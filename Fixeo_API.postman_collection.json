@@ -1,0 +1,971 @@
+{
+	"info": {
+		"_postman_id": "fixeo-api-collection",
+		"name": "Fixeo API",
+		"description": "Colección completa de la API de Fixeo con autenticación JWT",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Registro",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.data && jsonData.data.id) {",
+									"        pm.collectionVariables.set('user_id', jsonData.data.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"correo\": \"test@example.com\",\n  \"password\": \"Password123!\",\n  \"password2\": \"Password123!\",\n  \"nombre\": \"Juan\",\n  \"apellido\": \"Pérez\",\n  \"telefono\": \"+54911234567\",\n  \"is_owner_empresa\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", ""]
+						}
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.data && jsonData.data.tokens) {",
+									"        pm.collectionVariables.set('access_token', jsonData.data.tokens.access);",
+									"        pm.collectionVariables.set('refresh_token', jsonData.data.tokens.refresh);",
+									"        pm.collectionVariables.set('user_id', jsonData.data.user.id);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"correo\": \"test@example.com\",\n  \"password\": \"Password123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/login/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "login", ""]
+						}
+					}
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.data && jsonData.data.access) {",
+									"        pm.collectionVariables.set('access_token', jsonData.data.access);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/token/refresh/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "token", "refresh", ""]
+						}
+					}
+				},
+				{
+					"name": "Usuario Actual (Me)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/me/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "me", ""]
+						}
+					}
+				},
+				{
+					"name": "Cambiar Contraseña",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"old_password\": \"Password123!\",\n  \"new_password\": \"NewPassword456!\",\n  \"new_password2\": \"NewPassword456!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/change_password/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "change_password", ""]
+						}
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/logout/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "logout", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Usuarios",
+			"item": [
+				{
+					"name": "Listar Usuarios",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", ""]
+						}
+					}
+				},
+				{
+					"name": "Detalle Usuario",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/{{user_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "{{user_id}}", ""]
+						}
+					}
+				},
+				{
+					"name": "Actualizar Usuario",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nombre\": \"Juan Actualizado\",\n  \"telefono\": \"+54911111111\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/{{user_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "{{user_id}}", ""]
+						}
+					}
+				},
+				{
+					"name": "Eliminar Usuario (Soft Delete)",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/{{user_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "{{user_id}}", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Roles",
+			"item": [
+				{
+					"name": "Listar Roles",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/roles/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "roles", ""]
+						}
+					}
+				},
+				{
+					"name": "Detalle Rol",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/roles/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "roles", "1", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Profesiones",
+			"item": [
+				{
+					"name": "Listar Profesiones",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/profesiones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "profesiones", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Profesión",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nombre\": \"Plomero\",\n  \"usuario\": {{user_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/profesiones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "profesiones", ""]
+						}
+					}
+				},
+				{
+					"name": "Actualizar Profesión",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nombre\": \"Electricista\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/profesiones/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "profesiones", "1", ""]
+						}
+					}
+				},
+				{
+					"name": "Eliminar Profesión",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/profesiones/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "profesiones", "1", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Disponibilidades",
+			"item": [
+				{
+					"name": "Listar Disponibilidades",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/disponibilidades/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "disponibilidades", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Disponibilidad",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": {{user_id}},\n  \"fecha_yyyy_mm_dd\": \"2024-01-20\",\n  \"hora_inicio\": \"09:00:00\",\n  \"hora_fin\": \"18:00:00\",\n  \"tipo_disponible\": \"trabajo\",\n  \"origen_manual\": true,\n  \"usuario\": {{user_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/usuarios/disponibilidades/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "usuarios", "disponibilidades", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Empresas",
+			"item": [
+				{
+					"name": "Listar Empresas",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/empresas/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Empresa",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nombre\": \"Plomería Express\",\n  \"ubicacion\": \"Av. Corrientes 1234, CABA\",\n  \"descripcion\": \"Servicios de plomería 24/7\",\n  \"latitud\": -34.603722,\n  \"longitud\": -58.381559,\n  \"unipersonal\": false,\n  \"admin_id\": {{user_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/empresas/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", ""]
+						}
+					}
+				},
+				{
+					"name": "Detalle Empresa",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/empresas/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "1", ""]
+						}
+					}
+				},
+				{
+					"name": "Actualizar Empresa",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"descripcion\": \"Servicios de plomería profesional\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/empresas/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "1", ""]
+						}
+					}
+				},
+				{
+					"name": "Eliminar Empresa",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/empresas/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "1", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Servicios",
+			"item": [
+				{
+					"name": "Listar Servicios",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/empresas/servicios/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "servicios", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Servicio",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nombre\": \"Reparación de cañerías\",\n  \"descripcion\": \"Reparación de cañerías rotas o con fugas\",\n  \"precio_base\": 5000.00,\n  \"empresa\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/empresas/servicios/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "servicios", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Horarios",
+			"item": [
+				{
+					"name": "Listar Horarios",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/empresas/horarios/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "horarios", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Horario",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"dia_semana\": \"Lunes\",\n  \"hora_inicio\": \"09:00:00\",\n  \"hora_fin\": \"18:00:00\",\n  \"enabled\": true,\n  \"empresa\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/empresas/horarios/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "horarios", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Localizaciones",
+			"item": [
+				{
+					"name": "Listar Localizaciones",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/empresas/localizaciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "localizaciones", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Localización",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"ubicacion\": \"Av. Corrientes 1234\",\n  \"latitud\": -34.603722,\n  \"longitud\": -58.381559,\n  \"address\": \"Av. Corrientes 1234, CABA\",\n  \"city\": \"Buenos Aires\",\n  \"country\": \"Argentina\",\n  \"county\": \"CABA\",\n  \"state\": \"Buenos Aires\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/empresas/localizaciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "empresas", "localizaciones", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Trabajos",
+			"item": [
+				{
+					"name": "Listar Trabajos",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Trabajo",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"titulo\": \"Reparar pérdida de agua en baño\",\n  \"descripcion\": \"Tengo una pérdida de agua en el baño que necesita reparación urgente\",\n  \"categoria\": \"Plomería\",\n  \"status\": \"pendiente\",\n  \"precio_final\": 5000.00,\n  \"usuario\": {{user_id}},\n  \"servicio\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", ""]
+						}
+					}
+				},
+				{
+					"name": "Detalle Trabajo",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", "1", ""]
+						}
+					}
+				},
+				{
+					"name": "Actualizar Trabajo",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"aceptado\",\n  \"fecha_inicio\": \"2024-01-20T10:00:00Z\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", "1", ""]
+						}
+					}
+				},
+				{
+					"name": "Eliminar Trabajo",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", "1", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Estados",
+			"item": [
+				{
+					"name": "Listar Estados",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/estados/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", "estados", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Calificaciones",
+			"item": [
+				{
+					"name": "Listar Calificaciones",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/calificaciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", "calificaciones", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Calificación",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"rating\": 5,\n  \"comentario\": \"Excelente servicio, muy profesional\",\n  \"user_cal_recibe\": 2,\n  \"user_cal_sender\": {{user_id}},\n  \"trabajo\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trabajos/calificaciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trabajos", "calificaciones", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Mensajería",
+			"item": [
+				{
+					"name": "Listar Chats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/mensajeria/chats/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "mensajeria", "chats", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Chat",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"sender_id\": {{user_id}},\n  \"received_id\": 2\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/mensajeria/chats/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "mensajeria", "chats", ""]
+						}
+					}
+				},
+				{
+					"name": "Listar Mensajes",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/mensajeria/mensajes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "mensajeria", "mensajes", ""]
+						}
+					}
+				},
+				{
+					"name": "Enviar Mensaje",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"texto\": \"Hola, ¿cómo estás?\",\n  \"sender_id\": {{user_id}},\n  \"chat\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/mensajeria/mensajes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "mensajeria", "mensajes", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Notificaciones",
+			"item": [
+				{
+					"name": "Listar Notificaciones",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/notificaciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "notificaciones", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Notificación",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"titulo\": \"Nuevo trabajo asignado\",\n  \"descripcion\": \"Tienes un nuevo trabajo pendiente\",\n  \"deep_link\": \"/trabajos/1\",\n  \"entity_id\": 1,\n  \"usuario\": {{user_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/notificaciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "notificaciones", ""]
+						}
+					}
+				},
+				{
+					"name": "Listar Device Tokens",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/notificaciones/device-tokens/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "notificaciones", "device-tokens", ""]
+						}
+					}
+				},
+				{
+					"name": "Registrar Device Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"device_name\": \"iPhone 13\",\n  \"device_token\": \"abc123def456...\",\n  \"enabled\": true,\n  \"usuario\": {{user_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/notificaciones/device-tokens/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "notificaciones", "device-tokens", ""]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Suscripciones",
+			"item": [
+				{
+					"name": "Listar Planes",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suscripciones/planes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "suscripciones", "planes", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Plan",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"cantidad_personas\": 5,\n  \"duracion\": \"30 00:00:00\",\n  \"plan_id_stripe\": \"price_1234567890\",\n  \"caracteristicas\": {\n    \"trabajos_simultaneos\": 10,\n    \"soporte_prioritario\": true,\n    \"reportes_avanzados\": true\n  },\n  \"usuario\": {{user_id}}\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/suscripciones/planes/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "suscripciones", "planes", ""]
+						}
+					}
+				},
+				{
+					"name": "Listar Suscripciones",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/suscripciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "suscripciones", ""]
+						}
+					}
+				},
+				{
+					"name": "Crear Suscripción",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"plan_id\": 1,\n  \"user_id\": {{user_id}},\n  \"expiracion\": \"2024-12-31T23:59:59Z\",\n  \"cancelada\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/suscripciones/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "suscripciones", ""]
+						}
+					}
+				}
+			]
+		}
+	]
+}
