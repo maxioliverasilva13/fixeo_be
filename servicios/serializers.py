@@ -8,14 +8,14 @@ class ServicioSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Servicio
-        fields = ['id', 'usuario', 'profesion', 'profesion_detalle', 'precio', 'divisa', 'tiempo', 'notas', 'created_at', 'updated_at']
+        fields = ['id', 'usuario', 'profesion', 'profesion_detalle', 'nombre', 'precio', 'divisa', 'tiempo', 'notas', 'created_at', 'updated_at']
         read_only_fields = ['id', 'usuario', 'created_at', 'updated_at']
 
 
 class ServicioCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Servicio
-        fields = ['profesion', 'precio', 'divisa', 'tiempo', 'notas']
+        fields = ['profesion', 'nombre', 'precio', 'divisa', 'tiempo', 'notas']
     
     def validate_precio(self, value):
         if value <= 0:

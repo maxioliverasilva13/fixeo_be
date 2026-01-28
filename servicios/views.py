@@ -22,18 +22,22 @@ class ServicioViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Verificar que el usuario tenga esa profesión
         profesion_id = serializer.validated_data['profesion'].id
+        nombre = serializer.validated_data['nombre']
+        
         if not request.user.usuario_profesiones.filter(profesion_id=profesion_id).exists():
             return Response(
                 {'error': 'No puedes crear un servicio para una profesión que no tienes asignada'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Verificar si ya existe un servicio para esa profesión
-        if Servicio.objects.filter(usuario=request.user, profesion_id=profesion_id).exists():
+        if Servicio.objects.filter(
+            usuario=request.user,
+            profesion_id=profesion_id,
+            nombre=nombre
+        ).exists():
             return Response(
-                {'error': 'Ya existe un servicio para esta profesión'},
+                {'error': f'Ya existe un servicio con el nombre "{nombre}" para esta profesión'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -57,22 +61,26 @@ class ServicioViewSet(viewsets.ModelViewSet):
         serializer = ServicioCreateSerializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         
-        # Si se intenta cambiar la profesión, verificar que la tenga asignada
+        profesion_id = serializer.validated_data.get('profesion', instance.profesion).id
+        nombre = serializer.validated_data.get('nombre', instance.nombre)
+        
         if 'profesion' in serializer.validated_data:
-            profesion_id = serializer.validated_data['profesion'].id
             if profesion_id != instance.profesion_id:
                 if not request.user.usuario_profesiones.filter(profesion_id=profesion_id).exists():
                     return Response(
                         {'error': 'No puedes asignar una profesión que no tienes'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-                
-                # Verificar que no exista otro servicio con esa profesión
-                if Servicio.objects.filter(usuario=request.user, profesion_id=profesion_id).exists():
-                    return Response(
-                        {'error': 'Ya existe un servicio para esta profesión'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+        
+        if Servicio.objects.filter(
+            usuario=request.user,
+            profesion_id=profesion_id,
+            nombre=nombre
+        ).exclude(id=instance.id).exists():
+            return Response(
+                {'error': f'Ya existe un servicio con el nombre "{nombre}" para esta profesión'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         servicio = serializer.save()
         

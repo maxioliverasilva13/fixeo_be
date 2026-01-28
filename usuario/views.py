@@ -63,7 +63,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         city='',
                         country='',
                         county='',
-                        state=''
+                        state='',
+                        isPrimary=True
                     )
                     
                     UsuarioLocalizacion.objects.create(

@@ -7,6 +7,7 @@ from rol.serializers import RolSerializer
 class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     disponibilidades = serializers.SerializerMethodField()
+    localizaciones = serializers.SerializerMethodField()
     rol_detalle = RolSerializer(source='rol', read_only=True)
     
     class Meta:
@@ -14,13 +15,18 @@ class UsuarioSerializer(serializers.ModelSerializer):
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 
-                  'profesiones', 'disponibilidades']
+                  'profesiones', 'localizaciones', 'disponibilidades', 'is_configured']
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer
         usuario_profesiones = obj.usuario_profesiones.all()
         return [ProfesionSerializer(up.profesion).data for up in usuario_profesiones]
+    
+    def get_localizaciones(self, obj):
+        from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
+        usuario_localizaciones = obj.localizaciones.select_related('localizacion').all()
+        return UsuarioLocalizacionSerializer(usuario_localizaciones, many=True).data
     
     def get_disponibilidades(self, obj):
         from disponibilidad.serializers import DisponibilidadSerializer

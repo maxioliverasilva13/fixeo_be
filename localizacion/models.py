@@ -13,7 +13,7 @@ class Localizacion(BaseModel):
     country = models.CharField(max_length=100)
     county = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
-
+    isPrimary = models.BooleanField(default=False)
     class Meta:
         db_table = 'localizacion'
         verbose_name = 'Localización'

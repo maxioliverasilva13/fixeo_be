@@ -34,6 +34,7 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     rango_mapa_km = models.DecimalField(max_digits=5, decimal_places=2, default=10.00, help_text='Radio de búsqueda en kilómetros')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_configured = models.BooleanField(default=False)
     rol = models.ForeignKey(Rol, on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
 
     objects = UsuarioManager()
