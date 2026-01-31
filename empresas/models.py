@@ -38,17 +38,3 @@ class Horarios(BaseModel):
         return f"{self.empresa} - {self.dia_semana}"
 
 
-class Servicios(BaseModel):
-    nombre = models.CharField(max_length=200)
-    descripcion = models.TextField()
-    precio_base = models.DecimalField(max_digits=10, decimal_places=2)
-    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='servicios')
-
-    class Meta:
-        db_table = 'servicios'
-        verbose_name = 'Servicio'
-        verbose_name_plural = 'Servicios'
-
-    def __str__(self):
-        return f"{self.nombre} - {self.empresa}"
-

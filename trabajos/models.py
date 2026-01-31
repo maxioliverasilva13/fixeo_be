@@ -1,6 +1,6 @@
 from django.db import models
 from usuario.models import Usuario
-from empresas.models import Servicios
+from servicios.models import Servicio
 from fixeo_project.models import BaseModel
 
 
@@ -18,7 +18,7 @@ class Trabajo(BaseModel):
     cancelado_cliente = models.BooleanField(default=False)
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='trabajos_solicitados')
     profesional = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos_asignados')
-    servicio = models.ForeignKey(Servicios, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')
+    servicio = models.ForeignKey(Servicio, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')
 
     class Meta:
         db_table = 'trabajo'
