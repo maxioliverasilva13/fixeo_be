@@ -1,9 +1,12 @@
+from localizacion.utils import calcular_distancia_km
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa
 from .serializers import EmpresaSerializer
 from .utils import validar_nombre_empresa_unico
+from rest_framework.decorators import action
 
 
 class EmpresaViewSet(viewsets.ModelViewSet):
@@ -36,3 +39,44 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['get'], url_path='distance-from-me')
+    def distance_from_me(self, request, pk=None):
+        empresa = self.get_object()
+        usuario = request.user
+
+        loc_usuario = obtener_localizacion_usuario(usuario)
+        if not loc_usuario:
+            return Response(
+                {'error': 'El usuario no tiene localización configurada'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not empresa.localizacion:
+            return Response(
+                {'error': 'La empresa no tiene localización configurada'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        loc_empresa = empresa.localizacion
+
+        distancia = calcular_distancia_km(
+            loc_usuario.latitud,
+            loc_usuario.longitud,
+            loc_empresa.latitud,
+            loc_empresa.longitud
+        )
+
+        return Response({
+            'empresa_id': empresa.id,
+            'empresa_nombre': empresa.nombre,
+            'distance_km': distancia,
+            'user_location': {
+                'city': loc_usuario.city,
+                'country': loc_usuario.country
+            },
+            'empresa_location': {
+                'city': loc_empresa.city,
+                'country': loc_empresa.country
+            }
+        })

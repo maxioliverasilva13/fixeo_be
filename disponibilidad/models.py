@@ -3,18 +3,19 @@ from fixeo_project.models import BaseModel
 from usuario.models import Usuario
 from django.utils import timezone
 
+
+class Tipo(models.TextChoices):
+    DISPONIBLE = 'disponible', 'Disponible'
+    OCUPADO = 'ocupado', 'Ocupado'
+    BLOQUEADO = 'bloqueado', 'Bloqueado'
+class Origen(models.TextChoices):
+    MANUAL = 'manual', 'Manual'
+    TRABAJO = 'trabajo', 'Trabajo'
+    EMPRESA = 'empresa', 'Empresa'
+    SISTEMA = 'sistema', 'Sistema'
+
 class Disponibilidad(BaseModel):
 
-    class Tipo(models.TextChoices):
-        DISPONIBLE = 'disponible', 'Disponible'
-        OCUPADO = 'ocupado', 'Ocupado'
-        BLOQUEADO = 'bloqueado', 'Bloqueado'
-
-    class Origen(models.TextChoices):
-        MANUAL = 'manual', 'Manual'
-        TRABAJO = 'trabajo', 'Trabajo'
-        EMPRESA = 'empresa', 'Empresa'
-        SISTEMA = 'sistema', 'Sistema'
 
     usuario = models.ForeignKey(
         Usuario,

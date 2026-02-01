@@ -1,17 +1,17 @@
 from django.contrib import admin
-from .models import Trabajo, Calificacion, Estados
+from .models import Trabajo, Calificacion
 
 
 @admin.register(Trabajo)
 class TrabajoAdmin(admin.ModelAdmin):
-    list_display = ('titulo', 'usuario', 'status', 'precio_final', 'created_at')
+    list_display = ('esUrgente', 'usuario', 'status', 'precio_final', 'created_at')
     list_filter = ('status', 'created_at', 'cancelado_cliente')
-    search_fields = ('titulo', 'descripcion', 'usuario__correo', 'categoria')
+    search_fields = ('esUrgente', 'descripcion', 'usuario__correo', '')
     readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_at', 'deleted_by')
     
     fieldsets = (
         ('Información Básica', {
-            'fields': ('titulo', 'descripcion', 'categoria', 'status')
+            'fields': ('esUrgente', 'descripcion', '', 'status')
         }),
         ('Detalles del Trabajo', {
             'fields': ('usuario', 'profesional', 'servicio', 'precio_final')
@@ -36,11 +36,4 @@ class CalificacionAdmin(admin.ModelAdmin):
     search_fields = ('comentario', 'user_cal_sender__correo', 'user_cal_recibe__correo')
     readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by')
 
-
-@admin.register(Estados)
-class EstadosAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'finalizador', 'created_at')
-    list_filter = ('finalizador', 'nombre')
-    search_fields = ('nombre',)
-    readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by')
 
