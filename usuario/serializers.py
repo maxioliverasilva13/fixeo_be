@@ -112,3 +112,12 @@ class RegistroSerializer(serializers.Serializer):
             raise serializers.ValidationError("Debe seleccionar al menos un tipo de trabajo (domicilio o local).")
         
         return attrs
+
+class FilterUsersMapaSerializer(serializers.Serializer):
+    north = serializers.FloatField()
+    south = serializers.FloatField()
+    east = serializers.FloatField()
+    west = serializers.FloatField()
+    
+
+    

@@ -11,12 +11,13 @@ from usuario_profesion.models import UsuarioProfesion
 from usuario.serializers import (
     UsuarioSerializer, UsuarioCreateSerializer,
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
-    UpdateRangoMapaSerializer
+    UpdateRangoMapaSerializer, FilterUsersMapaSerializer
 )
 from localizacion.models import Localizacion
 from empresas.utils import crear_empresa
 from profesion.utils import obtener_profesion_por_id
-
+from decimal import Decimal 
+from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -115,6 +116,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -186,8 +188,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         
         serializer = ProfesionSerializer(profesiones, many=True)
         return Response(serializer.data)
-    
-    @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated])
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def update_rango_mapa(self, request):
         """
         Actualiza el rango del mapa en kilómetros para el usuario logueado
@@ -204,3 +206,26 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             'rango_mapa_km': float(usuario.rango_mapa_km)
         })
 
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='rango-mapa')
+    def filter_users_mapa(self, request):
+        serializer = FilterUsersMapaSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+
+        north = Decimal(request.query_params['north'])
+        south = Decimal(request.query_params['south'])
+        east  = Decimal(request.query_params['east'])
+        west  = Decimal(request.query_params['west'])
+
+        usuarios = UsuarioLocalizacion.objects.filter(
+            localizacion__latitud__lte=north,
+            localizacion__latitud__gte=south,
+            localizacion__longitud__lte=east,
+            localizacion__longitud__gte=west,
+            localizacion__isPrimary=True    
+            ).distinct()
+        
+        print(f"Usuarios encontrados: {usuarios.count()}")
+
+        return Response(
+            [UsuarioLocalizacionSerializer(ul).data for ul in usuarios]
+        )
