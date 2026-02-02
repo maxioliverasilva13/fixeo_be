@@ -1,12 +1,12 @@
+from localizacion.utils import calcular_distancia_km
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import Empresa, Horarios, Servicios
-from .serializers import (
-    EmpresaSerializer,
-    HorariosSerializer, ServiciosSerializer
-)
+from usuario.utils import obtener_localizacion_usuario
+from .models import Empresa
+from .serializers import EmpresaSerializer
 from .utils import validar_nombre_empresa_unico
+from rest_framework.decorators import action
 
 
 class EmpresaViewSet(viewsets.ModelViewSet):
@@ -40,29 +40,43 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
 
+    @action(detail=True, methods=['get'], url_path='distance-from-me')
+    def distance_from_me(self, request, pk=None):
+        empresa = self.get_object()
+        usuario = request.user
 
-class HorariosViewSet(viewsets.ModelViewSet):
-    queryset = Horarios.objects.all()
-    serializer_class = HorariosSerializer
-    permission_classes = [IsAuthenticated]
+        loc_usuario = obtener_localizacion_usuario(usuario)
+        if not loc_usuario:
+            return Response(
+                {'error': 'El usuario no tiene localización configurada'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        empresa_id = self.request.query_params.get('empresa_id', None)
-        if empresa_id:
-            queryset = queryset.filter(empresa_id=empresa_id)
-        return queryset
+        if not empresa.localizacion:
+            return Response(
+                {'error': 'La empresa no tiene localización configurada'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
+        loc_empresa = empresa.localizacion
 
-class ServiciosViewSet(viewsets.ModelViewSet):
-    queryset = Servicios.objects.all()
-    serializer_class = ServiciosSerializer
-    permission_classes = [IsAuthenticated]
+        distancia = calcular_distancia_km(
+            loc_usuario.latitud,
+            loc_usuario.longitud,
+            loc_empresa.latitud,
+            loc_empresa.longitud
+        )
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        empresa_id = self.request.query_params.get('empresa_id', None)
-        if empresa_id:
-            queryset = queryset.filter(empresa_id=empresa_id)
-        return queryset
-
+        return Response({
+            'empresa_id': empresa.id,
+            'empresa_nombre': empresa.nombre,
+            'distance_km': distancia,
+            'user_location': {
+                'city': loc_usuario.city,
+                'country': loc_usuario.country
+            },
+            'empresa_location': {
+                'city': loc_empresa.city,
+                'country': loc_empresa.country
+            }
+        })

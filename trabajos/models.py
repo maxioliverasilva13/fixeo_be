@@ -1,15 +1,20 @@
 from django.db import models
+from disponibilidad.models import Disponibilidad
 from usuario.models import Usuario
-from empresas.models import Servicios
+from servicios.models import Servicio
 from fixeo_project.models import BaseModel
 
 
 class Trabajo(BaseModel):
-    categoria = models.CharField(max_length=100, blank=True, null=True)
-    subcategoria_id = models.IntegerField(null=True, blank=True)
-    trabajo_id = models.IntegerField(null=True, blank=True)
+    STATUS_CHOICES = [
+        ('pendiente', 'Pendiente'),
+        ('aceptado', 'Aceptado'),
+        ('finalizado', 'Finalizado'),
+        ('cancelado', 'Cancelado'), 
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendiente')
+    esUrgente = models.BooleanField(default=False)
     status = models.CharField(max_length=50, blank=True, null=True)
-    titulo = models.CharField(max_length=200)
     fecha_inicio = models.DateTimeField(null=True, blank=True)
     fecha_fin = models.DateTimeField(null=True, blank=True)
     descripcion = models.TextField()
@@ -18,7 +23,7 @@ class Trabajo(BaseModel):
     cancelado_cliente = models.BooleanField(default=False)
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='trabajos_solicitados')
     profesional = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos_asignados')
-    servicio = models.ForeignKey(Servicios, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')
+    disponibilidad = models.ForeignKey(Disponibilidad, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')
 
     class Meta:
         db_table = 'trabajo'
@@ -26,7 +31,7 @@ class Trabajo(BaseModel):
         verbose_name_plural = 'Trabajos'
 
     def __str__(self):
-        return f"{self.titulo} - {self.status}"
+        return f"{self.status}"
 
 
 class Calificacion(BaseModel):
@@ -45,20 +50,15 @@ class Calificacion(BaseModel):
         return f"Calificación {self.rating} - {self.trabajo}"
 
 
-class Estados(BaseModel):
-    TIPO_CHOICES = [
-        ('aceptado', 'Aceptado'),
-        ('pendiente', 'Pendiente'),
-        ('finalizado', 'Finalizado'),
-    ]
-    nombre = models.CharField(max_length=100, choices=TIPO_CHOICES, unique=True)
-    finalizador = models.BooleanField(default=False)
+class TrabajoServicio(BaseModel):
+    trabajo = models.ForeignKey(Trabajo, on_delete=models.CASCADE, related_name='trabajo_servicios')
+    servicio = models.ForeignKey(Servicio, on_delete=models.CASCADE)
+    precio = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
-        db_table = 'estados'
-        verbose_name = 'Estado'
-        verbose_name_plural = 'Estados'
+        db_table = 'trabajo_servicio'
+        verbose_name = 'Trabajo Servicio'
+        verbose_name_plural = 'Trabajo Servicios'
 
     def __str__(self):
-        return self.nombre
-
+        return f"{self.servicio.nombre}"

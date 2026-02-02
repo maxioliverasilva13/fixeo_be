@@ -1,3 +1,4 @@
+from localizacion.utils import calcular_distancia_km
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -6,6 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
 from usuario.models import Usuario
+from usuario.utils import obtener_localizacion_usuario
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
 from usuario.serializers import (
@@ -18,6 +20,7 @@ from empresas.utils import crear_empresa
 from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
+from django.shortcuts import get_object_or_404
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -229,3 +232,48 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         return Response(
             [UsuarioLocalizacionSerializer(ul).data for ul in usuarios]
         )
+
+    @action(detail=True, methods=['get'], url_path='from-me')
+    def from_me(self, request, pk=None):
+        """
+        Devuelve la distancia en KM entre el usuario logueado
+        y otro usuario
+        """
+        usuario_origen = request.user
+        usuario_destino = get_object_or_404(Usuario, pk=pk)
+
+        loc_origen = obtener_localizacion_usuario(usuario_origen)
+        loc_destino = obtener_localizacion_usuario(usuario_destino)
+
+        if not loc_origen:
+            return Response(
+                {'error': 'El usuario logueado no tiene localización'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not loc_destino:
+            return Response(
+                {'error': 'El usuario destino no tiene localización'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        distancia = calcular_distancia_km(
+            float(loc_origen.latitud),
+            float(loc_origen.longitud),
+            float(loc_destino.latitud),
+            float(loc_destino.longitud),
+        )
+
+        return Response({
+            'from_user': usuario_origen.id,
+            'to_user': usuario_destino.id,
+            'distance_km': distancia,
+            'from_location': {
+                'city': loc_origen.city,
+                'country': loc_origen.country,
+            },
+            'to_location': {
+                'city': loc_destino.city,
+                'country': loc_destino.country,
+            }
+        })

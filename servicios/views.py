@@ -18,6 +18,18 @@ class ServicioViewSet(viewsets.ModelViewSet):
             return ServicioCreateSerializer
         return ServicioSerializer
     
+    @action(detail=True, methods=['get'], url_path='obtener-servicios')
+    def obtener_servicios(self, request, pk=None):
+        servicios = (
+            Servicio.objects
+            .filter(usuario_id=pk)
+            .select_related('profesion')
+            .order_by('profesion__nombre')
+        )
+
+        serializer = ServicioSerializer(servicios, many=True)
+        return Response(serializer.data)
+    
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)

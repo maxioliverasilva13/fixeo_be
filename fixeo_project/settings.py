@@ -7,6 +7,7 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost').split(',')
 
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -32,6 +33,7 @@ INSTALLED_APPS = [
     'suscripciones',
     'recursos',
     'servicios',
+    'horarios',
 ]
 
 MIDDLEWARE = [
@@ -87,7 +89,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = 'es-ar'
-TIME_ZONE = 'America/Argentina/Buenos_Aires'
+TIME_ZONE = 'America/Montevideo'
 USE_I18N = True
 USE_TZ = True
 

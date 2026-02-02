@@ -4,6 +4,7 @@ from .models import Disponibilidad
 
 @admin.register(Disponibilidad)
 class DisponibilidadAdmin(admin.ModelAdmin):
-    list_display = ('usuario', 'fecha_yyyy_mm_dd', 'hora_inicio', 'hora_fin')
-    list_filter = ('fecha_yyyy_mm_dd',)
-    search_fields = ('usuario__correo',)
+    list_display = ('usuario', 'fecha_inicio', 'fecha_fin', 'tipo', 'origen')
+    list_filter = ('tipo', 'origen', 'fecha_inicio')
+    search_fields = ('usuario__correo', 'usuario__nombre', 'usuario__apellido')
+    date_hierarchy = 'fecha_inicio'

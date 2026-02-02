@@ -16,7 +16,6 @@ docker-compose exec web python manage.py migrate
 
 echo "🌱 Ejecutando seeds..."
 docker-compose exec web python manage.py seed_roles
-docker-compose exec web python manage.py seed_estados
 docker-compose exec web python manage.py seed_profesiones
 docker-compose exec web python manage.py seed_roles
 
