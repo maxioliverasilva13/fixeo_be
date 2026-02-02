@@ -21,6 +21,7 @@ from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -227,11 +228,29 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             localizacion__isPrimary=True    
             ).distinct()
         
-        print(f"Usuarios encontrados: {usuarios.count()}")
 
         return Response(
             [UsuarioLocalizacionSerializer(ul).data for ul in usuarios]
         )
+
+    @action(detail=False, methods=['get'], url_path='search')
+    def search(self, request):
+        q = request.query_params.get('q', '').strip()
+
+        if not q:
+            return Response(
+                {'error': 'Parámetro q es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        usuarios = Usuario.objects.filter(
+            Q(nombre__icontains=q) |
+            Q(apellido__icontains=q) |
+            Q(usuario_profesiones__profesion__nombre__icontains=q)
+        ).distinct()
+
+        serializer = self.get_serializer(usuarios, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):
