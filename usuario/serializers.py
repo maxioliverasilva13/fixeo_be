@@ -2,23 +2,20 @@ from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
 from rol.serializers import RolSerializer
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
 
 class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     disponibilidades = serializers.SerializerMethodField()
     localizaciones = serializers.SerializerMethodField()
-    servicios = serializers.SerializerMethodField()  # <--- Nuevo campo
+    servicios = serializers.SerializerMethodField()  
+    empresa = serializers.SerializerMethodField()  
     rol_detalle = RolSerializer(source='rol', read_only=True)
-    
+
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
-                  'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 
+                  'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'disponibilidades', 'servicios', 'is_configured']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -42,6 +39,18 @@ class UsuarioSerializer(serializers.ModelSerializer):
             servicios = obj.servicios.select_related('profesion').all()
             return ServicioSerializer(servicios, many=True).data
         return []
+    
+    def get_empresa(self, obj):
+        if not obj.is_owner_empresa:
+            return None
+        from empresas.serializers import EmpresaSerializer
+
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return None
+
+        return EmpresaSerializer(empresa).data
+
 
 
 class UsuarioCreateSerializer(serializers.ModelSerializer):

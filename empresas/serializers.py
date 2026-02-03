@@ -4,9 +4,18 @@ from .models import Empresa
 from localizacion.serializers import LocalizacionSerializer
 
 class EmpresaSerializer(serializers.ModelSerializer):
-    servicios = ServicioSerializer(many=True, read_only=True)
-    localizacion_detalle = LocalizacionSerializer(source='localizacion', read_only=True)
-    
+
     class Meta:
         model = Empresa
-        fields = '__all__'
+        fields = [
+            'id',
+            'nombre',
+            'ubicacion',
+            'descripcion',
+            'latitud',
+            'longitud',
+            'unipersonal',
+            'created_at',
+            'updated_at',
+        ]
+

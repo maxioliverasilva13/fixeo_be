@@ -19,47 +19,33 @@ class HorariosSerializer(serializers.ModelSerializer):
     def validate(self, data):
         hora_inicio = data.get('hora_inicio')
         hora_fin = data.get('hora_fin')
-        dia_semana = data.get('dia_semana')
-        empresa = data.get('empresa')
 
-        # Validaciones básicas de hora
         if hora_inicio and hora_fin:
             if hora_inicio >= hora_fin:
                 raise serializers.ValidationError(
                     'hora_inicio debe ser menor que hora_fin'
                 )
 
-            if not (time(0, 0) <= hora_inicio <= time(23, 59)):
-                raise serializers.ValidationError({
-                    'hora_inicio': 'Debe estar entre 00:00:00 y 23:59:00'
-                })
-
-            if not (time(0, 0) <= hora_fin <= time(23, 59)):
-                raise serializers.ValidationError({
-                    'hora_fin': 'Debe estar entre 00:00:00 y 23:59:00'
-                })
-
-        if hora_inicio and hora_fin and dia_semana and empresa:
-            qs = Horarios.objects.filter(
-                empresa=empresa,
-                dia_semana=dia_semana,
-                enabled=True
-            )
-
-            if self.instance:
-                qs = qs.exclude(id=self.instance.id)
-
-            solapado = qs.filter(
-                hora_inicio__lt=hora_fin,
-                hora_fin__gt=hora_inicio
-            ).exists()
-
-            if solapado:
-                raise serializers.ValidationError(
-                    "El horario se solapa con otro existente para ese día"
-                )
-
         return data
+
+    def create(self, validated_data):
+        empresa = validated_data['empresa']
+        dia_semana = validated_data['dia_semana']
+
+        horario = Horarios.objects.filter(
+            empresa=empresa,
+            dia_semana=dia_semana
+        ).first()
+
+        if horario:
+            # 🔁 UPDATE
+            for attr, value in validated_data.items():
+                setattr(horario, attr, value)
+            horario.save()
+            return horario
+
+        # ➕ CREATE
+        return super().create(validated_data)
 
     class Meta:
         model = Horarios
