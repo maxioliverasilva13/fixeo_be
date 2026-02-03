@@ -8,8 +8,8 @@ class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     disponibilidades = serializers.SerializerMethodField()
     localizaciones = serializers.SerializerMethodField()
-    servicios = serializers.SerializerMethodField()  # <--- Nuevo campo
-    empresa = serializers.SerializerMethodField()  # 👈 NUEVO
+    servicios = serializers.SerializerMethodField()  
+    empresa = serializers.SerializerMethodField()  
     rol_detalle = RolSerializer(source='rol', read_only=True)
 
     class Meta:
