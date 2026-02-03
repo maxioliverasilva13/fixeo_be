@@ -11,4 +11,6 @@ django-filter==23.5
 djangorestframework-simplejwt[crypto]==5.3.1
 supabase==2.3.4
 requests==2.31.0
+gunicorn==21.2.0
+whitenoise==6.6.0
 
