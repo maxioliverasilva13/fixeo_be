@@ -2,7 +2,10 @@ from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
 from rol.serializers import RolSerializer
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 
 class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
