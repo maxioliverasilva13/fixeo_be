@@ -8,6 +8,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     disponibilidades = serializers.SerializerMethodField()
     localizaciones = serializers.SerializerMethodField()
+    servicios = serializers.SerializerMethodField()  # <--- Nuevo campo
     rol_detalle = RolSerializer(source='rol', read_only=True)
     
     class Meta:
@@ -15,9 +16,9 @@ class UsuarioSerializer(serializers.ModelSerializer):
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 
-                  'profesiones', 'localizaciones', 'disponibilidades', 'is_configured']
+                  'profesiones', 'localizaciones', 'disponibilidades', 'servicios', 'is_configured']
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
+
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer
         usuario_profesiones = obj.usuario_profesiones.all()
@@ -31,6 +32,13 @@ class UsuarioSerializer(serializers.ModelSerializer):
     def get_disponibilidades(self, obj):
         from disponibilidad.serializers import DisponibilidadSerializer
         return DisponibilidadSerializer(obj.disponibilidades.all(), many=True).data
+
+    def get_servicios(self, obj):
+        if obj.is_owner_empresa:
+            from servicios.serializers import ServicioSerializer
+            servicios = obj.servicios.select_related('profesion').all()
+            return ServicioSerializer(servicios, many=True).data
+        return []
 
 
 class UsuarioCreateSerializer(serializers.ModelSerializer):
@@ -118,6 +126,35 @@ class FilterUsersMapaSerializer(serializers.Serializer):
     south = serializers.FloatField()
     east = serializers.FloatField()
     west = serializers.FloatField()
+
+class UsuarioInMapaSerializer(serializers.ModelSerializer):
+    profesiones = serializers.SerializerMethodField()
+    localizacion = serializers.SerializerMethodField()
+
+
+    class Meta:
+        model = Usuario
+        fields = ['id', 'nombre', 'apellido', 'foto_url', 'trabajo_domicilio', 
+                  'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion']
+        read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 
+                            'trabajo_domicilio', 'trabajo_local', 
+                            'rango_mapa_km']
+        
+    def get_profesiones(self, obj):
+        from profesion.serializers import ProfesionSerializer
+        usuario_profesiones = obj.usuario_profesiones.all()
+        return [ProfesionSerializer(up.profesion).data for up in usuario_profesiones]
+    
+    def get_localizacion(self, obj):
+        from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
+        
+        usuario_localizacion = obj.localizaciones.filter(localizacion__isPrimary=True).select_related('localizacion').first()
+        
+        if usuario_localizacion:
+            return UsuarioLocalizacionSerializer(usuario_localizacion).data
+        
+        return None
+
     
 
     

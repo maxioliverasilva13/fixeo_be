@@ -13,13 +13,12 @@ from usuario_profesion.models import UsuarioProfesion
 from usuario.serializers import (
     UsuarioSerializer, UsuarioCreateSerializer,
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
-    UpdateRangoMapaSerializer, FilterUsersMapaSerializer
+    UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer
 )
 from localizacion.models import Localizacion
 from empresas.utils import crear_empresa
 from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
-from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 
@@ -230,7 +229,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         
 
         return Response(
-            [UsuarioLocalizacionSerializer(ul).data for ul in usuarios]
+            [UsuarioInMapaSerializer(ul.usuario).data for ul in usuarios]
         )
 
     @action(detail=False, methods=['get'], url_path='search')
