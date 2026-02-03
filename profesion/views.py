@@ -10,9 +10,9 @@ from .serializers import ProfesionSerializer
 class ProfesionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Profesion.objects.all()
     serializer_class = ProfesionSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
-    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
+    @action(detail=False, methods=['get'])
     def buscar(self, request):
         texto = request.query_params.get('texto', '')
         limit = int(request.query_params.get('limit', 10))
