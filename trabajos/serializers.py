@@ -6,7 +6,7 @@ from .models import Trabajo, Calificacion, TrabajoServicio
 from usuario.serializers import UsuarioSerializer 
 from servicios.serializers import ServicioSerializer 
 from profesion.serializers import ProfesionSerializer 
-
+from usuario.serializers import UsuarioBasicInformationSerializer
 
 
 class CalificacionSerializer(serializers.ModelSerializer):
@@ -94,17 +94,23 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
         return []
 
 class TrabajoListSerializer(serializers.ModelSerializer):
-    usuario_nombre = serializers.CharField(source='usuario.nombre', read_only=True)
-    profesional_nombre = serializers.CharField(source='profesional.nombre', read_only=True)
+    usuario = UsuarioBasicInformationSerializer(read_only=True)
+    profesional = UsuarioBasicInformationSerializer(read_only=True)
     cantidad_servicios = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Trabajo
         fields = [
-            'id', 'usuario_nombre', 'profesional_nombre',
-            'descripcion', 'status', 'precio_final',
-            'fecha_inicio', 'cantidad_servicios', 'created_at'
+            'id',
+            'usuario',
+            'profesional',
+            'descripcion',
+            'status',
+            'precio_final',
+            'fecha_inicio',
+            'cantidad_servicios',
+            'created_at'
         ]
-    
+
     def get_cantidad_servicios(self, obj):
         return obj.trabajo_servicios.count()

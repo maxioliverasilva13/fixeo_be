@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
 from rol.serializers import RolSerializer
+from django.db.models import Prefetch
 
 class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
@@ -51,7 +52,27 @@ class UsuarioSerializer(serializers.ModelSerializer):
 
         return EmpresaSerializer(empresa).data
 
+class UsuarioBasicInformationSerializer(serializers.ModelSerializer):
+    localizacion = serializers.SerializerMethodField()
 
+    class Meta:
+        model = Usuario
+        fields = ['id', 'nombre', 'apellido', 'foto_url', 'telefono', 'localizacion']
+
+    def get_localizacion(self, obj):
+        from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
+
+        usuario_localizacion = (
+            obj.localizaciones
+            .filter(localizacion__isPrimary=True)
+            .select_related('localizacion')
+            .first()
+        )
+
+        if usuario_localizacion:
+            return UsuarioLocalizacionSerializer(usuario_localizacion).data
+
+        return None
 
 class UsuarioCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
