@@ -84,6 +84,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 servicio=servicio,
                 precio=servicio.precio
             )
+            
 
         return Response({
             'id': trabajo.id,
