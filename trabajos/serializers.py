@@ -96,7 +96,7 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario = UsuarioBasicInformationSerializer(read_only=True)
     profesional = UsuarioBasicInformationSerializer(read_only=True)
-    cantidad_servicios = serializers.SerializerMethodField()
+    servicios = TrabajoServicioDetailSerializer(source='trabajo_servicios', many=True, read_only=True)
 
     class Meta:
         model = Trabajo
@@ -108,9 +108,7 @@ class TrabajoListSerializer(serializers.ModelSerializer):
             'status',
             'precio_final',
             'fecha_inicio',
-            'cantidad_servicios',
+            'servicios',
             'created_at'
         ]
-
-    def get_cantidad_servicios(self, obj):
-        return obj.trabajo_servicios.count()
+        
