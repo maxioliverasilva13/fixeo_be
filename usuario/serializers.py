@@ -4,12 +4,23 @@ from .models import Usuario
 from rol.serializers import RolSerializer
 from django.db.models import Prefetch
 
+class UsuarioSortSerializer(serializers.ModelSerializer):
+    rol_detalle = RolSerializer(source='rol', read_only=True)
+
+    class Meta:
+        model = Usuario
+        fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 
+                  'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
+                  'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
+                  'is_configured', 'auto_aprobacion_trabajos']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
 class UsuarioSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
-    disponibilidades = serializers.SerializerMethodField()
     localizaciones = serializers.SerializerMethodField()
-    servicios = serializers.SerializerMethodField()  
-    empresa = serializers.SerializerMethodField()  
+    servicios = serializers.SerializerMethodField()
+    empresa = serializers.SerializerMethodField()
     rol_detalle = RolSerializer(source='rol', read_only=True)
     foto_map_url = serializers.SerializerMethodField()
 
@@ -18,7 +29,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'foto_map_url',
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
-                  'profesiones', 'localizaciones', 'disponibilidades', 'servicios', 'is_configured']
+                  'profesiones', 'localizaciones', 'servicios', 'is_configured', 'auto_aprobacion_trabajos']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_profesiones(self, obj):
@@ -31,10 +42,6 @@ class UsuarioSerializer(serializers.ModelSerializer):
         usuario_localizaciones = obj.localizaciones.select_related('localizacion').all()
         return UsuarioLocalizacionSerializer(usuario_localizaciones, many=True).data
     
-    def get_disponibilidades(self, obj):
-        from disponibilidad.serializers import DisponibilidadSerializer
-        return DisponibilidadSerializer(obj.disponibilidades.all(), many=True).data
-
     def get_servicios(self, obj):
         if obj.is_owner_empresa:
             from servicios.serializers import ServicioSerializer
@@ -174,6 +181,44 @@ class FilterUsersMapaSerializer(serializers.Serializer):
     south = serializers.FloatField()
     east = serializers.FloatField()
     west = serializers.FloatField()
+
+
+class UpdateUsuarioSerializer(serializers.ModelSerializer):
+    """
+    Serializer para actualizar la información del usuario logueado
+    """
+    class Meta:
+        model = Usuario
+        fields = [
+            'nombre', 
+            'apellido', 
+            'telefono', 
+            'foto_url', 
+            'trabajo_domicilio', 
+            'trabajo_local',
+            'rango_mapa_km',
+            'auto_aprobacion_trabajos'
+        ]
+    
+    def validate_rango_mapa_km(self, value):
+        if value and value < 0.5:
+            raise serializers.ValidationError("El rango mínimo es 0.5 km")
+        if value and value > 50:
+            raise serializers.ValidationError("El rango máximo es 150 km")
+        return value
+    
+    def validate(self, attrs):
+        trabajo_domicilio = attrs.get('trabajo_domicilio', self.instance.trabajo_domicilio if self.instance else None)
+        trabajo_local = attrs.get('trabajo_local', self.instance.trabajo_local if self.instance else None)
+        
+        if trabajo_domicilio is not None and trabajo_local is not None:
+            if not trabajo_domicilio and not trabajo_local:
+                raise serializers.ValidationError(
+                    "Debe tener al menos un tipo de trabajo activo (domicilio o local)."
+                )
+        
+        return attrs
+
 
 class UsuarioInMapaSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()

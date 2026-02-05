@@ -1,4 +1,5 @@
 from django.db import transaction
+from localizacion.models import Localizacion
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -7,6 +8,7 @@ from disponibilidad.models import Disponibilidad, Tipo
 from disponibilidad.utils import calcular_rango, hay_conflicto, rango_horario_empresa
 from usuario.models import Usuario
 from servicios.models import Servicio
+from usuario_localizacion.models import UsuarioLocalizacion
 from .models import Calificacion, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
 from rest_framework.decorators import action
@@ -24,6 +26,76 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         elif self.action == 'list':
             return TrabajoListSerializer
         return TrabajoDetailSerializer
+    
+    @action(detail=True, methods=['post'], url_path='aprobar')
+    def aprobar_trabajo(self, request, pk=None):
+        """
+        Aprueba un trabajo pendiente.
+        Solo el profesional asignado puede aprobar.
+        """
+        trabajo = self.get_object()
+        
+        if trabajo.profesional != request.user:
+            return Response(
+                {'error': 'Solo el profesional asignado puede aprobar este trabajo'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        if trabajo.status != 'pendiente':
+            return Response(
+                {'error': f'No se puede aprobar un trabajo en estado "{trabajo.status}"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        trabajo.status = 'aceptado'
+        trabajo.save()
+        
+        return Response({
+            'message': 'Trabajo aprobado exitosamente',
+            'trabajo': TrabajoDetailSerializer(trabajo).data
+        }, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['post'], url_path='rechazar')
+    def rechazar_trabajo(self, request, pk=None):
+        """
+        Rechaza un trabajo pendiente.
+        Solo el profesional asignado puede rechazar.
+        Puede incluir un motivo opcional.
+        """
+        trabajo = self.get_object()
+        motivo = request.data.get('motivo', '')
+        
+        # Validar que el usuario es el profesional asignado
+        if trabajo.profesional != request.user:
+            return Response(
+                {'error': 'Solo el profesional asignado puede rechazar este trabajo'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Validar que el trabajo esté en estado pendiente
+        if trabajo.status != 'pendiente':
+            return Response(
+                {'error': f'No se puede rechazar un trabajo en estado "{trabajo.status}"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Cambiar estado a cancelado
+        trabajo.status = 'cancelado'
+        
+        # Opcional: guardar el motivo en comentario_cliente si lo enviaron
+        if motivo:
+            trabajo.comentario_cliente = f"Rechazado por profesional: {motivo}"
+        
+        trabajo.save()
+        
+        # Opcional: liberar la disponibilidad ocupada
+        if trabajo.disponibilidad:
+            trabajo.disponibilidad.delete()
+        
+        return Response({
+            'message': 'Trabajo rechazado exitosamente',
+            'trabajo': TrabajoDetailSerializer(trabajo).data
+        }, status=status.HTTP_200_OK)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -37,6 +109,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         fecha = serializer.validated_data['fecha']
         hora = serializer.validated_data['hora']
         profesional_id = serializer.validated_data['profesional_id']
+        es_domicilio_profesional = serializer.validated_data['es_domicilio_profesional']
 
         try:
             profesional = Usuario.objects.get(id=profesional_id)
@@ -65,6 +138,33 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             origen='trabajo'
         )
 
+        localizacion = None
+
+        if es_domicilio_profesional:
+            userLocation = UsuarioLocalizacion.objects.filter(usuario=profesional)
+            existsPrincipal = userLocation.filter(es_principal=True).exists()
+            if existsPrincipal:
+                localizacion = userLocation.get(es_principal=True).localizacion  
+            else:
+                if userLocation.first():
+                    localizacion = userLocation.first().localizacion
+                else:
+                    localizacion = None
+        else:
+            userLocation = UsuarioLocalizacion.objects.filter(usuario=request.user)
+            existsPrincipal = userLocation.get(es_principal=True).exists()
+            if existsPrincipal:
+                localizacion = userLocation.filter(es_principal=True).localizacion
+            else:
+                if userLocation.first():
+                    localizacion = userLocation.first().localizacion
+                else:
+                    localizacion = None
+
+        newStatus = 'pendiente'
+        if (profesional.auto_aprobacion_trabajos):
+            newStatus = 'aceptado'
+
         precio_final = sum([s.precio for s in servicios])
         trabajo = Trabajo.objects.create(
             usuario=usuario,
@@ -74,8 +174,10 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             disponibilidad=disponibilidad_ocupada,
             fecha_inicio=inicio,
             fecha_fin=fin,
+            es_domicilio_profesional=es_domicilio_profesional,
             precio_final=precio_final,
-            status='pendiente'
+            localizacion=localizacion,
+            status=newStatus
         )
 
         for servicio in servicios:
@@ -84,6 +186,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 servicio=servicio,
                 precio=servicio.precio
             )
+            
 
         return Response({
             'id': trabajo.id,

@@ -13,7 +13,8 @@ from usuario_profesion.models import UsuarioProfesion
 from usuario.serializers import (
     UsuarioSerializer, UsuarioCreateSerializer,
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
-    UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer
+    UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer,
+    UpdateUsuarioSerializer
 )
 from localizacion.models import Localizacion
 from empresas.utils import crear_empresa
@@ -161,6 +162,37 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def me(self, request):
         serializer = self.get_serializer(request.user)
         return Response(serializer.data)
+    
+    @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated])
+    def update_me(self, request):
+        """
+        Actualiza la información del usuario logueado
+        
+        Campos actualizables:
+        - nombre
+        - apellido
+        - telefono
+        - foto_url
+        - trabajo_domicilio
+        - trabajo_local
+        - rango_mapa_km
+        - auto_aprobacion_trabajos
+        """
+        usuario = request.user
+        serializer = UpdateUsuarioSerializer(
+            usuario, 
+            data=request.data, 
+            partial=request.method == 'PATCH'
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        user_data = UsuarioSerializer(usuario).data
+        
+        return Response({
+            'message': 'Información actualizada exitosamente',
+            'user': user_data
+        })
 
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
     def change_password(self, request):
