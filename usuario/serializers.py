@@ -15,7 +15,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Usuario
-        fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 
+        fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'foto_map_url',
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'disponibilidades', 'servicios', 'is_configured']
