@@ -1,5 +1,6 @@
 from django.db import models
 from disponibilidad.models import Disponibilidad
+from localizacion.models import Localizacion
 from usuario.models import Usuario
 from servicios.models import Servicio
 from fixeo_project.models import BaseModel
@@ -24,7 +25,8 @@ class Trabajo(BaseModel):
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='trabajos_solicitados')
     profesional = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos_asignados')
     disponibilidad = models.ForeignKey(Disponibilidad, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')
-
+    localizacion = models.ForeignKey(Localizacion, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')
+    es_domicilio_profesional = models.BooleanField(default=False)
     class Meta:
         db_table = 'trabajo'
         verbose_name = 'Trabajo'

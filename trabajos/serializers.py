@@ -3,10 +3,10 @@ from .models import Trabajo, Calificacion
 
 from rest_framework import serializers
 from .models import Trabajo, Calificacion, TrabajoServicio
-from usuario.serializers import UsuarioSerializer 
+from usuario.serializers import UsuarioSerializer, UsuarioSortSerializer 
 from servicios.serializers import ServicioSerializer 
 from profesion.serializers import ProfesionSerializer 
-
+from localizacion.serializers import LocalizacionSerializer
 
 
 class CalificacionSerializer(serializers.ModelSerializer):
@@ -30,12 +30,13 @@ class TrabajoCreateSerializer(serializers.ModelSerializer):
     fecha = serializers.DateField(write_only=True)
     hora = serializers.TimeField(write_only=True)
     profesional_id = serializers.IntegerField(write_only=True)
+    es_domicilio_profesional = serializers.BooleanField(write_only=True)
 
     class Meta:
         model = Trabajo
         fields = [
             'descripcion', 'esUrgente',
-            'servicios_ids', 'fecha', 'hora', 'profesional_id'
+            'servicios_ids', 'fecha', 'hora', 'profesional_id', 'es_domicilio_profesional'
         ]
 
     def validate_servicios_ids(self, value):
@@ -63,13 +64,13 @@ class CalificacionDetailSerializer(serializers.ModelSerializer):
 
 # Serializer completo para ver detalles de un trabajo
 class TrabajoDetailSerializer(serializers.ModelSerializer):
-    usuario = UsuarioSerializer(read_only=True)
+    usuario = UsuarioSortSerializer(read_only=True)
     
-    profesional = UsuarioSerializer(read_only=True)
-    profesional_profesiones = serializers.SerializerMethodField()
+    profesional = UsuarioSortSerializer(read_only=True)
     
     servicios = TrabajoServicioDetailSerializer(source='trabajo_servicios', many=True, read_only=True)
-    
+    localizacion_detalle = LocalizacionSerializer(source='localizacion', read_only=True)
+
     calificaciones = CalificacionDetailSerializer(many=True, read_only=True)
     
     disponibilidad_fecha_inicio = serializers.DateTimeField(source='disponibilidad.fecha_inicio', read_only=True)
@@ -78,32 +79,26 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Trabajo
         fields = [
-            'id', 'usuario', 'profesional', 'profesional_profesiones',
+            'id', 'usuario', 'profesional',
             'descripcion', 'esUrgente', 'status', 
             'fecha_inicio', 'fecha_fin', 'precio_final',
             'servicios', 'calificaciones',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'localizacion_detalle'
         ]
     
-    def get_profesional_profesiones(self, obj):
-        """Obtiene las profesiones del profesional"""
-        if obj.profesional:
-            profesiones = obj.profesional.usuario_profesiones.all()
-            return ProfesionSerializer([up.profesion for up in profesiones], many=True).data
-        return []
-
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario_nombre = serializers.CharField(source='usuario.nombre', read_only=True)
     profesional_nombre = serializers.CharField(source='profesional.nombre', read_only=True)
     cantidad_servicios = serializers.SerializerMethodField()
+    localizacion_detalle = LocalizacionSerializer(source='localizacion', read_only=True)
     
     class Meta:
         model = Trabajo
         fields = [
             'id', 'usuario_nombre', 'profesional_nombre',
             'descripcion', 'status', 'precio_final',
-            'fecha_inicio', 'cantidad_servicios', 'created_at'
+            'fecha_inicio', 'cantidad_servicios', 'created_at', 'localizacion_detalle'
         ]
     
     def get_cantidad_servicios(self, obj):

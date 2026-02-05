@@ -37,6 +37,8 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     is_configured = models.BooleanField(default=False)
     rol = models.ForeignKey(Rol, on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
 
+    auto_aprobacion_trabajos = models.BooleanField(default=False)
+
     objects = UsuarioManager()
 
     USERNAME_FIELD = 'correo'
