@@ -57,10 +57,15 @@ class UsuarioSerializer(serializers.ModelSerializer):
         if not obj.foto_url:
             return None
 
-        return obj.foto_url.replace(
-            "/storage/v1/object/public/",
-            "/storage/v1/render/image/public/"
-        ) + "?width=64&height=64&resize=cover&format=png&shape=circle"
+        return (
+            obj.foto_url
+            .replace(
+                "/storage/v1/object/public/",
+                "/storage/v1/render/image/public/"
+            )
+            + "?width=64&height=64&resize=cover"
+        )
+
 
 class UsuarioBasicInformationSerializer(serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()
