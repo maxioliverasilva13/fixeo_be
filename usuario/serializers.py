@@ -11,6 +11,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
     servicios = serializers.SerializerMethodField()  
     empresa = serializers.SerializerMethodField()  
     rol_detalle = RolSerializer(source='rol', read_only=True)
+    foto_map_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
@@ -51,6 +52,15 @@ class UsuarioSerializer(serializers.ModelSerializer):
             return None
 
         return EmpresaSerializer(empresa).data
+    
+    def get_foto_map_url(self, obj):
+        if not obj.foto_url:
+            return None
+
+        return obj.foto_url.replace(
+            "/storage/v1/object/public/",
+            "/storage/v1/render/image/public/"
+        ) + "?width=64&height=64&resize=cover&format=png&shape=circle"
 
 class UsuarioBasicInformationSerializer(serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()
