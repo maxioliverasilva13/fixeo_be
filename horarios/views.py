@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework import viewsets, status
+from empresas.models import Empresa
 
 class HorariosViewSet(viewsets.ModelViewSet):
     queryset = Horarios.objects.all()
@@ -21,9 +22,9 @@ class HorariosViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def bulk(self, request):
-        empresa = request.user.empresa
-        horarios_data = request.data  
+        empresa = Empresa.objects.get(admin_id=request.user)
 
+        horarios_data = request.data
         dias_recibidos = []
 
         with transaction.atomic():
@@ -38,8 +39,8 @@ class HorariosViewSet(viewsets.ModelViewSet):
                     empresa=empresa,
                     dia_semana=dia,
                     defaults={
-                        **serializer.validated_data,
-                        "empresa": empresa,
+                        "hora_inicio": serializer.validated_data["hora_inicio"],
+                        "hora_fin": serializer.validated_data["hora_fin"],
                         "enabled": serializer.validated_data.get("enabled", True),
                     }
                 )
@@ -48,9 +49,7 @@ class HorariosViewSet(viewsets.ModelViewSet):
                 empresa=empresa
             ).exclude(
                 dia_semana__in=dias_recibidos
-            ).update(enabled=False)
+            ).delete()
 
-        return Response(
-            {"message": "Horarios sincronizados correctamente"},
-            status=status.HTTP_200_OK
-        )
+
+        return Response({"ok": True})
