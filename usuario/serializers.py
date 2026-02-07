@@ -141,6 +141,8 @@ class UpdateRangoMapaSerializer(serializers.Serializer):
             raise serializers.ValidationError("El rango máximo es 50 km (tamaño de una ciudad grande)")
         return value
 
+class ValidateEmailExistSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
 
 class RegistroSerializer(serializers.Serializer):
     foto_url = serializers.URLField(required=False, allow_blank=True)

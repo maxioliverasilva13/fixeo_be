@@ -14,7 +14,7 @@ from usuario.serializers import (
     UsuarioSerializer, UsuarioCreateSerializer,
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
     UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer,
-    UpdateUsuarioSerializer
+    UpdateUsuarioSerializer, ValidateEmailExistSerializer
 )
 from localizacion.models import Localizacion
 from empresas.utils import crear_empresa
@@ -33,9 +33,25 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         return UsuarioSerializer
 
     def get_permissions(self):
-        if self.action in ['create', 'login', 'registro']:
+        if self.action in ['create', 'login', 'registro', 'validate_email']:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='validate-email')
+    def validate_email(self, request):
+        serializer = ValidateEmailExistSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        emailExist = Usuario.objects.filter(correo=serializer.validated_data['email']).exists()
+        if emailExist:
+            return Response(
+                {'error': 'El correo ya está registrado'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(
+            {'message': 'Correo disponible'},
+            status=status.HTTP_200_OK
+        )
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def registro(self, request):
