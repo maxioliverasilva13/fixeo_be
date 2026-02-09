@@ -102,3 +102,7 @@ class TrabajoListSerializer(serializers.ModelSerializer):
             'fecha_inicio', 'cantidad_servicios', 'created_at', 'localizacion_detalle'
         ]
         
+    def get_cantidad_servicios(self, obj):
+        return obj.trabajo_servicios.count()
+
+        
