@@ -63,7 +63,6 @@ class CalificacionDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'rating', 'comentario', 'user_cal_sender', 
                   'user_cal_sender_nombre', 'user_cal_sender_apellido', 'created_at']
 
-# Serializer completo para ver detalles de un trabajo
 class TrabajoDetailSerializer(serializers.ModelSerializer):
     usuario = UsuarioSortSerializer(read_only=True)
     
