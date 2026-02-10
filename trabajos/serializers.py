@@ -8,7 +8,7 @@ from servicios.serializers import ServicioSerializer
 from profesion.serializers import ProfesionSerializer 
 from usuario.serializers import UsuarioBasicInformationSerializer
 from localizacion.serializers import LocalizacionSerializer
-
+from servicios.models import Servicio
 
 class CalificacionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -89,20 +89,39 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
         ]
     
 class TrabajoListSerializer(serializers.ModelSerializer):
-    usuario_nombre = serializers.CharField(source='usuario.nombre', read_only=True)
-    profesional_nombre = serializers.CharField(source='profesional.nombre', read_only=True)
-    cantidad_servicios = serializers.SerializerMethodField()
-    localizacion_detalle = LocalizacionSerializer(source='localizacion', read_only=True)
-    
+    usuario = UsuarioSerializer(read_only=True)
+    profesional = UsuarioSerializer(read_only=True)
+
+    servicios = serializers.SerializerMethodField()
+    cantidad_servicios = serializers.IntegerField(
+        source='trabajo_servicios.count',
+        read_only=True
+    )
+
+    localizacion_detalle = LocalizacionSerializer(
+        source='localizacion',
+        read_only=True
+    )
+
     class Meta:
         model = Trabajo
         fields = [
-            'id', 'usuario_nombre', 'profesional_nombre',
-            'descripcion', 'status', 'precio_final',
-            'fecha_inicio', 'cantidad_servicios', 'created_at', 'localizacion_detalle'
+            'id',
+            'usuario',
+            'profesional',
+            'servicios',
+            'cantidad_servicios',
+            'descripcion',
+            'status',
+            'precio_final',
+            'fecha_inicio',
+            'created_at',
+            'localizacion_detalle'
         ]
-        
-    def get_cantidad_servicios(self, obj):
-        return obj.trabajo_servicios.count()
 
-        
+    def get_servicios(self, obj):
+        servicios = Servicio.objects.filter(
+            trabajoservicio__trabajo=obj
+        )
+        return ServicioSerializer(servicios, many=True).data
+     

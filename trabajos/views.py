@@ -152,7 +152,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     localizacion = None
         else:
             userLocation = UsuarioLocalizacion.objects.filter(usuario=request.user)
-            existsPrincipal = userLocation.get(es_principal=True).exists()
+            existsPrincipal = userLocation.filter(es_principal=True).exists()
             if existsPrincipal:
                 localizacion = userLocation.filter(es_principal=True).localizacion
             else:

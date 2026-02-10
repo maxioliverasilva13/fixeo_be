@@ -3,17 +3,29 @@ from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
 from rol.serializers import RolSerializer
 from django.db.models import Prefetch
-
+from empresas.serializers import EmpresaSerializer
 class UsuarioSortSerializer(serializers.ModelSerializer):
     rol_detalle = RolSerializer(source='rol', read_only=True)
+    empresa = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
-                  'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
+                  'is_active','empresa', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
                   'is_configured', 'auto_aprobacion_trabajos']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+    def get_empresa(self, obj):
+        if not obj.is_owner_empresa:
+            return None
+
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return None
+
+        return EmpresaSerializer(empresa).data
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
