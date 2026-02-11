@@ -123,14 +123,18 @@ class ServicioViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='por-profesion/(?P<profesion_id>[^/.]+)')
     def por_profesion(self, request, profesion_id=None):
         """
-        Obtiene el servicio del usuario logueado para una profesión específica
+        Obtiene todos los servicios del usuario logueado para una profesión específica
         """
-        try:
-            servicio = Servicio.objects.get(usuario=request.user, profesion_id=profesion_id)
-            serializer = self.get_serializer(servicio)
-            return Response(serializer.data)
-        except Servicio.DoesNotExist:
+        servicios = Servicio.objects.filter(
+            usuario=request.user,
+            profesion_id=profesion_id
+        )
+
+        if not servicios.exists():
             return Response(
-                {'error': 'No tienes un servicio configurado para esta profesión'},
+                {'error': 'No tienes servicios configurados para esta profesión'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+        serializer = self.get_serializer(servicios, many=True)
+        return Response(serializer.data)

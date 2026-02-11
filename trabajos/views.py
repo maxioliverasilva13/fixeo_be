@@ -39,6 +39,27 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             return TrabajoListSerializer
         return TrabajoDetailSerializer
     
+    @action(detail=False, methods=['get'], url_path='calificaciones-usuario/(?P<usuario_id>[^/.]+)')
+    def listado_por_usuario(self, request, usuario_id=None):
+        """
+        Retorna todas las calificaciones recibidas por un usuario específico.
+        """
+        calificaciones = Calificacion.objects.filter(
+            user_cal_recibe_id=usuario_id
+        ).order_by('-created_at')
+
+        data = [{
+            'id': c.id,
+            'rating': c.rating,
+            'comentario': c.comentario,
+            'user_cal_sender': c.user_cal_sender.id,
+            'user_cal_sender_nombre': c.user_cal_sender.nombre,
+            'user_cal_sender_apellido': c.user_cal_sender.apellido,
+            'created_at': c.created_at,
+            'trabajo_id': c.trabajo.id if c.trabajo else None
+        } for c in calificaciones]
+
+        return Response(data, status=status.HTTP_200_OK)
     @action(detail=True, methods=['post'], url_path='aprobar')
     def aprobar_trabajo(self, request, pk=None):
         """
@@ -254,19 +275,40 @@ class CalificacionViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['GET'], url_path='resumen/(?P<usuario_id>[^/.]+)')
     def resumen(self, request, usuario_id=None):
         """
-        Devuelve promedio de estrellas, cantidad de calificaciones y últimas 3 calificaciones para un usuario
+        Devuelve promedio, cantidad y últimas calificaciones con nombre de usuario y servicios.
         """
-        calificaciones = Calificacion.objects.filter(user_cal_recibe_id=usuario_id).order_by('-created_at')
+        calificaciones = Calificacion.objects.filter(
+            user_cal_recibe_id=usuario_id
+        ).select_related(
+            'user_cal_sender', 
+            'trabajo'
+        ).prefetch_related(
+            'trabajo__trabajo_servicios__servicio'
+        ).order_by('-created_at')
+
         count = calificaciones.count()
         promedio = calificaciones.aggregate(promedio=Avg('rating'))['promedio'] or 0
         ultimas = calificaciones[:3]
 
-        ultimas_data = [{
-            'trabajo_id': c.trabajo.id if c.trabajo else None,
-            'rating': c.rating,
-            'comentario': c.comentario,
-            'user_cal_sender': c.user_cal_sender.id
-        } for c in ultimas]
+        ultimas_data = []
+        for c in ultimas:
+            servicios_nombres = []
+            if c.trabajo:
+                servicios_nombres = [
+                    ts.servicio.nombre for ts in c.trabajo.trabajo_servicios.all()
+                ]
+
+            ultimas_data.append({
+                'id': c.id,
+                'rating': c.rating,
+                'comentario': c.comentario,
+                'created_at': c.created_at,
+                'user_cal_sender_nombre': c.user_cal_sender.nombre,
+                'user_cal_sender_apellido': c.user_cal_sender.apellido,
+                'user_cal_sender_foto': c.user_cal_sender.foto_url if hasattr(c.user_cal_sender, 'foto_url') else None,
+                'trabajo_id': c.trabajo.id if c.trabajo else None,
+                'servicios': servicios_nombres,
+            })
 
         return Response({
             'usuario_id': usuario_id,

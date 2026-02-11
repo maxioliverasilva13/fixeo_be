@@ -90,7 +90,7 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario = UsuarioSerializer(read_only=True)
     profesional = UsuarioSerializer(read_only=True)
-
+    calificaciones = CalificacionDetailSerializer(many=True, read_only=True)
     servicios = serializers.SerializerMethodField()
     cantidad_servicios = serializers.IntegerField(
         source='trabajo_servicios.count',
@@ -112,6 +112,7 @@ class TrabajoListSerializer(serializers.ModelSerializer):
             'cantidad_servicios',
             'descripcion',
             'status',
+            'calificaciones',
             'precio_final',
             'fecha_inicio',
             'created_at',
