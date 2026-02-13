@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'recursos',
     'servicios',
     'horarios',
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [
