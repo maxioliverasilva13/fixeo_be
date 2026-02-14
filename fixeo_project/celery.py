@@ -17,6 +17,13 @@ app.conf.beat_schedule = {
     },
 }
 
+app.conf.broker_connection_retry_on_startup = True
+
 @app.task(bind=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')
+
+@app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    from fixeo_project import tasks
+    from notificaciones import tasks as notif_tasks
