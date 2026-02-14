@@ -131,7 +131,6 @@ class TrabajoUrgenteCreateSerializer(serializers.Serializer):
     latitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
     longitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
     direccion = serializers.CharField(required=False, allow_blank=True)
-    radio_busqueda_km = serializers.DecimalField(max_digits=5, decimal_places=2, default=10.00)
 
 
 class OfertaTrabajoSerializer(serializers.ModelSerializer):
@@ -173,7 +172,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         model = Trabajo
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'localizacion_detalle', 
-                  'profesion_detalle', 'radio_busqueda_km', 'ofertas', 
+                  'profesion_detalle', 'ofertas', 
                   'cantidad_ofertas', 'created_at', 'updated_at']
     
     def get_cantidad_ofertas(self, obj):

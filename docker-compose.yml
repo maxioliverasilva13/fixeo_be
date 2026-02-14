@@ -40,6 +40,17 @@ services:
       redis:
         condition: service_healthy
 
+  celery:
+    build: .
+    command: celery -A fixeo_project worker --beat --loglevel=info
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+
 volumes:
   postgres_data:
 

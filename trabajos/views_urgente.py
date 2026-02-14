@@ -3,7 +3,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, F, FloatField
+from django.db.models.functions import ACos, Cos, Sin, Radians
+from django.db.models.expressions import Value
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
@@ -14,6 +16,7 @@ from usuario.models import Usuario
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
 from disponibilidad.models import Disponibilidad, Tipo
+from notificaciones.tasks import notificar_usuario, notificar_usuarios_multiple
 from .models import Trabajo, OfertaTrabajo
 from .serializers import (
     TrabajoUrgenteCreateSerializer,
@@ -26,6 +29,67 @@ from .serializers import (
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     
+    def _buscar_profesionales_cercanos(self, profesion_id, latitud, longitud, excluir_usuario_id=None):
+        from django.db import connection
+        
+        lat_trabajo = float(latitud)
+        lng_trabajo = float(longitud)
+        
+        query = """
+        WITH profesionales_con_localizacion AS (
+            SELECT DISTINCT ON (up.usuario_id)
+                up.usuario_id,
+                u.rango_mapa_km,
+                l.latitud,
+                l.longitud,
+                ul.is_primary
+            FROM usuario_profesion up
+            INNER JOIN usuario u ON u.id = up.usuario_id
+            INNER JOIN usuario_localizacion ul ON ul.usuario_id = up.usuario_id
+            INNER JOIN localizacion l ON l.id = ul.localizacion_id
+            WHERE up.profesion_id = %s
+                AND up.deleted_at IS NULL
+                AND ul.deleted_at IS NULL
+                AND l.deleted_at IS NULL
+                {excluir_clause}
+            ORDER BY up.usuario_id, ul.is_primary DESC NULLS LAST
+        ),
+        profesionales_con_distancia AS (
+            SELECT 
+                usuario_id,
+                rango_mapa_km,
+                (
+                    6371 * acos(
+                        cos(radians(%s)) * 
+                        cos(radians(latitud)) * 
+                        cos(radians(longitud) - radians(%s)) + 
+                        sin(radians(%s)) * 
+                        sin(radians(latitud))
+                    )
+                ) AS distancia_km
+            FROM profesionales_con_localizacion
+        )
+        SELECT usuario_id
+        FROM profesionales_con_distancia
+        WHERE distancia_km <= COALESCE(rango_mapa_km, 10.0)
+        ORDER BY distancia_km ASC;
+        """
+        
+        excluir_clause = ""
+        params = [profesion_id, lat_trabajo, lng_trabajo, lat_trabajo]
+        
+        if excluir_usuario_id:
+            excluir_clause = "AND up.usuario_id != %s"
+            params.insert(1, excluir_usuario_id)
+        
+        query = query.format(excluir_clause=excluir_clause)
+        
+        with connection.cursor() as cursor:
+            cursor.execute(query, params)
+            profesionales_cercanos = [row[0] for row in cursor.fetchall()]
+        
+        return profesionales_cercanos
+    
     @transaction.atomic
     def create(self, request):
         serializer = TrabajoUrgenteCreateSerializer(data=request.data)
@@ -37,7 +101,6 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         latitud = serializer.validated_data['latitud']
         longitud = serializer.validated_data['longitud']
         direccion = serializer.validated_data.get('direccion', '')
-        radio_busqueda_km = serializer.validated_data.get('radio_busqueda_km', 10.00)
         
         try:
             profesion = Profesion.objects.get(id=profesion_id)
@@ -65,9 +128,28 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             status='pendiente_urgente',
             localizacion=localizacion,
             profesion_urgente=profesion,
-            radio_busqueda_km=radio_busqueda_km,
+            radio_busqueda_km=None,
             es_domicilio_profesional=False
         )
+        
+        profesionales_cercanos = self._buscar_profesionales_cercanos(
+            profesion_id, 
+            latitud, 
+            longitud,
+            excluir_usuario_id=usuario.id
+        )
+        
+        if profesionales_cercanos:
+            notificar_usuarios_multiple.delay(
+                usuarios_ids=profesionales_cercanos,
+                titulo=f"Nuevo trabajo urgente de {profesion.nombre}",
+                mensaje=descripcion[:100],
+                data={
+                    'deep_link': f'fixeo://trabajos/urgente/{trabajo.id}',
+                    'entity_id': trabajo.id,
+                    'tipo': 'nuevo_trabajo_urgente'
+                }
+            )
         
         return Response(
             TrabajoUrgenteDetailSerializer(trabajo).data,
@@ -178,6 +260,17 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             mensaje=serializer.validated_data.get('mensaje', '')
         )
         
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="Nueva oferta recibida",
+            mensaje=f"{request.user.nombre} hizo una oferta de ${oferta.precio_ofertado}",
+            data={
+                'deep_link': f'fixeo://trabajos/urgente/{trabajo.id}/ofertas',
+                'entity_id': oferta.id,
+                'tipo': 'nueva_oferta'
+            }
+        )
+        
         return Response(
             OfertaTrabajoSerializer(oferta).data,
             status=status.HTTP_201_CREATED
@@ -252,6 +345,30 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         trabajo.save()
         
         trabajo.ofertas.exclude(id=oferta.id).update(status='rechazada')
+        
+        notificar_usuario.delay(
+            usuario_id=oferta.profesional.id,
+            titulo="¡Tu oferta fue aceptada!",
+            mensaje=f"Tu oferta de ${oferta.precio_ofertado} fue aceptada",
+            data={
+                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'oferta_aceptada'
+            }
+        )
+        
+        ofertas_rechazadas = trabajo.ofertas.filter(status='rechazada').exclude(id=oferta.id)
+        for oferta_rechazada in ofertas_rechazadas:
+            notificar_usuario.delay(
+                usuario_id=oferta_rechazada.profesional.id,
+                titulo="Oferta no seleccionada",
+                mensaje="El cliente seleccionó otra oferta para este trabajo",
+                data={
+                    'deep_link': f'fixeo://trabajos/urgente/{trabajo.id}',
+                    'entity_id': trabajo.id,
+                    'tipo': 'oferta_rechazada'
+                }
+            )
         
         return Response({
             'message': 'Oferta aceptada exitosamente',
