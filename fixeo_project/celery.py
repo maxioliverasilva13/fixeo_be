@@ -13,7 +13,7 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     'test-celery-cada-minuto': {
         'task': 'fixeo_project.tasks.test_celery_beat',
-        'schedule': 60.0,
+        'schedule': 86.400,
     },
 }
 
