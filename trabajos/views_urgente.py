@@ -43,7 +43,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 u.rango_mapa_km,
                 l.latitud,
                 l.longitud,
-                ul.is_primary
+                ul.es_principal
             FROM usuario_profesion up
             INNER JOIN usuario u ON u.id = up.usuario_id
             INNER JOIN usuario_localizacion ul ON ul.usuario_id = up.usuario_id
@@ -53,7 +53,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 AND ul.deleted_at IS NULL
                 AND l.deleted_at IS NULL
                 {excluir_clause}
-            ORDER BY up.usuario_id, ul.is_primary DESC NULLS LAST
+            ORDER BY up.usuario_id, ul.es_principal DESC NULLS LAST
         ),
         profesionales_con_distancia AS (
             SELECT 
@@ -169,7 +169,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
     def list(self, request):
         usuario = request.user
         usuario_profesiones = UsuarioProfesion.objects.filter(usuario=usuario).values_list('profesion_id', flat=True)
-        
+        status_filter = request.query_params.get("status")
+
         if not usuario_profesiones:
             return Response({
                 'message': 'No tienes profesiones configuradas',
@@ -194,15 +195,14 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         trabajos_urgentes = Trabajo.objects.filter(
             esUrgente=True,
-            status='pendiente_urgente',
             profesion_urgente_id__in=usuario_profesiones
         ).exclude(
             usuario=usuario
         ).select_related('usuario', 'localizacion', 'profesion_urgente')
         
-        print(str(usuario_profesiones))
-        print("xd1")
-        print(trabajos_urgentes.count())
+        if status_filter:
+            trabajos_urgentes = trabajos_urgentes.filter(status=status_filter)
+            
         trabajos_cercanos = []
         for trabajo in trabajos_urgentes:
             if trabajo.localizacion:
@@ -420,6 +420,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['get'], url_path='mis-solicitudes')
     def mis_solicitudes(self, request):
+        print("USER:", request.user.id, request.user)
         status_filter = request.query_params.get('status', None)
         
         trabajos = Trabajo.objects.filter(
