@@ -24,6 +24,7 @@ from .serializers import (
     OfertaTrabajoSerializer,
     OfertaTrabajoCreateSerializer
 )
+from datetime import datetime
 
 
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
@@ -102,6 +103,13 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         longitud = serializer.validated_data['longitud']
         direccion = serializer.validated_data.get('direccion', '')
         
+        # --- NUEVOS CAMPOS ---
+        fecha = serializer.validated_data['fecha'] # Date objeto
+        hora = serializer.validated_data['hora']   # Time objeto
+        # Combinamos ambos en un solo objeto datetime para el campo fecha_inicio
+        fecha_inicio_combinada = datetime.combine(fecha, hora)
+        # ---------------------
+
         try:
             profesion = Profesion.objects.get(id=profesion_id)
         except Profesion.DoesNotExist:
@@ -121,6 +129,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 isPrimary=False
             )
         
+        # Creamos el trabajo incluyendo la fecha y hora
         trabajo = Trabajo.objects.create(
             usuario=usuario,
             descripcion=descripcion,
@@ -128,6 +137,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             status='pendiente_urgente',
             localizacion=localizacion,
             profesion_urgente=profesion,
+            fecha_inicio=fecha_inicio_combinada, # <--- SE GUARDA AQUÍ
             radio_busqueda_km=None,
             es_domicilio_profesional=False
         )

@@ -19,30 +19,21 @@ class TrabajoSerializer(serializers.ModelSerializer):
         model = Trabajo
         fields = '__all__'
 
-class TrabajoCreateSerializer(serializers.ModelSerializer):
-    servicios_ids = serializers.ListField(
-        child=serializers.IntegerField(),
-        write_only=True
-    )
-    fecha = serializers.DateField(write_only=True)
-    hora = serializers.TimeField(write_only=True)
-    profesional_id = serializers.IntegerField(write_only=True)
-    es_domicilio_profesional = serializers.BooleanField(write_only=True)
+class TrabajoUrgenteCreateSerializer(serializers.Serializer):
+    descripcion = serializers.CharField(required=True)
+    profesion_id = serializers.IntegerField(required=True)
+    latitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
+    longitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
+    direccion = serializers.CharField(required=False, allow_blank=True)
+    fecha = serializers.DateField(required=True)
+    hora = serializers.TimeField(required=True)
 
-    class Meta:
-        model = Trabajo
-        fields = [
-            'descripcion', 'esUrgente',
-            'servicios_ids', 'fecha', 'hora', 'profesional_id', 'es_domicilio_profesional'
-        ]
-
-    def validate_servicios_ids(self, value):
-        if not value:
-            raise serializers.ValidationError("Se debe enviar al menos un servicio")
-        if not all(isinstance(i, int) for i in value):
-            raise serializers.ValidationError("Todos los IDs de servicios deben ser enteros")
+    def validate_fecha(self, value):
+        from datetime import date
+        if value < date.today():
+            raise serializers.ValidationError("La fecha no puede ser en el pasado.")
         return value
-
+    
 class TrabajoServicioDetailSerializer(serializers.ModelSerializer):
     servicio = ServicioSerializer(read_only=True)
     
@@ -172,7 +163,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         model = Trabajo
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'localizacion_detalle', 
-                  'profesion_detalle', 'ofertas', 
+                  'profesion_detalle', 'ofertas', 'fecha_inicio', 
                   'cantidad_ofertas', 'created_at', 'updated_at']
     
     def get_cantidad_ofertas(self, obj):
