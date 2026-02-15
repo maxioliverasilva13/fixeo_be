@@ -116,7 +116,7 @@ class TrabajoListSerializer(serializers.ModelSerializer):
         return ServicioSerializer(servicios, many=True).data
 
 
-class TrabajoUrgenteCreateSerializer(serializers.Serializer):
+class TrabajoCreateSerializer(serializers.Serializer):
     descripcion = serializers.CharField(required=True)
     profesion_id = serializers.IntegerField(required=True)
     latitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
