@@ -126,19 +126,19 @@ class TrabajoCreateSerializer(serializers.Serializer):
 
 class OfertaTrabajoSerializer(serializers.ModelSerializer):
     profesional_detalle = UsuarioBasicInformationSerializer(source='profesional', read_only=True)
-    
+
     class Meta:
         model = OfertaTrabajo
         fields = ['id', 'trabajo', 'profesional', 'profesional_detalle', 
                   'precio_ofertado', 'tiempo_estimado', 'mensaje', 'status', 
-                  'created_at', 'updated_at']
+                  'created_at', 'updated_at', 'fecha_inicio']
         read_only_fields = ['id', 'trabajo', 'profesional', 'status', 'created_at', 'updated_at']
 
 
 class OfertaTrabajoCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = OfertaTrabajo
-        fields = ['precio_ofertado', 'tiempo_estimado', 'mensaje']
+        fields = ['precio_ofertado', 'tiempo_estimado', 'mensaje', 'fecha_inicio']
     
     def validate_precio_ofertado(self, value):
         if value <= 0:

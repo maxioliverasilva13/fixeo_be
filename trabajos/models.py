@@ -81,6 +81,7 @@ class OfertaTrabajo(BaseModel):
     profesional = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='ofertas_realizadas')
     precio_ofertado = models.DecimalField(max_digits=10, decimal_places=2)
     tiempo_estimado = models.IntegerField(help_text='Tiempo estimado en minutos')
+    fecha_inicio = models.DateTimeField(null=True, blank=True)
     mensaje = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendiente')
     
