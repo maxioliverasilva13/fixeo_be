@@ -118,9 +118,6 @@ class TrabajoListSerializer(serializers.ModelSerializer):
 
 class TrabajoCreateSerializer(serializers.Serializer):
     descripcion = serializers.CharField(required=True)
-    profesion_id = serializers.IntegerField(required=True)
-    latitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
-    longitud = serializers.DecimalField(max_digits=10, decimal_places=7, required=True)
     direccion = serializers.CharField(required=False, allow_blank=True)
 
 
