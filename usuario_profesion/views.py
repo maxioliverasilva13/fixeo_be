@@ -19,8 +19,8 @@ class UsuarioProfesionViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(usuario_id=usuario_id)
         return queryset
 
-    @action(detail=False, methods=['post'], url_path='actualizar-mis-profesiones')
-    def actualizar_mis_profesiones(self, request):
+    @action(detail=False, methods=['post'], url_path='actualizar')
+    def actualizar(self, request):
         """
         Actualiza las profesiones del usuario autenticado.
         Recibe una lista de profesion_ids (máximo 3).
