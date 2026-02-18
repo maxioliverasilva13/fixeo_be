@@ -24,6 +24,7 @@ from .serializers import (
     OfertaTrabajoSerializer,
     OfertaTrabajoCreateSerializer
 )
+from datetime import datetime
 
 
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
@@ -42,7 +43,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 u.rango_mapa_km,
                 l.latitud,
                 l.longitud,
-                ul.is_primary
+                ul.es_principal
             FROM usuario_profesion up
             INNER JOIN usuario u ON u.id = up.usuario_id
             INNER JOIN usuario_localizacion ul ON ul.usuario_id = up.usuario_id
@@ -52,7 +53,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 AND ul.deleted_at IS NULL
                 AND l.deleted_at IS NULL
                 {excluir_clause}
-            ORDER BY up.usuario_id, ul.is_primary DESC NULLS LAST
+            ORDER BY up.usuario_id, ul.es_principal DESC NULLS LAST
         ),
         profesionales_con_distancia AS (
             SELECT 
@@ -102,6 +103,13 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         longitud = serializer.validated_data['longitud']
         direccion = serializer.validated_data.get('direccion', '')
         
+        # --- NUEVOS CAMPOS ---
+        fecha = serializer.validated_data['fecha'] # Date objeto
+        hora = serializer.validated_data['hora']   # Time objeto
+        # Combinamos ambos en un solo objeto datetime para el campo fecha_inicio
+        fecha_inicio_combinada = datetime.combine(fecha, hora)
+        # ---------------------
+
         try:
             profesion = Profesion.objects.get(id=profesion_id)
         except Profesion.DoesNotExist:
@@ -121,6 +129,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 isPrimary=False
             )
         
+        # Creamos el trabajo incluyendo la fecha y hora
         trabajo = Trabajo.objects.create(
             usuario=usuario,
             descripcion=descripcion,
@@ -128,6 +137,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             status='pendiente_urgente',
             localizacion=localizacion,
             profesion_urgente=profesion,
+            fecha_inicio=fecha_inicio_combinada, # <--- SE GUARDA AQUÍ
             radio_busqueda_km=None,
             es_domicilio_profesional=False
         )
@@ -159,7 +169,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
     def list(self, request):
         usuario = request.user
         usuario_profesiones = UsuarioProfesion.objects.filter(usuario=usuario).values_list('profesion_id', flat=True)
-        
+        status_filter = request.query_params.get("status")
+
         if not usuario_profesiones:
             return Response({
                 'message': 'No tienes profesiones configuradas',
@@ -184,15 +195,20 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         trabajos_urgentes = Trabajo.objects.filter(
             esUrgente=True,
-            status='pendiente_urgente',
             profesion_urgente_id__in=usuario_profesiones
         ).exclude(
             usuario=usuario
-        ).select_related('usuario', 'localizacion', 'profesion_urgente')
+        ).exclude(
+            ofertas__profesional=usuario  
+        ).select_related(
+            'usuario',
+            'localizacion',
+            'profesion_urgente'
+        ).distinct()
         
-        print(str(usuario_profesiones))
-        print("xd1")
-        print(trabajos_urgentes.count())
+        if status_filter:
+            trabajos_urgentes = trabajos_urgentes.filter(status=status_filter)
+
         trabajos_cercanos = []
         for trabajo in trabajos_urgentes:
             if trabajo.localizacion:
@@ -257,7 +273,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             profesional=request.user,
             precio_ofertado=serializer.validated_data['precio_ofertado'],
             tiempo_estimado=serializer.validated_data['tiempo_estimado'],
-            mensaje=serializer.validated_data.get('mensaje', '')
+            mensaje=serializer.validated_data.get('mensaje', ''),
+            fecha_inicio=serializer.validated_data.get('fecha_inicio')
         )
         
         notificar_usuario.delay(
@@ -320,11 +337,9 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         except OfertaTrabajo.DoesNotExist:
             return Response({'error': 'Oferta no encontrada'}, status=status.HTTP_404_NOT_FOUND)
         
-        now = timezone.now()
         tiempo_estimado_minutos = oferta.tiempo_estimado
-        fecha_inicio = now
-        fecha_fin = now + timedelta(minutes=tiempo_estimado_minutos)
-        
+        fecha_inicio = oferta.fecha_inicio or timezone.now()
+        fecha_fin = fecha_inicio + timedelta(minutes=tiempo_estimado_minutos)
         disponibilidad_ocupada = Disponibilidad.objects.create(
             usuario=oferta.profesional,
             fecha_inicio=fecha_inicio,
@@ -332,10 +347,10 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             tipo=Tipo.OCUPADO,
             origen='trabajo'
         )
-        
+
         oferta.status = 'aceptada'
         oferta.save()
-        
+
         trabajo.status = 'aceptado'
         trabajo.profesional = oferta.profesional
         trabajo.precio_final = oferta.precio_ofertado
@@ -407,9 +422,76 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             'message': 'Oferta rechazada exitosamente',
             'oferta': OfertaTrabajoSerializer(oferta).data
         })
-    
+
+    @action(detail=False, methods=['get'], url_path='mis-ofertas')
+    def mis_ofertas(self, request):
+        usuario = request.user
+        status_filter = request.query_params.get('status')
+
+        # Obtener localización principal del usuario
+        localizacion_usuario = UsuarioLocalizacion.objects.filter(
+            usuario=usuario,
+            localizacion__isPrimary=True
+        ).select_related('localizacion').first()
+
+        if not localizacion_usuario:
+            localizacion_usuario = UsuarioLocalizacion.objects.filter(
+                usuario=usuario
+            ).select_related('localizacion').first()
+
+        if not localizacion_usuario:
+            return Response({
+                'message': 'No tienes localización configurada',
+                'trabajos': []
+            })
+
+        ofertas = OfertaTrabajo.objects.filter(
+            profesional=usuario
+        ).select_related(
+            'trabajo',
+            'trabajo__usuario',
+            'trabajo__localizacion',
+            'trabajo__profesion_urgente'
+        )
+
+        if status_filter:
+            ofertas = ofertas.filter(status=status_filter)
+
+        resultado = []
+
+        for oferta in ofertas:
+            trabajo = oferta.trabajo
+
+            if trabajo.localizacion:
+                distancia = calcular_distancia_km(
+                    float(localizacion_usuario.localizacion.latitud),
+                    float(localizacion_usuario.localizacion.longitud),
+                    float(trabajo.localizacion.latitud),
+                    float(trabajo.localizacion.longitud)
+                )
+
+                trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
+
+                resultado.append({
+                    "oferta_id": oferta.id,
+                    "status_oferta": oferta.status,
+                    "precio_ofertado": oferta.precio_ofertado,
+                    "tiempo_estimado": oferta.tiempo_estimado,
+                    "mensaje": oferta.mensaje,
+                    "created_at": oferta.created_at,
+                    "distancia_km": round(distancia, 2),
+                    "trabajo": trabajo_data
+                })
+
+        resultado.sort(key=lambda x: x['distancia_km'])
+
+        return Response({
+            'count': len(resultado),
+            'trabajos': resultado
+        })
     @action(detail=False, methods=['get'], url_path='mis-solicitudes')
     def mis_solicitudes(self, request):
+        print("USER:", request.user.id, request.user)
         status_filter = request.query_params.get('status', None)
         
         trabajos = Trabajo.objects.filter(

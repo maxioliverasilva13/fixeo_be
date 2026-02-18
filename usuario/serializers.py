@@ -45,13 +45,14 @@ class UsuarioSerializer(serializers.ModelSerializer):
     empresa = serializers.SerializerMethodField()
     rol_detalle = RolSerializer(source='rol', read_only=True)
     foto_map_url = serializers.SerializerMethodField()
+    localizacion_principal = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'foto_map_url',
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
-                  'profesiones', 'localizaciones', 'servicios', 'is_configured', 'auto_aprobacion_trabajos']
+                  'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured', 'auto_aprobacion_trabajos']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_profesiones(self, obj):
@@ -94,6 +95,21 @@ class UsuarioSerializer(serializers.ModelSerializer):
             )
             + "?width=64&height=64&resize=cover"
         )
+    
+    def get_localizacion_principal(self, obj):
+        from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
+
+        loc_principal = (
+            obj.localizaciones
+            .select_related('localizacion')
+            .filter(localizacion__isPrimary=True)
+            .first()
+        )
+
+        if not loc_principal:
+            return None
+
+        return UsuarioLocalizacionSerializer(loc_principal).data
 
 
 class UsuarioBasicInformationSerializer(serializers.ModelSerializer):
