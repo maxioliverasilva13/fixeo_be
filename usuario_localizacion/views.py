@@ -115,23 +115,19 @@ class UsuarioLocalizacionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # 1️⃣ Quitar principal a TODAS las relaciones del usuario
         UsuarioLocalizacion.objects.filter(
             usuario=request.user,
             es_principal=True
         ).update(es_principal=False)
 
-        # 2️⃣ Quitar isPrimary a TODAS las localizaciones del usuario
         from localizacion.models import Localizacion
         Localizacion.objects.filter(
             usuarios__usuario=request.user
         ).update(isPrimary=False)
 
-        # 3️⃣ Marcar esta relación como principal
         usuario_localizacion.es_principal = True
         usuario_localizacion.save()
 
-        # 4️⃣ Marcar esta localización como primaria
         localizacion = usuario_localizacion.localizacion
         localizacion.isPrimary = True
         localizacion.save()
