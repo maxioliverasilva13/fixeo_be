@@ -144,6 +144,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         profesional_id = serializer.validated_data['profesional_id']
         es_domicilio_profesional = serializer.validated_data['es_domicilio_profesional']
 
+        print(servicios_ids)
         try:
             profesional = Usuario.objects.get(id=profesional_id)
         except Usuario.DoesNotExist:
