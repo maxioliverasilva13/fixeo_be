@@ -14,13 +14,17 @@ from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, Traba
 from rest_framework.decorators import action
 from django.db.models import Avg
 from django.utils.dateparse import parse_date
+from django.db.models import Q
 
 class TrabajoViewSet(viewsets.ModelViewSet):
-    queryset = Trabajo.objects.all()
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = Trabajo.objects.all()
+        user = self.request.user
+
+        queryset = Trabajo.objects.filter(
+            Q(usuario=user) | Q(profesional=user)
+        )
 
         fecha = self.request.query_params.get('date')
         if fecha:
@@ -28,8 +32,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             if fecha_parsed:
                 queryset = queryset.filter(fecha_inicio__date=fecha_parsed)
 
-        return queryset
-
+        return queryset.order_by('-fecha_inicio')
+        
     def get_serializer_class(self):
         if self.action == 'create':
             return TrabajoCreateSerializer
