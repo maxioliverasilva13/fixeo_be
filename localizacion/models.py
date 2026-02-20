@@ -18,6 +18,11 @@ class Localizacion(BaseModel):
         db_table = 'localizacion'
         verbose_name = 'Localización'
         verbose_name_plural = 'Localizaciones'
+        indexes = [
+            models.Index(fields=['latitud'], name='idx_localizacion_latitud'),
+            models.Index(fields=['longitud'], name='idx_localizacion_longitud'),
+            models.Index(fields=['latitud', 'longitud'], name='idx_localizacion_geo'),
+        ]
 
     def __str__(self):
         return f"{self.city}, {self.country}"

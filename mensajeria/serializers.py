@@ -57,7 +57,7 @@ class ChatSerializer(serializers.ModelSerializer):
         if obj.trabajo:
             return {
                 'id': obj.trabajo.id,
-                'titulo': obj.trabajo.titulo,
+                'titulo': obj.trabajo.descripcion,
                 'status': obj.trabajo.status,
                 'precio_final': float(obj.trabajo.precio_final) if obj.trabajo.precio_final else None
             }
@@ -76,7 +76,7 @@ class ChatSerializer(serializers.ModelSerializer):
     def get_mensajes_no_leidos(self, obj):
         request = self.context.get('request')
         if request and request.user:
-            return obj.mensajes.filter(sender__ne=request.user, leido=False).count()
+            return obj.mensajes.filter(leido=False).exclude(sender=request.user).count()
         return 0
 
 

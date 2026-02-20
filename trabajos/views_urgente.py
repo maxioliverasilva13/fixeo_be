@@ -12,6 +12,7 @@ from decimal import Decimal
 from localizacion.models import Localizacion
 from localizacion.utils import calcular_distancia_km
 from profesion.models import Profesion
+from trabajos.utils import filtrar_trabajos_por_distancia_sql
 from usuario.models import Usuario
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
@@ -103,12 +104,9 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         longitud = serializer.validated_data['longitud']
         direccion = serializer.validated_data.get('direccion', '')
         
-        # --- NUEVOS CAMPOS ---
-        fecha = serializer.validated_data['fecha'] # Date objeto
-        hora = serializer.validated_data['hora']   # Time objeto
-        # Combinamos ambos en un solo objeto datetime para el campo fecha_inicio
+        fecha = serializer.validated_data['fecha']
+        hora = serializer.validated_data['hora']
         fecha_inicio_combinada = datetime.combine(fecha, hora)
-        # ---------------------
 
         try:
             profesion = Profesion.objects.get(id=profesion_id)
@@ -128,8 +126,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 address=direccion,
                 isPrimary=False
             )
+            UsuarioLocalizacion.objects.create(
+                usuario=usuario,
+                localizacion=localizacion,
+                es_principal=False
+            )
         
-        # Creamos el trabajo incluyendo la fecha y hora
         trabajo = Trabajo.objects.create(
             usuario=usuario,
             descripcion=descripcion,
@@ -137,7 +139,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             status='pendiente_urgente',
             localizacion=localizacion,
             profesion_urgente=profesion,
-            fecha_inicio=fecha_inicio_combinada, # <--- SE GUARDA AQUÍ
+            fecha_inicio=fecha_inicio_combinada,
             radio_busqueda_km=None,
             es_domicilio_profesional=False
         )
@@ -148,6 +150,9 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             longitud,
             excluir_usuario_id=usuario.id
         )
+
+        print("profesionales_cercanos")
+        print(profesionales_cercanos)
         
         if profesionales_cercanos:
             notificar_usuarios_multiple.delay(
@@ -165,6 +170,19 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             TrabajoUrgenteDetailSerializer(trabajo).data,
             status=status.HTTP_201_CREATED
         )
+
+    def _get_localizacion_usuario(self, usuario):
+        localizacion = UsuarioLocalizacion.objects.filter(
+            usuario=usuario,
+            localizacion__isPrimary=True
+        ).select_related('localizacion').first()
+        
+        if not localizacion:
+            localizacion = UsuarioLocalizacion.objects.filter(
+                usuario=usuario
+            ).select_related('localizacion').first()
+        
+        return localizacion
     
     def list(self, request):
         usuario = request.user
@@ -177,15 +195,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 'trabajos': []
             })
         
-        localizacion_usuario = UsuarioLocalizacion.objects.filter(
-            usuario=usuario,
-            localizacion__isPrimary=True
-        ).select_related('localizacion').first()
-        
-        if not localizacion_usuario:
-            localizacion_usuario = UsuarioLocalizacion.objects.filter(
-                usuario=usuario
-            ).select_related('localizacion').first()
+        localizacion_usuario = self._get_localizacion_usuario(usuario)
         
         if not localizacion_usuario:
             return Response({
@@ -193,7 +203,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 'trabajos': []
             })
         
-        trabajos_urgentes = Trabajo.objects.filter(
+        trabajos_urgentes_qs = Trabajo.objects.filter(
             esUrgente=True,
             profesion_urgente_id__in=usuario_profesiones
         ).exclude(
@@ -204,33 +214,46 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             'usuario',
             'localizacion',
             'profesion_urgente'
-        ).distinct()
+        )
         
         if status_filter:
-            trabajos_urgentes = trabajos_urgentes.filter(status=status_filter)
+            trabajos_urgentes_qs = trabajos_urgentes_qs.filter(status=status_filter)
 
-        trabajos_cercanos = []
-        for trabajo in trabajos_urgentes:
-            if trabajo.localizacion:
-                distancia = calcular_distancia_km(
-                    float(localizacion_usuario.localizacion.latitud),
-                    float(localizacion_usuario.localizacion.longitud),
-                    float(trabajo.localizacion.latitud),
-                    float(trabajo.localizacion.longitud)
-                )
-                
-                if distancia <= float(trabajo.radio_busqueda_km or 10):
-                    trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
-                    trabajo_data['distancia_km'] = round(distancia, 2)
-                    trabajos_cercanos.append(trabajo_data)
+        trabajo_ids_cercanos = filtrar_trabajos_por_distancia_sql(
+            trabajos_urgentes_qs,
+            usuario,
+            localizacion_usuario.localizacion.latitud,
+            localizacion_usuario.localizacion.longitud
+        )
         
-        trabajos_cercanos.sort(key=lambda x: x['distancia_km'])
+        trabajos_cercanos = Trabajo.objects.filter(
+            id__in=trabajo_ids_cercanos
+        ).select_related(
+            'usuario',
+            'localizacion',
+            'profesion_urgente'
+        )
+        
+        resultado = []
+        for trabajo in trabajos_cercanos:
+            distancia = calcular_distancia_km(
+                float(localizacion_usuario.localizacion.latitud),
+                float(localizacion_usuario.localizacion.longitud),
+                float(trabajo.localizacion.latitud),
+                float(trabajo.localizacion.longitud)
+            )
+            
+            trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
+            trabajo_data['distancia_km'] = round(distancia, 2)
+            resultado.append(trabajo_data)
+        
+        resultado.sort(key=lambda x: x['distancia_km'])
         
         return Response({
-            'count': len(trabajos_cercanos),
-            'trabajos': trabajos_cercanos
+            'count': len(resultado),
+            'trabajos': resultado
         })
-    
+
     def retrieve(self, request, pk=None):
         try:
             trabajo = Trabajo.objects.get(id=pk, esUrgente=True)
@@ -428,7 +451,6 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         usuario = request.user
         status_filter = request.query_params.get('status')
 
-        # Obtener localización principal del usuario
         localizacion_usuario = UsuarioLocalizacion.objects.filter(
             usuario=usuario,
             localizacion__isPrimary=True
@@ -491,7 +513,6 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         })
     @action(detail=False, methods=['get'], url_path='mis-solicitudes')
     def mis_solicitudes(self, request):
-        print("USER:", request.user.id, request.user)
         status_filter = request.query_params.get('status', None)
         
         trabajos = Trabajo.objects.filter(

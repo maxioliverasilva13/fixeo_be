@@ -6,10 +6,12 @@ from rest_framework.permissions import IsAuthenticated
 from datetime import datetime
 from disponibilidad.models import Disponibilidad, Tipo
 from disponibilidad.utils import calcular_rango, hay_conflicto, rango_horario_empresa
+from trabajos.utils import filtrar_trabajos_por_distancia_sql
 from usuario.models import Usuario
 from servicios.models import Servicio
 from usuario_localizacion.models import UsuarioLocalizacion
-from .models import Calificacion, Trabajo, TrabajoServicio
+from usuario_profesion.models import UsuarioProfesion
+from .models import Calificacion, OfertaTrabajo, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
 from rest_framework.decorators import action
 from django.db.models import Avg
@@ -92,6 +94,84 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'trabajo': TrabajoDetailSerializer(trabajo).data
         }, status=status.HTTP_200_OK)
     
+    
+    @action(detail=False, methods=['get'], url_path='contador-urgentes')
+    def contador_urgentes(self, request):
+        logged_user = request.user
+        
+        if logged_user.is_owner_empresa:
+            profesiones_ids = UsuarioProfesion.objects.filter(
+                usuario=logged_user
+            ).values_list('profesion_id', flat=True)
+            
+            trabajos_online_qs = Trabajo.objects.filter(
+                esUrgente=True,
+                status='pendiente_urgente',
+                profesion_urgente_id__in=profesiones_ids
+            ).exclude(
+                usuario=logged_user
+            ).exclude(
+                ofertas__profesional=logged_user
+            )
+            
+            localizacion_usuario = UsuarioLocalizacion.objects.filter(
+                usuario=logged_user,
+                localizacion__isPrimary=True
+            ).select_related('localizacion').first()
+            
+            if not localizacion_usuario:
+                localizacion_usuario = UsuarioLocalizacion.objects.filter(
+                    usuario=logged_user
+                ).select_related('localizacion').first()
+            
+            online_count = 0
+            if localizacion_usuario:
+                trabajo_ids_cercanos = filtrar_trabajos_por_distancia_sql(
+                    trabajos_online_qs,
+                    logged_user,
+                    localizacion_usuario.localizacion.latitud,
+                    localizacion_usuario.localizacion.longitud
+                )
+                online_count = len(trabajo_ids_cercanos)
+            else:
+                online_count = 0
+            
+            pendientes_count = Trabajo.objects.filter(
+                esUrgente=True,
+                status='pendiente',
+                profesional=logged_user
+            ).count()
+            
+            total = online_count + pendientes_count
+            
+            return Response({
+                'online': online_count,
+                'pendientes': pendientes_count,
+                'total': total
+            }, status=status.HTTP_200_OK)
+        
+        else:
+            trabajos_pendientes = Trabajo.objects.filter(
+                esUrgente=True,
+                status__in=['pendiente', 'aceptado'],
+                usuario=logged_user
+            ).count()
+
+            ofertas_recibidas = OfertaTrabajo.objects.filter(
+                trabajo__usuario=logged_user,
+                trabajo__esUrgente=True,
+                trabajo__status__in=['pendiente_urgente', 'pendiente'],
+                status='pendiente',
+                status__in=['pendiente']
+            ).select_related('trabajo', 'trabajo__profesion_urgente', 'trabajo__usuario').count()
+            
+
+            return Response({
+                'online': ofertas_recibidas,
+                'pendientes': trabajos_pendientes,
+                'total': ofertas_recibidas + trabajos_pendientes
+            }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='rechazar')
     def rechazar_trabajo(self, request, pk=None):
         """
@@ -148,6 +228,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         profesional_id = serializer.validated_data['profesional_id']
         es_domicilio_profesional = serializer.validated_data['es_domicilio_profesional']
 
+        print(servicios_ids)
         try:
             profesional = Usuario.objects.get(id=profesional_id)
         except Usuario.DoesNotExist:
