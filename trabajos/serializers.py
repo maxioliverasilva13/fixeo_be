@@ -178,14 +178,14 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
     profesion_detalle = ProfesionSerializer(source='profesion_urgente', read_only=True)
     ofertas = OfertaTrabajoSerializer(many=True, read_only=True)
     cantidad_ofertas = serializers.SerializerMethodField()
-    calificacion = CalificacionDetailSerializer(many=True, read_only=True)
-    
+    calificaciones = CalificacionDetailSerializer(many=True, read_only=True)  
+
     class Meta:
         model = Trabajo
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'localizacion_detalle', 
                   'profesion_detalle', 'ofertas', 'fecha_inicio', 
-                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificacion']
+                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones']
 
     def get_cantidad_ofertas(self, obj):
         return obj.ofertas.count()
