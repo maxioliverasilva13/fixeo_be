@@ -28,7 +28,7 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
         serializer.save(usuario=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=['post'], url_path='notificar-usuario')
+    @action(methods=['post'], url_path='notificar-usuario')
     def notificar_usuario(self, request):
         usuario_id = request.data.get('usuario_id', None)
         if usuario_id:
