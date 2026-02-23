@@ -1,11 +1,10 @@
-from django.contrib.admin import action
-from notificaciones.tasks import notificar_usuario
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from notificaciones.tasks import notificar_usuario as notificar_usuario_task
 from .models import DeviceToken, Notificaciones, Notas
 from .serializers import DeviceTokenCreateSerializer, DeviceTokenSerializer, NotificacionesSerializer, NotasSerializer
-
-from rest_framework.response import Response
 
 class DeviceTokenViewSet(viewsets.ModelViewSet):
     queryset = DeviceToken.objects.all()
@@ -28,12 +27,12 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
         serializer.save(usuario=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    @action(methods=['post'], url_path='notificar-usuario')
+    @action(detail=False, methods=['post'], url_path='notificar-usuario')
     def notificar_usuario(self, request):
         usuario_id = request.data.get('usuario_id', None)
         if usuario_id:
-            notificar_usuario.delay(usuario_id=usuario_id, titulo="Nueva notificación", mensaje="Tienes una nueva notificación")
-        return Response(status=status.HTTP_200_OK)
+            notificar_usuario_task.delay(usuario_id=usuario_id, titulo="Nueva notificación", mensaje="Tienes una nueva notificación")
+        return Response({'message': 'Notificación enviada'}, status=status.HTTP_200_OK)
 
 
 class NotificacionesViewSet(viewsets.ModelViewSet):
