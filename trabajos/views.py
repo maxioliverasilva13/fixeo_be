@@ -1,5 +1,6 @@
 from django.db import transaction
 from localizacion.models import Localizacion
+from notificaciones.tasks import notificar_usuario
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -69,6 +70,18 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         Solo el profesional asignado puede aprobar.
         """
         trabajo = self.get_object()
+
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="¡Trabajo aprobado!",
+            mensaje=f"{request.user.nombre} ha aprobado tu solicitud de trabajo",
+            data={
+                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_aprobado'
+            }
+        )
+        
         
         if trabajo.profesional != request.user:
             return Response(
@@ -204,6 +217,18 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         # Opcional: liberar la disponibilidad ocupada
         if trabajo.disponibilidad:
             trabajo.disponibilidad.delete()
+
+        
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="¡Trabajo rechazado!",
+            mensaje=f"{request.user.nombre} ha rechazado tu solicitud de trabajo",
+            data={
+                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_rechazado'
+            }
+        )
         
         return Response({
             'message': 'Trabajo rechazado exitosamente',
@@ -301,6 +326,18 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 precio=servicio.precio
             )
             
+        cleanFecha = fecha.strftime('%d/%m/%Y')
+        cleanHora = hora.strftime('%H:%M')
+        notificar_usuario.delay(
+            usuario_id=profesional.id,
+            titulo="¡Nueva solicitud de trabajo!",
+            mensaje=f"{request.user.nombre} ha creado una solicitud de trabajo para el dia {cleanFecha} a las {cleanHora}",
+            data={
+                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_creado'
+            }
+        )
 
         return Response({
             'id': trabajo.id,
