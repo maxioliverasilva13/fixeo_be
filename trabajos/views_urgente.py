@@ -7,10 +7,11 @@ from django.db.models import Q, F, FloatField
 from django.db.models.functions import ACos, Cos, Sin, Radians
 from django.db.models.expressions import Value
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, datetime
 from decimal import Decimal
 from localizacion.models import Localizacion
 from localizacion.utils import calcular_distancia_km
+from mensajeria.models import Chat
 from profesion.models import Profesion
 from trabajos.utils import filtrar_trabajos_por_distancia_sql
 from usuario.models import Usuario
@@ -25,7 +26,6 @@ from .serializers import (
     OfertaTrabajoSerializer,
     OfertaTrabajoCreateSerializer
 )
-from datetime import datetime
 
 
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
@@ -383,6 +383,18 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         trabajo.save()
         
         trabajo.ofertas.exclude(id=oferta.id).update(status='rechazada')
+        
+        chat_exists = Chat.objects.filter(
+            Q(sender=trabajo.usuario, receiver=oferta.profesional) |
+            Q(sender=oferta.profesional, receiver=trabajo.usuario)
+        ).exists()
+        
+        if not chat_exists:
+            Chat.objects.create(
+                sender=trabajo.usuario,
+                receiver=oferta.profesional,
+                trabajo=trabajo
+            )
         
         notificar_usuario.delay(
             usuario_id=oferta.profesional.id,

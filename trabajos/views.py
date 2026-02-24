@@ -1,5 +1,6 @@
 from django.db import transaction
 from localizacion.models import Localizacion
+from mensajeria.models import Chat
 from notificaciones.tasks import notificar_usuario
 from rest_framework import viewsets, status
 from rest_framework.response import Response
@@ -72,20 +73,9 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         """
         Aprueba un trabajo pendiente.
         Solo el profesional asignado puede aprobar.
+        Crea un chat entre el cliente y el profesional.
         """
         trabajo = self.get_object()
-
-        notificar_usuario.delay(
-            usuario_id=trabajo.usuario.id,
-            titulo="¡Trabajo aprobado!",
-            mensaje=f"{request.user.nombre} ha aprobado tu solicitud de trabajo",
-            data={
-                'deep_link': f'fixeo://trabajos/{trabajo.id}',
-                'entity_id': trabajo.id,
-                'tipo': 'trabajo_aprobado'
-            }
-        )
-        
         
         if trabajo.profesional != request.user:
             return Response(
@@ -101,6 +91,30 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         
         trabajo.status = 'aceptado'
         trabajo.save()
+        
+        # Crear chat entre cliente y profesional si no existe
+        chat_exists = Chat.objects.filter(
+            Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
+            Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+        ).exists()
+        
+        if not chat_exists:
+            Chat.objects.create(
+                sender=trabajo.profesional,
+                receiver=trabajo.usuario,
+                trabajo=trabajo
+            )
+        
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="¡Trabajo aprobado!",
+            mensaje=f"{request.user.nombre} ha aprobado tu solicitud de trabajo",
+            data={
+                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_aprobado'
+            }
+        )
         
         return Response({
             'message': 'Trabajo aprobado exitosamente',
