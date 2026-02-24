@@ -281,6 +281,9 @@ class UpdateUsuarioSerializer(serializers.ModelSerializer):
     """
     Serializer para actualizar la información del usuario logueado
     """
+    telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    foto_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
+    
     class Meta:
         model = Usuario
         fields = [
