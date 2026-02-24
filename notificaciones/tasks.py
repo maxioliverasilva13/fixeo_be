@@ -54,6 +54,12 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
     except Exception as e:
         return {'error': f'Firebase no inicializado: {str(e)}'}
     
+    # Convertir todos los valores de data a strings para Firebase
+    firebase_data = {}
+    if data:
+        for key, value in data.items():
+            firebase_data[key] = str(value)
+    
     tokens_enviados = 0
     tokens_fallidos = 0
     errores = []
@@ -68,7 +74,7 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
             message = messaging.Message(
                 notification=notification,
                 token=token,
-                data=data if data else {}
+                data=firebase_data  # Usar data convertida a strings
             )
             
             response = messaging.send(message)
@@ -94,8 +100,14 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
 def notificar_usuarios_multiple(usuarios_ids, titulo, mensaje, data=None):
     resultados = []
     
+    # Convertir data a strings una sola vez
+    firebase_data = {}
+    if data:
+        for key, value in data.items():
+            firebase_data[key] = str(value)
+    
     for usuario_id in usuarios_ids:
-        resultado = notificar_usuario.delay(usuario_id, titulo, mensaje, data)
+        resultado = notificar_usuario.delay(usuario_id, titulo, mensaje, firebase_data)
         resultados.append({
             'usuario_id': usuario_id,
             'task_id': resultado.id
