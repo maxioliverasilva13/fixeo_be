@@ -4,6 +4,8 @@ from .models import Usuario
 from rol.serializers import RolSerializer
 from django.db.models import Prefetch
 from empresas.serializers import EmpresaSerializer
+from localizacion.models import Localizacion
+from django.db import transaction
 
 class UsuarioSortSerializer(serializers.ModelSerializer):
     rol_detalle = RolSerializer(source='rol', read_only=True)
@@ -150,9 +152,24 @@ class UsuarioCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
 
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+    direction_name = serializers.CharField(required=False, allow_blank=True)
+
     class Meta:
         model = Usuario
-        fields = ['correo', 'password', 'password2', 'nombre', 'apellido', 'telefono', 'is_owner_empresa']
+        fields = [
+            'correo',
+            'password',
+            'password2',
+            'nombre',
+            'apellido',
+            'telefono',
+            'is_owner_empresa',
+            'latitude',
+            'longitude',
+            'direction_name'
+        ]
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:
@@ -161,9 +178,34 @@ class UsuarioCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop('password2')
-        user = Usuario.objects.create_user(**validated_data)
-        return user
 
+        lat = validated_data.pop('latitude', None)
+        lng = validated_data.pop('longitude', None)
+        direction_name = validated_data.pop('direction_name', '')
+
+        with transaction.atomic():
+            from usuario_localizacion.models import UsuarioLocalizacion
+            user = Usuario.objects.create_user(**validated_data)
+
+            if lat is not None and lng is not None:
+                localizacion = Localizacion.objects.create(
+                    ubicacion=direction_name,
+                    latitud=lat,
+                    longitud=lng,
+                    address=direction_name,
+                    city='',
+                    country='',
+                    county='',
+                    state='',
+                    isPrimary=True
+                )
+
+                UsuarioLocalizacion.objects.create(
+                    usuario=user,
+                    localizacion=localizacion
+                )
+
+        return user
 
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True)
