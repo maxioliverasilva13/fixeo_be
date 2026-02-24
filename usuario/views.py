@@ -272,7 +272,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             localizacion__latitud__gte=south,
             localizacion__longitud__lte=east,
             localizacion__longitud__gte=west,
-            localizacion__isPrimary=True    
+            localizacion__isPrimary=True,
+            usuario__is_owner_empresa=True
             ).distinct()
         
 
