@@ -6,13 +6,14 @@ from fixeo_project.models import BaseModel
 class DeviceToken(BaseModel):
     device_name = models.CharField(max_length=100)
     enabled = models.BooleanField(default=True)
-    device_token = models.CharField(max_length=255, unique=True)
+    device_token = models.CharField(max_length=255)
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='device_tokens')
 
     class Meta:
         db_table = 'device_token'
         verbose_name = 'Device Token'
         verbose_name_plural = 'Device Tokens'
+        unique_together = [['device_token', 'usuario']]
 
     def __str__(self):
         return f"{self.device_name} - {self.usuario}"

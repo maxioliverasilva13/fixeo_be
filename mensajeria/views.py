@@ -174,9 +174,12 @@ class ChatViewSet(viewsets.ModelViewSet):
         )
 
         userNameToReceive = None
+        userIdToReceive = None
         if (request.user.id == chat.sender.id):
+            userIdToReceive = chat.receiver.id
             userNameToReceive = chat.receiver.nombre
         else:
+            userIdToReceive = chat.sender.id
             userNameToReceive = chat.sender.nombre
 
         notificar_usuario.delay(
