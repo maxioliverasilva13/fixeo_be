@@ -1,3 +1,4 @@
+from notificaciones.tasks import notificar_usuario
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -165,11 +166,27 @@ class ChatViewSet(viewsets.ModelViewSet):
                     {'error': 'El recurso no existe o ya está asociado a otro mensaje'},
                     status=status.HTTP_404_NOT_FOUND
                 )
-        
+
         mensaje = Mensajes.objects.create(
             texto=serializer.validated_data['texto'],
             sender=request.user,
             chat=chat
+        )
+
+        userNameToReceive = None
+        if (request.user.id == chat.sender.id):
+            userNameToReceive = chat.receiver.nombre
+        else:
+            userNameToReceive = chat.sender.nombre
+
+        notificar_usuario.delay(
+            usuario_id=chat.receiver.id,
+            titulo=f"Nuevo mensaje de {userNameToReceive}",
+            mensaje=mensaje.texto,
+            data={
+                'deep_link': f'fixeo://chats/{chat.id}',
+                'entity_id': chat.id
+            }
         )
         
         if recurso:
