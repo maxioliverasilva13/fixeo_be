@@ -183,7 +183,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             userNameToReceive = chat.sender.nombre
 
         notificar_usuario.delay(
-            usuario_id=chat.receiver.id,
+            usuario_id=userIdToReceive,
             titulo=f"Nuevo mensaje de {userNameToReceive}",
             mensaje=mensaje.texto,
             data={
