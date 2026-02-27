@@ -19,9 +19,30 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
         return queryset
     
     def create(self, request):
+        device_name = request.data.get('device_name')
+        device_token = request.data.get('device_token')
+        
+        if not device_token:
+            return Response(
+                {'error': 'device_token es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        existing_token = DeviceToken.objects.filter(
+            device_token=device_token,
+            usuario=request.user
+        ).first()
+        
+        if existing_token:
+            existing_token.device_name = device_name or existing_token.device_name
+            existing_token.enabled = True
+            existing_token.save()
+            serializer = DeviceTokenSerializer(existing_token)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
         serializer = DeviceTokenCreateSerializer(data={
-            'device_name': request.data.get('device_name'),
-            'device_token': request.data.get('device_token'),
+            'device_name': device_name,
+            'device_token': device_token,
         })
         serializer.is_valid(raise_exception=True)
         serializer.save(usuario=request.user)
