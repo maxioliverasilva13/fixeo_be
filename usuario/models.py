@@ -26,6 +26,7 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     telefono = models.CharField(max_length=20)
     nombre = models.CharField(max_length=100)
     foto_url = models.URLField(max_length=500, blank=True, null=True)
+    rounded_foto_url = models.URLField(max_length=500, blank=True, null=True)
     trabajo_domicilio = models.BooleanField(default=False)
     trabajo_local = models.BooleanField(default=False)
     is_owner_empresa = models.BooleanField(default=False)

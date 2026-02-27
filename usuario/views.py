@@ -72,7 +72,9 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     foto_url=serializer.validated_data.get('foto_url', ''),
                     trabajo_domicilio=serializer.validated_data['trabajo_domicilio'],
                     trabajo_local=serializer.validated_data['trabajo_local'],
-                    is_owner_empresa=serializer.validated_data['es_empresa']
+                    telefono=serializer.validated_data.get('telefono', ''),
+                    is_owner_empresa=serializer.validated_data['es_empresa'],
+                    rounded_foto_url=serializer.validated_data.get('rounded_foto_url', ''),
                 )
                 
                 if serializer.validated_data.get('latitude') and serializer.validated_data.get('longitude'):
