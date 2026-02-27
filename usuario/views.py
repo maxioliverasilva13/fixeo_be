@@ -22,6 +22,9 @@ from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
+from django.db.models import Avg
+from decimal import Decimal
+import math
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -261,28 +264,84 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='rango-mapa')
     def filter_users_mapa(self, request):
-        serializer = FilterUsersMapaSerializer(data=request.query_params)
-        serializer.is_valid(raise_exception=True)
+            serializer = FilterUsersMapaSerializer(data=request.query_params)
+            serializer.is_valid(raise_exception=True)
 
-        north = Decimal(request.query_params['north'])
-        south = Decimal(request.query_params['south'])
-        east  = Decimal(request.query_params['east'])
-        west  = Decimal(request.query_params['west'])
+            north = Decimal(request.query_params['north'])
+            south = Decimal(request.query_params['south'])
+            east  = Decimal(request.query_params['east'])
+            west  = Decimal(request.query_params['west'])
 
-        usuarios = UsuarioLocalizacion.objects.filter(
-            localizacion__latitud__lte=north,
-            localizacion__latitud__gte=south,
-            localizacion__longitud__lte=east,
-            localizacion__longitud__gte=west,
-            localizacion__isPrimary=True,
-            usuario__is_owner_empresa=True
-            ).distinct()
-        
+            profesion_id  = request.query_params.get('profesion_id')
+            sort_by       = request.query_params.get('sort_by', 'mejor_valorados')  
+            max_price     = request.query_params.get('max_price')
+            is_urgent     = request.query_params.get('is_urgent') 
 
-        return Response(
-            [UsuarioInMapaSerializer(ul.usuario).data for ul in usuarios]
-        )
+            usuarios_loc = UsuarioLocalizacion.objects.filter(
+                localizacion__latitud__lte=north,
+                localizacion__latitud__gte=south,
+                localizacion__longitud__lte=east,
+                localizacion__longitud__gte=west,
+                localizacion__isPrimary=True,
+                usuario__is_owner_empresa=True,
+                usuario__is_active=True,
+            ).select_related('usuario', 'localizacion').distinct()
 
+            if profesion_id:
+                usuarios_loc = usuarios_loc.filter(
+                    usuario__usuario_profesiones__profesion_id=profesion_id
+                )
+
+            if max_price:
+                usuarios_loc = usuarios_loc.filter(
+                    usuario__servicios__precio__lte=Decimal(max_price)
+                ).distinct()
+
+            if is_urgent == 'true':
+                usuarios_loc = usuarios_loc.filter(
+                    usuario__trabajos_asignados__esUrgente=True
+                ).distinct()
+
+            center_lat = float((north + south) / 2)
+            center_lng = float((east + west) / 2)
+            
+            results = []
+            for ul in usuarios_loc:
+                usuario = ul.usuario
+                lat = float(ul.localizacion.latitud)
+                lng = float(ul.localizacion.longitud)
+
+                dlat = math.radians(lat - center_lat)
+                dlng = math.radians(lng - center_lng)
+                a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(lat)) * math.sin(dlng/2)**2
+                distance_km = 6371 * 2 * math.asin(math.sqrt(a))
+
+                avg_rating = usuario.calificaciones_recibidas.aggregate(
+                    avg=Avg('rating')
+                )['avg'] or 0
+
+                min_price = usuario.servicios.order_by('precio').values_list('precio', flat=True).first()
+
+                results.append({
+                    'usuario': usuario,
+                    'distance_km': distance_km,
+                    'avg_rating': avg_rating,
+                    'min_price': float(min_price) if min_price else None,
+                })
+
+            # Ordenar
+            if sort_by == 'mejor_valorados':
+                results.sort(key=lambda x: x['avg_rating'], reverse=True)
+            elif sort_by == 'mas_cercanos':
+                results.sort(key=lambda x: x['distance_km'])
+            elif sort_by == 'mejor_precio':
+                results.sort(key=lambda x: (x['min_price'] is None, x['min_price'] or 0))
+
+            return Response([
+                UsuarioInMapaSerializer(r['usuario']).data
+                for r in results
+            ])
+    
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
         q = request.query_params.get('q', '').strip()

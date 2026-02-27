@@ -267,10 +267,18 @@ class RegistroSerializer(serializers.Serializer):
         return attrs
 
 class FilterUsersMapaSerializer(serializers.Serializer):
-    north = serializers.FloatField()
-    south = serializers.FloatField()
-    east = serializers.FloatField()
-    west = serializers.FloatField()
+    north      = serializers.DecimalField(max_digits=20, decimal_places=15)
+    south      = serializers.DecimalField(max_digits=20, decimal_places=15)
+    east       = serializers.DecimalField(max_digits=20, decimal_places=15)
+    west       = serializers.DecimalField(max_digits=20, decimal_places=15)
+    profesion_id = serializers.IntegerField(required=False, allow_null=True)
+    sort_by      = serializers.ChoiceField(
+        choices=['mejor_valorados', 'mas_cercanos', 'mejor_precio'],
+        required=False,
+        default='mejor_valorados'
+    )
+    max_price    = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    is_urgent    = serializers.BooleanField(required=False, default=False)
 
 
 class UpdateUsuarioSerializer(serializers.ModelSerializer):
