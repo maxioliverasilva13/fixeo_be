@@ -27,7 +27,7 @@ services:
 
   web:
     build: .
-    command: python manage.py runserver 0.0.0.0:8000
+    command: python -m watchfiles "daphne -b 0.0.0.0 -p 8000 fixeo_project.asgi:application" .
     volumes:
       - .:/app
     ports:

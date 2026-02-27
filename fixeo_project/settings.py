@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'servicios',
     'horarios',
     'rest_framework_simplejwt.token_blacklist',
+    'channels'
 ]
 
 MIDDLEWARE = [
@@ -69,6 +70,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'fixeo_project.wsgi.application'
+ASGI_APPLICATION = 'fixeo_project.asgi.application'
 
 DATABASES = {
     'default': {
@@ -152,7 +154,7 @@ if DEBUG:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:8000",
-        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8000"
     ]
 else:
     CORS_ALLOW_ALL_ORIGINS = True
@@ -201,6 +203,15 @@ else:
     else:
         CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
         CELERY_RESULT_BACKEND = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [CELERY_BROKER_URL],
+        },
+    },
+}
 
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'

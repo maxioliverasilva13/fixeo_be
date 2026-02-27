@@ -69,7 +69,8 @@ class ChatSerializer(serializers.ModelSerializer):
             return {
                 'texto': ultimo.texto,
                 'sender': ultimo.sender.id,
-                'created_at': ultimo.created_at
+                'created_at': ultimo.created_at,
+                'leido': ultimo.leido
             }
         return None
     

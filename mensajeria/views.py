@@ -13,7 +13,8 @@ from .serializers import (
     MensajesSerializer, MensajeCreateSerializer,
     RecursoSerializer, RecursoCreateSerializer
 )
-
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 class ChatPagination(PageNumberPagination):
     page_size = 20
@@ -61,13 +62,13 @@ class ChatViewSet(viewsets.ModelViewSet):
         receiver_id = serializer.validated_data['receiver_id']
         trabajo_id = serializer.validated_data.get('trabajo_id')
         mensaje_inicial = serializer.validated_data.get('mensaje_inicial')
-        
+
         if receiver_id == request.user.id:
             return Response(
                 {'error': 'No puedes crear un chat contigo mismo'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             receiver = Usuario.objects.get(id=receiver_id)
         except Usuario.DoesNotExist:
@@ -111,7 +112,33 @@ class ChatViewSet(viewsets.ModelViewSet):
             )
             chat.ultimo_mensaje_at = chat.created_at
             chat.save()
+
+        room_name = f"usuario_channel_{chat.receiver.id}"
+
+        print(f"[CHAT CREATED] chat_id={chat.id} room_name={room_name} sender_id={request.user.id} receiver_id={receiver.id}")
+
+        channel_layer = get_channel_layer()
+
+        payload = {
+            'type': 'chat_message',
+            'message': mensaje_inicial if mensaje_inicial else '',
+            'user_id': request.user.id,
+            'leido': False,
+            'chat_id': chat.id,
+            'chat': {
+                'id': chat.id,
+                'sender_id': chat.sender.id,
+                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'receiver_id': chat.receiver.id,
+                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                'ultimo_mensaje_at': chat.ultimo_mensaje_at.isoformat(),
+            }
+        }
+
+        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', payload)
         
+        print('10')
         return Response(
             ChatSerializer(chat, context={'request': request}).data,
             status=status.HTTP_201_CREATED
@@ -171,6 +198,24 @@ class ChatViewSet(viewsets.ModelViewSet):
             sender=request.user,
             chat=chat
         )
+
+        received_user = chat.receiver if request.user.id == chat.sender_id else chat.sender
+
+        room_name = f"usuario_channel_{received_user.id}"
+
+        channel_layer = get_channel_layer()
+
+        payload = {
+            'type': 'chat_message',
+            'message': mensaje.texto,
+            'mensaje_id': mensaje.mensaje_id,  
+            'user_id': request.user.id,
+            'created_at': mensaje.created_at.isoformat(),
+            'chat_id': chat.id,
+            'leido': mensaje.leido
+        }
+
+        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', payload)
         
         if recurso:
             recurso.mensaje = mensaje
@@ -236,6 +281,32 @@ class ChatViewSet(viewsets.ModelViewSet):
         mensajes_actualizados = chat.mensajes.filter(
             leido=False
         ).exclude(sender=request.user).update(leido=True)
+
+        mensajes_no_leidos = chat.mensajes.filter(
+            leido=False
+        ).exclude(sender=request.user)
+
+        mensaje_ids = list(mensajes_no_leidos.values_list('mensaje_id', flat=True))
+
+        mensajes_actualizados = mensajes_no_leidos.update(leido=True)
+
+        received_user = chat.receiver if request.user.id == chat.sender_id else chat.sender
+        room_name = f"usuario_channel_{received_user.id}"
+
+        payload = {
+            'type': 'chat_read', 
+            'chat_id': chat.id,
+            'reader_id': request.user.id,
+            'mensaje_ids': mensaje_ids,
+        }
+
+        channel_layer = get_channel_layer()
+
+        async_to_sync(channel_layer.group_send)(
+            f'chat_{room_name}',
+            payload
+        )
+
         
         return Response({
             'message': f'{mensajes_actualizados} mensajes marcados como leídos'
