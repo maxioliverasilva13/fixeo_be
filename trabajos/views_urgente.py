@@ -26,7 +26,7 @@ from .serializers import (
     OfertaTrabajoSerializer,
     OfertaTrabajoCreateSerializer
 )
-
+from mensajeria.models import Recurso
 
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -143,6 +143,21 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             radio_busqueda_km=None,
             es_domicilio_profesional=False
         )
+
+        fotos = serializer.validated_data.get('fotos', [])
+
+        if fotos:
+            recursos = [
+                Recurso(
+                    url=foto,
+                    tipo='imagen',
+                    nombre='imagen_trabajo',
+                    trabajo=trabajo
+                )
+                for foto in fotos
+            ]
+
+            Recurso.objects.bulk_create(recursos)
         
         profesionales_cercanos = self._buscar_profesionales_cercanos(
             profesion_id, 
@@ -329,7 +344,9 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        ofertas = trabajo.ofertas.select_related('profesional').all()
+        ofertas = trabajo.ofertas.select_related(
+            'profesional'
+        ).order_by('-created_at')
         return Response({
             'count': ofertas.count(),
             'ofertas': OfertaTrabajoSerializer(ofertas, many=True).data
@@ -486,7 +503,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             'trabajo__usuario',
             'trabajo__localizacion',
             'trabajo__profesion_urgente'
-        )
+        ).order_by('-created_at')
 
         if status_filter:
             ofertas = ofertas.filter(status=status_filter)

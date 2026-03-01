@@ -1,7 +1,7 @@
 from django.db import models
 from usuario.models import Usuario
 from fixeo_project.models import BaseModel
-
+from trabajos.models import Trabajo
 
 class Chat(BaseModel):
     sender = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='chats_enviados')
@@ -41,7 +41,20 @@ class Recurso(BaseModel):
     tipo = models.CharField(max_length=50, blank=True)
     nombre = models.CharField(max_length=255, blank=True)
     mensaje = models.ForeignKey(Mensajes, on_delete=models.CASCADE, related_name='recursos', null=True, blank=True)
-    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='recursos')
+    chat = models.ForeignKey(
+        Chat,
+        on_delete=models.CASCADE,
+        related_name='recursos',
+        null=True,
+        blank=True
+    )
+    trabajo = models.ForeignKey(
+        Trabajo,
+        on_delete=models.CASCADE,
+        related_name='recursos',
+        null=True,
+        blank=True
+    )
 
     class Meta:
         db_table = 'recurso'

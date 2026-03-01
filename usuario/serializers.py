@@ -312,17 +312,27 @@ class UpdateUsuarioSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, attrs):
-        trabajo_domicilio = attrs.get('trabajo_domicilio', self.instance.trabajo_domicilio if self.instance else None)
-        trabajo_local = attrs.get('trabajo_local', self.instance.trabajo_local if self.instance else None)
-        
-        if trabajo_domicilio is not None and trabajo_local is not None:
-            if not trabajo_domicilio and not trabajo_local:
-                raise serializers.ValidationError(
-                    "Debe tener al menos un tipo de trabajo activo (domicilio o local)."
-                )
-        
-        return attrs
+        usuario = self.instance 
 
+        if not usuario or not usuario.is_owner_empresa:
+            return attrs
+
+        trabajo_domicilio = attrs.get(
+            'trabajo_domicilio',
+            usuario.trabajo_domicilio
+        )
+
+        trabajo_local = attrs.get(
+            'trabajo_local',
+            usuario.trabajo_local
+        )
+
+        if not trabajo_domicilio and not trabajo_local:
+            raise serializers.ValidationError(
+                "Debe tener al menos un tipo de trabajo activo (domicilio o local)."
+            )
+
+        return attrs
 
 class UsuarioInMapaSerializer(serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()

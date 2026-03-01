@@ -27,6 +27,11 @@ class TrabajoUrgenteCreateSerializer(serializers.Serializer):
     direccion = serializers.CharField(required=False, allow_blank=True)
     fecha = serializers.DateField(required=True)
     hora = serializers.TimeField(required=True)
+    fotos = serializers.ListField(
+        child=serializers.URLField(),
+        required=False,
+        allow_empty=True
+    )
 
     def validate_fecha(self, value):
         from datetime import date
@@ -52,28 +57,35 @@ class CalificacionDetailSerializer(serializers.ModelSerializer):
 
 class TrabajoDetailSerializer(serializers.ModelSerializer):
     usuario = UsuarioSortSerializer(read_only=True)
-    
     profesional = UsuarioSortSerializer(read_only=True)
-    
     servicios = TrabajoServicioDetailSerializer(source='trabajo_servicios', many=True, read_only=True)
     localizacion_detalle = LocalizacionSerializer(source='localizacion', read_only=True)
-
     calificaciones = CalificacionDetailSerializer(many=True, read_only=True)
-    
     disponibilidad_fecha_inicio = serializers.DateTimeField(source='disponibilidad.fecha_inicio', read_only=True)
     disponibilidad_fecha_fin = serializers.DateTimeField(source='disponibilidad.fecha_fin', read_only=True)
-    
+    chat_id = serializers.SerializerMethodField()
+
+    def get_chat_id(self, obj):
+        from mensajeria.models import Chat
+        from django.db.models import Q
+        chat = Chat.objects.filter(
+            Q(sender=obj.usuario, receiver=obj.profesional) |
+            Q(sender=obj.profesional, receiver=obj.usuario)
+        ).first()
+        return chat.id if chat else None
+
     class Meta:
         model = Trabajo
         fields = [
             'id', 'usuario', 'profesional',
-            'descripcion', 'esUrgente', 'status', 
+            'descripcion', 'esUrgente', 'status',
             'fecha_inicio', 'fecha_fin', 'precio_final',
             'servicios', 'calificaciones',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
-            'created_at', 'updated_at', 'localizacion_detalle'
+            'created_at', 'updated_at', 'localizacion_detalle',
+            'chat_id'
         ]
-    
+
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario = UsuarioSerializer(read_only=True)
     profesional = UsuarioSerializer(read_only=True)
@@ -103,7 +115,8 @@ class TrabajoListSerializer(serializers.ModelSerializer):
             'precio_final',
             'fecha_inicio',
             'created_at',
-            'localizacion_detalle'
+            'localizacion_detalle',
+            'esUrgente'
         ]
     
     def get_cantidad_servicios(self, obj):
@@ -179,13 +192,24 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
     ofertas = OfertaTrabajoSerializer(many=True, read_only=True)
     cantidad_ofertas = serializers.SerializerMethodField()
     calificaciones = CalificacionDetailSerializer(many=True, read_only=True)  
+    recursos = serializers.SerializerMethodField()
 
     class Meta:
         model = Trabajo
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'localizacion_detalle', 
                   'profesion_detalle', 'ofertas', 'fecha_inicio', 
-                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones']
+                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones', 'recursos']
+        
+    def get_recursos(self, obj):
+        return list(
+            obj.recursos.values(
+                'id',
+                'url',
+                'tipo',
+                'nombre'
+            )
+        )
 
     def get_cantidad_ofertas(self, obj):
         return obj.ofertas.count()
