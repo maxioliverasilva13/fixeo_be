@@ -15,6 +15,10 @@ app.conf.beat_schedule = {
         'task': 'fixeo_project.tasks.test_celery_beat',
         'schedule': 86.400,
     },
+    'finalizar-trabajos-vencidos-cada-hora': {
+        'task': 'trabajos.tasks.finalizar_trabajos_vencidos',
+        'schedule': 3600.0,
+    },
 }
 
 app.conf.broker_connection_retry_on_startup = True
@@ -27,3 +31,4 @@ def debug_task(self):
 def setup_periodic_tasks(sender, **kwargs):
     from fixeo_project import tasks
     from notificaciones import tasks as notif_tasks
+    from trabajos import tasks as trabajos_tasks
