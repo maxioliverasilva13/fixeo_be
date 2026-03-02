@@ -19,6 +19,7 @@ from rest_framework.decorators import action
 from django.db.models import Avg
 from django.utils.dateparse import parse_date
 from django.db.models import Q
+from .tasks import finalizar_trabajo
 
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -115,6 +116,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'tipo': 'trabajo_aprobado'
             }
         )
+
+        if trabajo.status == "aceptado":
+            finalizar_trabajo.apply_async(
+                args=[trabajo.id],
+                eta=trabajo.fecha_fin
+            )
         
         return Response({
             'message': 'Trabajo aprobado exitosamente',
@@ -336,6 +343,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             localizacion=localizacion,
             status=newStatus
         )
+
+        if trabajo.status == "aceptado":
+            finalizar_trabajo.apply_async(
+                args=[trabajo.id],
+                eta=trabajo.fecha_fin
+            )
 
         for servicio in servicios:
             TrabajoServicio.objects.create(

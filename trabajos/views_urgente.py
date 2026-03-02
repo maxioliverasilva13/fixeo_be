@@ -27,6 +27,7 @@ from .serializers import (
     OfertaTrabajoCreateSerializer
 )
 from mensajeria.models import Recurso
+from .tasks import finalizar_trabajo
 
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -436,6 +437,11 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     'tipo': 'oferta_rechazada'
                 }
             )
+
+        finalizar_trabajo.apply_async(
+            args=[trabajo.id],
+            eta=trabajo.fecha_fin
+        )
         
         return Response({
             'message': 'Oferta aceptada exitosamente',

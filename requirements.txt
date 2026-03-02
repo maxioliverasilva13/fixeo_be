@@ -18,5 +18,5 @@ channels==4.0.0
 channels-redis==4.1.0
 daphne==4.1.2
 watchfiles==0.21.0
-
+django-celery-beat==2.6.0
 
