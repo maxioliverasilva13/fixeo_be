@@ -27,7 +27,6 @@ from .serializers import (
     OfertaTrabajoCreateSerializer
 )
 from mensajeria.models import Recurso
-from .tasks import finalizar_trabajo
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
@@ -459,11 +458,6 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     'tipo': 'oferta_rechazada'
                 }
             )
-
-        finalizar_trabajo.apply_async(
-            args=[trabajo.id],
-            eta=trabajo.fecha_fin
-        )
         
         return Response({
             'message': 'Oferta aceptada exitosamente',
