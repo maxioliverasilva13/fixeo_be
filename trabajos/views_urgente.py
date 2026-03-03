@@ -28,6 +28,8 @@ from .serializers import (
 )
 from mensajeria.models import Recurso
 from .tasks import finalizar_trabajo
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -402,17 +404,37 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         trabajo.ofertas.exclude(id=oferta.id).update(status='rechazada')
         
-        chat_exists = Chat.objects.filter(
+        chat = Chat.objects.filter(
             Q(sender=trabajo.usuario, receiver=oferta.profesional) |
             Q(sender=oferta.profesional, receiver=trabajo.usuario)
-        ).exists()
-        
-        if not chat_exists:
-            Chat.objects.create(
+        ).first()
+
+        if not chat:
+            chat = Chat.objects.create(
                 sender=trabajo.usuario,
                 receiver=oferta.profesional,
                 trabajo=trabajo
             )
+
+            channel_layer = get_channel_layer()
+            room_name = f"usuario_channel_{chat.receiver.id}"
+
+            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+                'type': 'chat_message',
+                'message': '',
+                'user_id': chat.sender.id,
+                'leido': False,
+                'chat_id': chat.id,
+                'chat': {
+                    'id': chat.id,
+                    'sender_id': chat.sender.id,
+                    'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                    'receiver_id': chat.receiver.id,
+                    'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                    'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                    'ultimo_mensaje_at': chat.created_at.isoformat(),
+                }
+            })
         
         notificar_usuario.delay(
             usuario_id=oferta.profesional.id,

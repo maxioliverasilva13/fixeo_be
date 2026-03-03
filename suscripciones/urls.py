@@ -1,12 +1,23 @@
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from .views import PlanViewSet, SubscripcionViewSet
+from django.urls import path
+from .views import (
+    PlanListView,
+    PlanDetailView,
+    SubscripcionCreateView,
+    MiSubscripcionActivaView,
+    CancelarSubscripcionView,
+    AdminSubscripcionListView,
+)
 
-router = DefaultRouter()
-router.register(r'planes', PlanViewSet, basename='plan')
-router.register(r'', SubscripcionViewSet, basename='subscripcion')
-
-urlpatterns = [
-    path('', include(router.urls)),
+planes_urlpatterns = [
+    path('', PlanListView.as_view(), name='plan-list'),
+    path('<int:pk>/', PlanDetailView.as_view(), name='plan-detail'),
 ]
 
+suscripciones_urlpatterns = [
+    path('', SubscripcionCreateView.as_view(), name='subscripcion-create'),
+    path('mi-plan/', MiSubscripcionActivaView.as_view(), name='mi-subscripcion'),
+    path('<int:pk>/cancelar/', CancelarSubscripcionView.as_view(), name='subscripcion-cancelar'),
+    path('admin/', AdminSubscripcionListView.as_view(), name='admin-subscripcion-list'),
+]
+
+urlpatterns = planes_urlpatterns 

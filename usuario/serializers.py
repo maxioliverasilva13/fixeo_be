@@ -6,6 +6,7 @@ from django.db.models import Prefetch
 from empresas.serializers import EmpresaSerializer
 from localizacion.models import Localizacion
 from django.db import transaction
+from datetime import timedelta
 
 class UsuarioSortSerializer(serializers.ModelSerializer):
     rol_detalle = RolSerializer(source='rol', read_only=True)
@@ -49,75 +50,108 @@ class UsuarioSerializer(serializers.ModelSerializer):
     foto_map_url = serializers.SerializerMethodField()
     localizacion_principal = serializers.SerializerMethodField()
     device_tokens = serializers.SerializerMethodField()
+    subscripcion_activa = serializers.SerializerMethodField()   # <-- nuevo
 
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 'foto_map_url',
-                  'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
+                  'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa',
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
-                  'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured', 
-                  'auto_aprobacion_trabajos', 'device_tokens']
+                  'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
+                  'auto_aprobacion_trabajos', 'device_tokens',
+                  'subscripcion_activa']                        # <-- nuevo
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def get_subscripcion_activa(self, obj):
+        if not obj.is_owner_empresa:
+            return None
+
+        from django.utils import timezone
+        from suscripciones.models import Subscripcion
+        from suscripciones.serializers import UsuarioSubscripcionActivaSerializer
+        from trabajos.models import Trabajo
+
+        subscripcion = (
+            Subscripcion.objects
+            .filter(
+                user_id=obj,
+                cancelada=False,
+                expiracion__gt=timezone.now(),
+            )
+            .select_related('plan_id')
+            .order_by('-created_at')
+            .first()
+        )
+
+        if not subscripcion:
+            return None
+
+        inicio_periodo = subscripcion.expiracion - timedelta(days=30)
+
+        print('inicio', inicio_periodo)
+
+        trabajos_usados = Trabajo.objects.filter(
+            profesional=obj,
+            created_at__gte=inicio_periodo,
+            is_deleted=False,
+        ).exclude(status='cancelado').count()
+
+        cantidad_jobs = subscripcion.plan_id.cantidad_jobs
+        jobs_restantes = max(0, cantidad_jobs - trabajos_usados)
+
+        return UsuarioSubscripcionActivaSerializer(subscripcion, context={
+            'jobs_restantes': jobs_restantes
+        }).data
+    
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer
         usuario_profesiones = obj.usuario_profesiones.all()
         return [ProfesionSerializer(up.profesion).data for up in usuario_profesiones]
-    
+
     def get_foto_map_url(self, obj):
         if not obj.rounded_foto_url:
             return obj.foto_url
-
         return obj.rounded_foto_url
 
     def get_localizaciones(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
         usuario_localizaciones = obj.localizaciones.select_related('localizacion').all()
         return UsuarioLocalizacionSerializer(usuario_localizaciones, many=True).data
-    
+
     def get_servicios(self, obj):
         if obj.is_owner_empresa:
             from servicios.serializers import ServicioSerializer
             servicios = obj.servicios.select_related('profesion').all()
             return ServicioSerializer(servicios, many=True).data
         return []
-    
+
     def get_empresa(self, obj):
         if not obj.is_owner_empresa:
             return None
         from empresas.serializers import EmpresaSerializer
-
         empresa = obj.empresas_administradas.first()
         if not empresa:
             return None
-
         return EmpresaSerializer(empresa).data
-    
+
     def get_localizacion_principal(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
-
         loc_principal = (
             obj.localizaciones
             .select_related('localizacion')
             .filter(localizacion__isPrimary=True)
             .first()
         )
-
         if not loc_principal:
             return None
-
         return UsuarioLocalizacionSerializer(loc_principal).data
-    
+
     def get_device_tokens(self, obj):
-        """
-        Retorna un array de strings con los device tokens activos del usuario
-        """
         return list(
             obj.device_tokens
             .filter(enabled=True)
             .values_list('device_token', flat=True)
         )
-
 
 class UsuarioBasicInformationSerializer(serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()

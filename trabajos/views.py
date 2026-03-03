@@ -20,6 +20,8 @@ from django.db.models import Avg
 from django.utils.dateparse import parse_date
 from django.db.models import Q
 from .tasks import finalizar_trabajo
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -69,6 +71,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         } for c in calificaciones]
 
         return Response(data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='aprobar')
     def aprobar_trabajo(self, request, pk=None):
         """
@@ -77,35 +80,54 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         Crea un chat entre el cliente y el profesional.
         """
         trabajo = self.get_object()
-        
+
         if trabajo.profesional != request.user:
             return Response(
                 {'error': 'Solo el profesional asignado puede aprobar este trabajo'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         if trabajo.status != 'pendiente':
             return Response(
                 {'error': f'No se puede aprobar un trabajo en estado "{trabajo.status}"'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         trabajo.status = 'aceptado'
         trabajo.save()
-        
-        # Crear chat entre cliente y profesional si no existe
-        chat_exists = Chat.objects.filter(
+
+        chat = Chat.objects.filter(
             Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
             Q(sender=trabajo.profesional, receiver=trabajo.usuario)
-        ).exists()
-        
-        if not chat_exists:
-            Chat.objects.create(
+        ).first()
+
+        if not chat:
+            chat = Chat.objects.create(
                 sender=trabajo.profesional,
                 receiver=trabajo.usuario,
                 trabajo=trabajo
             )
-        
+
+            channel_layer = get_channel_layer()
+            room_name = f"usuario_channel_{chat.receiver.id}"
+
+            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+                'type': 'chat_message',
+                'message': '',
+                'user_id': chat.sender.id,
+                'leido': False,
+                'chat_id': chat.id,
+                'chat': {
+                    'id': chat.id,
+                    'sender_id': chat.sender.id,
+                    'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                    'receiver_id': chat.receiver.id,
+                    'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                    'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                    'ultimo_mensaje_at': chat.created_at.isoformat(),
+                }
+            })
+
         notificar_usuario.delay(
             usuario_id=trabajo.usuario.id,
             titulo="¡Trabajo aprobado!",
@@ -122,13 +144,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 args=[trabajo.id],
                 eta=trabajo.fecha_fin
             )
-        
+
         return Response({
             'message': 'Trabajo aprobado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
         }, status=status.HTTP_200_OK)
-    
-    
+        
     @action(detail=False, methods=['get'], url_path='contador-urgentes')
     def contador_urgentes(self, request):
         logged_user = request.user

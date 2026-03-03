@@ -6,6 +6,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenRefreshView
+from suscripciones.urls import planes_urlpatterns, suscripciones_urlpatterns
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -21,11 +22,13 @@ urlpatterns = [
     path('api/trabajos/', include('trabajos.urls')),
     path('api/mensajeria/', include('mensajeria.urls')),
     path('api/notificaciones/', include('notificaciones.urls')),
-    path('api/suscripciones/', include('suscripciones.urls')),
     path('api/recursos/', include('recursos.urls')),
     path('api/servicios/', include('servicios.urls')),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/planes/', include(planes_urlpatterns)),
+    path('api/suscripciones/', include(suscripciones_urlpatterns))
 ]
+
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

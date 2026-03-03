@@ -16,6 +16,7 @@ from .serializers import (
 )
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from django.db.models import OuterRef, Subquery
 
 class ChatPagination(PageNumberPagination):
     page_size = 20
@@ -331,3 +332,20 @@ class ChatViewSet(viewsets.ModelViewSet):
         return Response({
             'message': f'{mensajes_actualizados} mensajes marcados como leídos'
         })
+    
+    @action(detail=False, methods=['get'], url_path='no-leidos')
+    def mensajes_no_leidos(self, request):
+        ultimo_mensaje = Mensajes.objects.filter(
+            chat=OuterRef('pk')
+        ).order_by('-created_at').values('pk')[:1]
+
+        count = Chat.objects.filter(
+            Q(sender=request.user) | Q(receiver=request.user)
+        ).filter(
+            mensajes__mensaje_id=Subquery(ultimo_mensaje),
+            mensajes__leido=False,
+        ).exclude(
+            mensajes__sender=request.user
+        ).count()
+
+        return Response({'no_leidos': count})
