@@ -405,3 +405,62 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 'country': loc_destino.country,
             }
         })
+    
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-nacionales')
+    def top_nacionales(self, request):
+        limit = int(request.query_params.get('limit', 50))
+        sort_by = request.query_params.get('sort_by', 'mejor_valorados')
+
+        usuarios = Usuario.objects.filter(
+            is_owner_empresa=True,
+            is_active=True,
+        ).annotate(
+            avg_rating=Avg('calificaciones_recibidas__rating')
+        )
+
+        if sort_by == 'mejor_valorados':
+            usuarios = usuarios.order_by('-avg_rating')
+        elif sort_by == 'mejor_precio':
+            usuarios = usuarios.order_by('servicios__precio')
+
+        return Response(UsuarioInMapaSerializer(usuarios[:limit], many=True).data)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-zona')
+    def top_zona(self, request):
+        """Top usuarios dentro de bounds, con límite"""
+        north = Decimal(request.query_params['north'])
+        south = Decimal(request.query_params['south'])
+        east  = Decimal(request.query_params['east'])
+        west  = Decimal(request.query_params['west'])
+        limit = int(request.query_params.get('limit', 50))
+        sort_by = request.query_params.get('sort_by', 'mejor_valorados')
+
+        usuarios_loc = UsuarioLocalizacion.objects.filter(
+            localizacion__latitud__lte=north,
+            localizacion__latitud__gte=south,
+            localizacion__longitud__lte=east,
+            localizacion__longitud__gte=west,
+            localizacion__isPrimary=True,
+            usuario__is_owner_empresa=True,
+            usuario__is_active=True,
+        ).select_related('usuario', 'localizacion').distinct()
+
+        results = []
+        for ul in usuarios_loc:
+            avg_rating = ul.usuario.calificaciones_recibidas.aggregate(avg=Avg('rating'))['avg'] or 0
+            min_price = ul.usuario.servicios.order_by('precio').values_list('precio', flat=True).first()
+            results.append({
+                'usuario': ul.usuario,
+                'avg_rating': avg_rating,
+                'min_price': float(min_price) if min_price else None,
+            })
+
+        if sort_by == 'mejor_valorados':
+            results.sort(key=lambda x: x['avg_rating'], reverse=True)
+        elif sort_by == 'mejor_precio':
+            results.sort(key=lambda x: (x['min_price'] is None, x['min_price'] or 0))
+
+        return Response([
+            UsuarioInMapaSerializer(r['usuario']).data
+            for r in results[:limit]
+        ])
