@@ -50,7 +50,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
     foto_map_url = serializers.SerializerMethodField()
     localizacion_principal = serializers.SerializerMethodField()
     device_tokens = serializers.SerializerMethodField()
-    subscripcion_activa = serializers.SerializerMethodField()   # <-- nuevo
+    subscripcion_activa = serializers.SerializerMethodField()   
 
     class Meta:
         model = Usuario
@@ -59,7 +59,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
                   'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens',
-                  'subscripcion_activa']                        # <-- nuevo
+                  'subscripcion_activa', 'rating','cant_calif']                        
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_subscripcion_activa(self, obj):
