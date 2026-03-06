@@ -21,7 +21,7 @@ from django.utils.dateparse import parse_date
 from django.db.models import Q
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from mensajeria.models import Recurso
+from mensajeria.models import Recurso, Mensajes
 
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -127,6 +127,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     'ultimo_mensaje_at': chat.created_at.isoformat(),
                 }
             })
+
+            Mensajes.objects.create(
+                texto= chat.sender.defaultMessageReservation ,
+                sender=chat.sender,
+                chat=chat
+            )
 
         notificar_usuario.delay(
             usuario_id=trabajo.usuario.id,
@@ -373,6 +379,46 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'tipo': 'trabajo_creado'
             }
         )
+
+        if profesional.auto_aprobacion_trabajos == True:
+            chat = Chat.objects.filter(
+                Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
+                Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+            ).first()
+
+            if not chat:
+                chat = Chat.objects.create(
+                    sender=trabajo.profesional,
+                    receiver=trabajo.usuario,
+                    trabajo=trabajo
+                )
+
+                channel_layer = get_channel_layer()
+                room_name = f"usuario_channel_{chat.receiver.id}"
+
+                mensaaje = Mensajes.objects.create(
+                    texto= chat.sender.defaultMessageReservation ,
+                    sender=chat.sender,
+                    chat=chat
+                )
+
+                async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+                    'type': 'chat_message',
+                    'message': '',
+                    'user_id': chat.sender.id,
+                    'leido': False,
+                    'chat_id': chat.id,
+                    'chat': {
+                        'id': chat.id,
+                        'sender_id': chat.sender.id,
+                        'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                        'receiver_id': chat.receiver.id,
+                        'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                        'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                        'ultimo_mensaje_at': mensaaje.te,
+                    }
+                })
+
 
         return Response({
             'id': trabajo.id,

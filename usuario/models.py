@@ -22,6 +22,7 @@ class UsuarioManager(BaseUserManager):
 class Usuario(AbstractBaseUser, PermissionsMixin):
     correo = models.EmailField(unique=True)
     password = models.CharField(max_length=255)
+    defaultMessageReservation = models.CharField(max_length=1000, default='Gracias por reservar!. En breve nos pondremos en contacto contigo')
     apellido = models.CharField(max_length=100)
     telefono = models.CharField(max_length=20)
     nombre = models.CharField(max_length=100)
