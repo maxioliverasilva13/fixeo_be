@@ -5,18 +5,21 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from notificaciones.tasks import notificar_usuario as notificar_usuario_task
 from .models import DeviceToken, Notificaciones, Notas
-from .serializers import (
-    DeviceTokenCreateSerializer,
-    DeviceTokenSerializer,
-    NotificacionesSerializer,
-    NotasSerializer,
-)
+from .serializers import DeviceTokenCreateSerializer, DeviceTokenSerializer, NotificacionesSerializer, NotasSerializer
 
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+    def get_paginated_response(self, data):
+        return Response({
+            'count':    self.page.paginator.count,
+            'next':     self.get_next_link(),
+            'previous': self.get_previous_link(),
+            'results':  data,
+        })
 
 
 class DeviceTokenViewSet(viewsets.ModelViewSet):
@@ -77,25 +80,14 @@ class NotificacionesViewSet(viewsets.ModelViewSet):
     queryset = Notificaciones.objects.all()
     serializer_class = NotificacionesSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        usuario_id = self.request.query_params.get("usuario_id", None)
+        usuario_id = self.request.query_params.get('usuario_id', None)
         if usuario_id:
             queryset = queryset.filter(usuario_id=usuario_id)
-        return queryset.order_by("-created_at")
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        paginator = StandardResultsSetPagination()
-        page = paginator.paginate_queryset(queryset, request)
-        serializer = self.get_serializer(page, many=True)
-        return Response({
-            "count":    paginator.page.paginator.count,
-            "next":     paginator.get_next_link(),
-            "previous": paginator.get_previous_link(),
-            "results":  serializer.data,
-        })
+        return queryset.order_by('-created_at')
 
 
 class NotasViewSet(viewsets.ModelViewSet):
