@@ -22,34 +22,40 @@ class HorariosViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def bulk(self, request):
-        empresa = Empresa.objects.get(admin_id=request.user)
+        try:
+            print("xd1")
+            empresa = Empresa.objects.get(admin_id=request.user)
 
-        horarios_data = request.data
-        dias_recibidos = []
+            horarios_data = request.data
+            dias_recibidos = []
 
-        with transaction.atomic():
-            for item in horarios_data:
-                serializer = HorariosSerializer(data=item)
-                serializer.is_valid(raise_exception=True)
+            with transaction.atomic():
+                for item in horarios_data:
+                    serializer = HorariosSerializer(data=item)
+                    serializer.is_valid(raise_exception=True)
 
-                dia = serializer.validated_data['dia_semana']
-                dias_recibidos.append(dia)
+                    dia = serializer.validated_data['dia_semana']
+                    dias_recibidos.append(dia)
 
-                Horarios.objects.update_or_create(
-                    empresa=empresa,
-                    dia_semana=dia,
-                    defaults={
-                        "hora_inicio": serializer.validated_data["hora_inicio"],
-                        "hora_fin": serializer.validated_data["hora_fin"],
-                        "enabled": serializer.validated_data.get("enabled", True),
-                    }
-                )
+                    Horarios.objects.update_or_create(
+                        empresa=empresa,
+                        dia_semana=dia,
+                        defaults={
+                            "hora_inicio": serializer.validated_data["hora_inicio"],
+                            "hora_fin": serializer.validated_data["hora_fin"],
+                            "enabled": serializer.validated_data.get("enabled", True),
+                        }
+                    )
 
             Horarios.objects.filter(
                 empresa=empresa
             ).exclude(
                 dia_semana__in=dias_recibidos
             ).delete()
-
-
-        return Response({"ok": True})
+            return Response({"ok": True})
+        except Exception as e:
+            print(e)
+            return Response(
+                {'error': f'Error al obtener la empresa: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
