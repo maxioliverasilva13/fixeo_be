@@ -74,28 +74,27 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
 
 
 class NotificacionesViewSet(viewsets.ModelViewSet):
+    queryset = Notificaciones.objects.all()
     serializer_class = NotificacionesSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Notificaciones.objects.filter(
-            usuario=self.request.user
-        ).order_by('-created_at')
+        queryset = super().get_queryset()
+        usuario_id = self.request.query_params.get("usuario_id", None)
+        if usuario_id:
+            queryset = queryset.filter(usuario_id=usuario_id)
+        return queryset.order_by("-created_at")
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
-
-        # Paginación manual — sin pagination_class para que
-        # el wrapper custom { ok, message, data } funcione
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request)
         serializer = self.get_serializer(page, many=True)
-
         return Response({
-            'count':    paginator.page.paginator.count,
-            'next':     paginator.get_next_link(),
-            'previous': paginator.get_previous_link(),
-            'results':  serializer.data,
+            "count":    paginator.page.paginator.count,
+            "next":     paginator.get_next_link(),
+            "previous": paginator.get_previous_link(),
+            "results":  serializer.data,
         })
 
 
