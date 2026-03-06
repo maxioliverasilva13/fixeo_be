@@ -64,6 +64,7 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
     disponibilidad_fecha_inicio = serializers.DateTimeField(source='disponibilidad.fecha_inicio', read_only=True)
     disponibilidad_fecha_fin = serializers.DateTimeField(source='disponibilidad.fecha_fin', read_only=True)
     chat_id = serializers.SerializerMethodField()
+    fotos = serializers.SerializerMethodField()
 
     def get_chat_id(self, obj):
         from mensajeria.models import Chat
@@ -74,6 +75,9 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
         ).first()
         return chat.id if chat else None
 
+    def get_fotos(self, obj): 
+        return [r.url for r in obj.recursos.all()]
+
     class Meta:
         model = Trabajo
         fields = [
@@ -83,9 +87,8 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
             'servicios', 'calificaciones',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
             'created_at', 'updated_at', 'localizacion_detalle',
-            'chat_id'
+            'chat_id', 'fotos'  
         ]
-
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario = UsuarioSerializer(read_only=True)
     profesional = UsuarioSerializer(read_only=True)
@@ -137,6 +140,11 @@ class TrabajoCreateSerializer(serializers.Serializer):
     hora = serializers.TimeField(required=True)
     profesional_id = serializers.IntegerField(required=True)
     es_domicilio_profesional = serializers.BooleanField(required=True)
+    fotos = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True
+    )    
     
 def validate_servicios_ids(self, value):
     if not value:

@@ -50,16 +50,16 @@ class UsuarioSerializer(serializers.ModelSerializer):
     foto_map_url = serializers.SerializerMethodField()
     localizacion_principal = serializers.SerializerMethodField()
     device_tokens = serializers.SerializerMethodField()
-    subscripcion_activa = serializers.SerializerMethodField()   # <-- nuevo
+    subscripcion_activa = serializers.SerializerMethodField()   
 
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 'foto_map_url',
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa',
-                  'is_active', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
+                  'is_active', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens',
-                  'subscripcion_activa']                        # <-- nuevo
+                  'subscripcion_activa', 'rating','cant_calif']                        
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_subscripcion_activa(self, obj):
@@ -321,6 +321,7 @@ class UpdateUsuarioSerializer(serializers.ModelSerializer):
     """
     telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
     foto_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
+    defaultMessageReservation = serializers.CharField(required=False, allow_blank=True, max_length=1000)
     
     class Meta:
         model = Usuario
@@ -333,7 +334,8 @@ class UpdateUsuarioSerializer(serializers.ModelSerializer):
             'trabajo_domicilio', 
             'trabajo_local',
             'rango_mapa_km',
-            'auto_aprobacion_trabajos'
+            'auto_aprobacion_trabajos',
+            'defaultMessageReservation',
         ]
     
     def validate_rango_mapa_km(self, value):

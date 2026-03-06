@@ -198,6 +198,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         - trabajo_local
         - rango_mapa_km
         - auto_aprobacion_trabajos
+        - defaultMessageReservation
         """
         usuario = request.user
         serializer = UpdateUsuarioSerializer(

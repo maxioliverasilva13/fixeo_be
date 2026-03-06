@@ -22,6 +22,7 @@ class UsuarioManager(BaseUserManager):
 class Usuario(AbstractBaseUser, PermissionsMixin):
     correo = models.EmailField(unique=True)
     password = models.CharField(max_length=255)
+    defaultMessageReservation = models.CharField(max_length=1000, default='Gracias por reservar!. En breve nos pondremos en contacto contigo')
     apellido = models.CharField(max_length=100)
     telefono = models.CharField(max_length=20)
     nombre = models.CharField(max_length=100)
@@ -37,7 +38,8 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     updated_at = models.DateTimeField(auto_now=True)
     is_configured = models.BooleanField(default=False)
     rol = models.ForeignKey(Rol, on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
-    
+    rating = models.FloatField(default=0)
+    cant_calif = models.IntegerField(default=0)
 
     auto_aprobacion_trabajos = models.BooleanField(default=False)
 

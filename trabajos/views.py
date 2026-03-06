@@ -21,6 +21,7 @@ from django.utils.dateparse import parse_date
 from django.db.models import Q
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from mensajeria.models import Recurso, Mensajes
 
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -99,7 +100,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
             Q(sender=trabajo.profesional, receiver=trabajo.usuario)
         ).first()
-
+        
+        chat = chat
         if not chat:
             chat = Chat.objects.create(
                 sender=trabajo.profesional,
@@ -107,37 +109,31 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 trabajo=trabajo
             )
 
-            channel_layer = get_channel_layer()
-            room_name = f"usuario_channel_{chat.receiver.id}"
-
-            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
-                'type': 'chat_message',
-                'message': '',
-                'user_id': chat.sender.id,
-                'leido': False,
-                'chat_id': chat.id,
-                'chat': {
-                    'id': chat.id,
-                    'sender_id': chat.sender.id,
-                    'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
-                    'receiver_id': chat.receiver.id,
-                    'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
-                    'trabajo_id': chat.trabajo.id if chat.trabajo else None,
-                    'ultimo_mensaje_at': chat.created_at.isoformat(),
-                }
-            })
-
-        notificar_usuario.delay(
-            usuario_id=trabajo.usuario.id,
-            titulo="¡Trabajo aprobado!",
-            mensaje=f"{request.user.nombre} ha aprobado tu solicitud de trabajo",
-            data={
-                'deep_link': f'fixeo://trabajos/{trabajo.id}',
-                'entity_id': trabajo.id,
-                'tipo': 'trabajo_aprobado'
-            }
+        mensaje = Mensajes.objects.create(
+            texto=chat.sender.defaultMessageReservation,
+            sender=chat.sender,
+            chat=chat
         )
 
+        channel_layer = get_channel_layer()
+        room_name = f"usuario_channel_{chat.receiver.id}"
+
+        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+            'type': 'chat_message',
+            'message': mensaje.texto,
+            'user_id': chat.sender.id,
+            'leido': False,
+            'chat_id': chat.id,
+            'chat': {
+                'id': chat.id,
+                'sender_id': chat.sender.id,
+                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'receiver_id': chat.receiver.id,
+                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                'ultimo_mensaje_at': mensaje.created_at.isoformat(),
+            }
+        })
         return Response({
             'message': 'Trabajo aprobado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
@@ -287,8 +283,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         hora = serializer.validated_data['hora']
         profesional_id = serializer.validated_data['profesional_id']
         es_domicilio_profesional = serializer.validated_data['es_domicilio_profesional']
+        fotos_urls = serializer.validated_data.get('fotos', [])  
 
-        print(servicios_ids)
         try:
             profesional = Usuario.objects.get(id=profesional_id)
         except Usuario.DoesNotExist:
@@ -322,28 +318,20 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             userLocation = UsuarioLocalizacion.objects.filter(usuario=profesional)
             existsPrincipal = userLocation.filter(es_principal=True).exists()
             if existsPrincipal:
-                localizacion = userLocation.get(es_principal=True).localizacion  
+                localizacion = userLocation.get(es_principal=True).localizacion
             else:
-                if userLocation.first():
-                    localizacion = userLocation.first().localizacion
-                else:
-                    localizacion = None
+                localizacion = userLocation.first().localizacion if userLocation.first() else None
         else:
             userLocation = UsuarioLocalizacion.objects.filter(usuario=request.user)
             existsPrincipal = userLocation.filter(es_principal=True).exists()
             if existsPrincipal:
                 localizacion = userLocation.filter(es_principal=True).first().localizacion
             else:
-                if userLocation.first():
-                    localizacion = userLocation.first().localizacion
-                else:
-                    localizacion = None
+                localizacion = userLocation.first().localizacion if userLocation.first() else None
 
-        newStatus = 'pendiente'
-        if (profesional.auto_aprobacion_trabajos):
-            newStatus = 'aceptado'
-
+        newStatus = 'aceptado' if profesional.auto_aprobacion_trabajos else 'pendiente'
         precio_final = sum([s.precio for s in servicios])
+
         trabajo = Trabajo.objects.create(
             usuario=usuario,
             profesional=profesional,
@@ -364,7 +352,10 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 servicio=servicio,
                 precio=servicio.precio
             )
-            
+
+        for url in fotos_urls:
+            Recurso.objects.create(trabajo=trabajo, url=url)
+
         cleanFecha = fecha.strftime('%d/%m/%Y')
         cleanHora = hora.strftime('%H:%M')
         notificar_usuario.delay(
@@ -378,57 +369,116 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             }
         )
 
-        return Response({
-            'id': trabajo.id,
-            'descripcion': trabajo.descripcion,
-            'fecha_inicio': trabajo.fecha_inicio,
-            'fecha_fin': trabajo.fecha_fin,
-            'precio_final': trabajo.precio_final,
-            'profesional_id': profesional.id,
-            'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
-            'status': trabajo.status
-        }, status=status.HTTP_201_CREATED)
+        if profesional.auto_aprobacion_trabajos:
+            chat = Chat.objects.filter(
+                Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
+                Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+            ).first()
+
+            if not chat:
+                chat = Chat.objects.create(
+                    sender=trabajo.profesional,
+                    receiver=trabajo.usuario,
+                    trabajo=trabajo
+                )
+
+                mensaaje = Mensajes.objects.create(
+                    texto=chat.sender.defaultMessageReservation,
+                    sender=chat.sender,
+                    chat=chat
+                )
+
+                channel_layer = get_channel_layer()
+                room_name = f"usuario_channel_{chat.receiver.id}"
+
+                async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+                    'type': 'chat_message',
+                    'message': mensaaje.texto,
+                    'user_id': chat.sender.id,
+                    'leido': False,
+                    'chat_id': chat.id,
+                    'chat': {
+                        'id': chat.id,
+                        'sender_id': chat.sender.id,
+                        'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                        'receiver_id': chat.receiver.id,
+                        'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                        'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                        'ultimo_mensaje_at': mensaaje.created_at.isoformat(),
+                    }
+                })
+
+                return Response({
+                    'id': trabajo.id,
+                    'descripcion': trabajo.descripcion,
+                    'fecha_inicio': trabajo.fecha_inicio,
+                    'fecha_fin': trabajo.fecha_fin,
+                    'precio_final': trabajo.precio_final,
+                    'profesional_id': profesional.id,
+                    'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
+                    'fotos': [r.url for r in trabajo.recursos.all()],  
+                    'status': trabajo.status
+                }, status=status.HTTP_201_CREATED)
+
 
 class CalificacionViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def create(self, request):
-        """
-        Calificar un trabajo.
-        Recibe: trabajo_id, rating (1-5), comentario (opcional)
-        """
         usuario = request.user
         trabajo_id = request.data.get('trabajo_id')
         rating = request.data.get('rating')
         comentario = request.data.get('comentario', '')
 
         if not trabajo_id or not rating:
-            return Response({'error': 'Faltan parámetros obligatorios'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'Faltan parámetros obligatorios'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
-            trabajo = Trabajo.objects.get(id=trabajo_id)
+            trabajo = Trabajo.objects.select_related('profesional').get(id=trabajo_id)
         except Trabajo.DoesNotExist:
-            return Response({'error': 'Trabajo no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'error': 'Trabajo no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         if trabajo.usuario != usuario:
-            return Response({'error': 'No puedes calificar este trabajo'}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {'error': 'No puedes calificar este trabajo'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        profesional = trabajo.profesional
 
         calificacion, created = Calificacion.objects.update_or_create(
             trabajo=trabajo,
             user_cal_sender=usuario,
-            defaults={'rating': rating, 'comentario': comentario, 'user_cal_recibe': trabajo.profesional}
+            defaults={
+                'rating': rating,
+                'comentario': comentario,
+                'user_cal_recibe': profesional
+            }
         )
+
+        # actualizar rating del profesional
+        if created:
+            total_rating = profesional.rating * profesional.cant_calif
+            profesional.cant_calif += 1
+            profesional.rating = (total_rating + float(rating)) / profesional.cant_calif
+            profesional.save(update_fields=['rating', 'cant_calif'])
 
         return Response({
             'id': calificacion.id,
             'trabajo_id': trabajo.id,
             'rating': calificacion.rating,
             'comentario': calificacion.comentario,
-            'user_cal_recibe': calificacion.user_cal_recibe.id,
-            'user_cal_sender': calificacion.user_cal_sender.id
+            'user_cal_recibe': profesional.id,
+            'user_cal_sender': usuario.id
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
-
+    
     @action(detail=False, methods=['GET'], url_path='resumen/(?P<usuario_id>[^/.]+)')
     def resumen(self, request, usuario_id=None):
         """
