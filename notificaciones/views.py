@@ -65,13 +65,28 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
 class NotificacionesViewSet(viewsets.ModelViewSet):
     serializer_class = NotificacionesSerializer
     permission_classes = [IsAuthenticated]
-    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         return Notificaciones.objects.filter(
             usuario=self.request.user
         ).order_by('-created_at')
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request)
+
+        serializer = self.get_serializer(page, many=True)
+
+        data = {
+            'count': paginator.page.paginator.count,
+            'next': paginator.get_next_link(),
+            'previous': paginator.get_previous_link(),
+            'results': serializer.data,
+        }
+
+        return Response(data)
 
 class NotasViewSet(viewsets.ModelViewSet):
     queryset = Notas.objects.all()
