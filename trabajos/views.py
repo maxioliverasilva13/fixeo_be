@@ -100,7 +100,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
             Q(sender=trabajo.profesional, receiver=trabajo.usuario)
         ).first()
-
+        
+        chat = chat
         if not chat:
             chat = Chat.objects.create(
                 sender=trabajo.profesional,
@@ -108,43 +109,31 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 trabajo=trabajo
             )
 
-            channel_layer = get_channel_layer()
-            room_name = f"usuario_channel_{chat.receiver.id}"
-
-            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
-                'type': 'chat_message',
-                'message': '',
-                'user_id': chat.sender.id,
-                'leido': False,
-                'chat_id': chat.id,
-                'chat': {
-                    'id': chat.id,
-                    'sender_id': chat.sender.id,
-                    'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
-                    'receiver_id': chat.receiver.id,
-                    'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
-                    'trabajo_id': chat.trabajo.id if chat.trabajo else None,
-                    'ultimo_mensaje_at': chat.created_at.isoformat(),
-                }
-            })
-
-            Mensajes.objects.create(
-                texto= chat.sender.defaultMessageReservation ,
-                sender=chat.sender,
-                chat=chat
-            )
-
-        notificar_usuario.delay(
-            usuario_id=trabajo.usuario.id,
-            titulo="¡Trabajo aprobado!",
-            mensaje=f"{request.user.nombre} ha aprobado tu solicitud de trabajo",
-            data={
-                'deep_link': f'fixeo://trabajos/{trabajo.id}',
-                'entity_id': trabajo.id,
-                'tipo': 'trabajo_aprobado'
-            }
+        mensaje = Mensajes.objects.create(
+            texto=chat.sender.defaultMessageReservation,
+            sender=chat.sender,
+            chat=chat
         )
 
+        channel_layer = get_channel_layer()
+        room_name = f"usuario_channel_{chat.receiver.id}"
+
+        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+            'type': 'chat_message',
+            'message': mensaje.texto,
+            'user_id': chat.sender.id,
+            'leido': False,
+            'chat_id': chat.id,
+            'chat': {
+                'id': chat.id,
+                'sender_id': chat.sender.id,
+                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'receiver_id': chat.receiver.id,
+                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                'ultimo_mensaje_at': mensaje.created_at.isoformat(),
+            }
+        })
         return Response({
             'message': 'Trabajo aprobado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
@@ -380,7 +369,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             }
         )
 
-        if profesional.auto_aprobacion_trabajos == True:
+        if profesional.auto_aprobacion_trabajos:
             chat = Chat.objects.filter(
                 Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
                 Q(sender=trabajo.profesional, receiver=trabajo.usuario)
@@ -393,18 +382,18 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     trabajo=trabajo
                 )
 
-                channel_layer = get_channel_layer()
-                room_name = f"usuario_channel_{chat.receiver.id}"
-
                 mensaaje = Mensajes.objects.create(
-                    texto= chat.sender.defaultMessageReservation ,
+                    texto=chat.sender.defaultMessageReservation,
                     sender=chat.sender,
                     chat=chat
                 )
 
+                channel_layer = get_channel_layer()
+                room_name = f"usuario_channel_{chat.receiver.id}"
+
                 async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
                     'type': 'chat_message',
-                    'message': '',
+                    'message': mensaaje.texto,
                     'user_id': chat.sender.id,
                     'leido': False,
                     'chat_id': chat.id,
@@ -415,22 +404,21 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                         'receiver_id': chat.receiver.id,
                         'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
                         'trabajo_id': chat.trabajo.id if chat.trabajo else None,
-                        'ultimo_mensaje_at': mensaaje.te,
+                        'ultimo_mensaje_at': mensaaje.created_at.isoformat(),
                     }
                 })
 
-
-        return Response({
-            'id': trabajo.id,
-            'descripcion': trabajo.descripcion,
-            'fecha_inicio': trabajo.fecha_inicio,
-            'fecha_fin': trabajo.fecha_fin,
-            'precio_final': trabajo.precio_final,
-            'profesional_id': profesional.id,
-            'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
-            'fotos': [r.url for r in trabajo.recursos.all()],  
-            'status': trabajo.status
-        }, status=status.HTTP_201_CREATED)
+                return Response({
+                    'id': trabajo.id,
+                    'descripcion': trabajo.descripcion,
+                    'fecha_inicio': trabajo.fecha_inicio,
+                    'fecha_fin': trabajo.fecha_fin,
+                    'precio_final': trabajo.precio_final,
+                    'profesional_id': profesional.id,
+                    'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
+                    'fotos': [r.url for r in trabajo.recursos.all()],  
+                    'status': trabajo.status
+                }, status=status.HTTP_201_CREATED)
 
 
 class CalificacionViewSet(viewsets.ViewSet):
