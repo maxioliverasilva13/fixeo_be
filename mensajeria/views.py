@@ -233,7 +233,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             titulo=f"Nuevo mensaje de {userNameToReceive}",
             mensaje=mensaje.texto,
             data={
-                'deep_link': f'fixeo://chats/{chat.id}',
+                'deep_link': f'/chats/{chat.id}',
                 'entity_id': chat.id
             }
         )

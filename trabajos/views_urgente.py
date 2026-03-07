@@ -177,7 +177,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 titulo=f"Nuevo trabajo urgente de {profesion.nombre}",
                 mensaje=descripcion[:100],
                 data={
-                    'deep_link': f'fixeo://trabajos/urgente/{trabajo.id}',
+                    'deep_link': f'/trabajos/urgente/{trabajo.id}',
                     'entity_id': trabajo.id,
                     'tipo': 'nuevo_trabajo_urgente'
                 }
@@ -322,7 +322,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             titulo="Nueva oferta recibida",
             mensaje=f"{request.user.nombre} hizo una oferta de ${oferta.precio_ofertado}",
             data={
-                'deep_link': f'fixeo://trabajos/urgente/{trabajo.id}/ofertas',
+                'deep_link': f'/trabajos/urgente/{trabajo.id}/ofertas',
                 'entity_id': oferta.id,
                 'tipo': 'nueva_oferta'
             }
@@ -440,7 +440,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             titulo="¡Tu oferta fue aceptada!",
             mensaje=f"Tu oferta de ${oferta.precio_ofertado} fue aceptada",
             data={
-                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'deep_link': f'/trabajos/{trabajo.id}',
                 'entity_id': trabajo.id,
                 'tipo': 'oferta_aceptada'
             }
@@ -453,7 +453,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 titulo="Oferta no seleccionada",
                 mensaje="El cliente seleccionó otra oferta para este trabajo",
                 data={
-                    'deep_link': f'fixeo://trabajos/urgente/{trabajo.id}',
+                    'deep_link': f'/trabajos/urgente/{trabajo.id}',
                     'entity_id': trabajo.id,
                     'tipo': 'oferta_rechazada'
                 }

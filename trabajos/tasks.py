@@ -55,7 +55,7 @@ def finalizar_trabajos_vencidos():
             titulo=f"Califica a {profesional_nombre}",
             mensaje=f"Tu trabajo con {profesional_nombre} ha finalizado. ¡Califícalo ahora!",
             data={
-                'deep_link': f'fixeo://trabajos/{trabajo_id}/calificar?profesionalId={profesional_id}',
+                'deep_link': f'/historial?trabajoId={trabajo_id}&calificar=true',
                 'trabajo_id': str(trabajo_id),
                 'profesional_id': str(profesional_id),
                 'profesional_nombre': profesional_nombre,

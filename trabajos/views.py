@@ -259,7 +259,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             titulo="¡Trabajo rechazado!",
             mensaje=f"{request.user.nombre} ha rechazado tu solicitud de trabajo",
             data={
-                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'deep_link': f'/trabajos/{trabajo.id}',
                 'entity_id': trabajo.id,
                 'tipo': 'trabajo_rechazado'
             }
@@ -363,7 +363,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             titulo="¡Nueva solicitud de trabajo!",
             mensaje=f"{request.user.nombre} ha creado una solicitud de trabajo para el dia {cleanFecha} a las {cleanHora}",
             data={
-                'deep_link': f'fixeo://trabajos/{trabajo.id}',
+                'deep_link': f'/trabajos/{trabajo.id}',
                 'entity_id': trabajo.id,
                 'tipo': 'trabajo_creado'
             }
