@@ -397,29 +397,19 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     'user_id': chat.sender.id,
                     'leido': False,
                     'chat_id': chat.id,
-                    'chat': {
-                        'id': chat.id,
-                        'sender_id': chat.sender.id,
-                        'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
-                        'receiver_id': chat.receiver.id,
-                        'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
-                        'trabajo_id': chat.trabajo.id if chat.trabajo else None,
-                        'ultimo_mensaje_at': mensaaje.created_at.isoformat(),
-                    }
                 })
 
-                return Response({
-                    'id': trabajo.id,
-                    'descripcion': trabajo.descripcion,
-                    'fecha_inicio': trabajo.fecha_inicio,
-                    'fecha_fin': trabajo.fecha_fin,
-                    'precio_final': trabajo.precio_final,
-                    'profesional_id': profesional.id,
-                    'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
-                    'fotos': [r.url for r in trabajo.recursos.all()],  
-                    'status': trabajo.status
-                }, status=status.HTTP_201_CREATED)
-
+        return Response({
+            'id': trabajo.id,
+            'descripcion': trabajo.descripcion,
+            'fecha_inicio': trabajo.fecha_inicio,
+            'fecha_fin': trabajo.fecha_fin,
+            'precio_final': trabajo.precio_final,
+            'profesional_id': profesional.id,
+            'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
+            'fotos': [r.url for r in trabajo.recursos.all()],
+            'status': trabajo.status
+        }, status=status.HTTP_201_CREATED)
 
 class CalificacionViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
