@@ -14,7 +14,7 @@ from usuario.serializers import (
     UsuarioSerializer, UsuarioCreateSerializer,
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
     UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer,
-    UpdateUsuarioSerializer, ValidateEmailExistSerializer
+    UpdateUsuarioSerializer, ValidateEmailExistSerializer, SocialLoginSerializer
 )
 from localizacion.models import Localizacion
 from empresas.utils import crear_empresa
@@ -25,6 +25,8 @@ from django.db.models import Q
 from django.db.models import Avg
 from decimal import Decimal
 import math
+import firebase_admin
+from firebase_admin import credentials,auth as firebase_auth
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -465,3 +467,41 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             UsuarioInMapaSerializer(r['usuario']).data
             for r in results[:limit]
         ])
+    
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='social-login')
+    def social_login(self, request):
+        serializer = SocialLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        firebase_token = serializer.validated_data['firebase_token']
+        email          = serializer.validated_data['email']
+        nombre         = serializer.validated_data.get('nombre', '')
+        foto_url       = serializer.validated_data.get('foto_url', '')
+
+        try:
+            firebase_auth.verify_id_token(firebase_token)
+        except Exception:
+            return Response(
+                {'error': 'Token de Firebase inválido'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        usuario = Usuario.objects.filter(correo=email).first()
+
+        if usuario:
+            refresh = RefreshToken.for_user(usuario)
+            return Response({
+                'ok': True,
+                'data': {
+                    'user': UsuarioSerializer(usuario).data,
+                    'tokens': {
+                        'refresh': str(refresh),
+                        'access': str(refresh.access_token),
+                    }
+                }
+            })
+        else:
+            return Response(
+                {'error': 'Usuario no registrado', 'isNewUser': True},
+                status=status.HTTP_404_NOT_FOUND
+            )
