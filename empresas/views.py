@@ -7,7 +7,9 @@ from .models import Empresa
 from .serializers import EmpresaSerializer
 from .utils import validar_nombre_empresa_unico
 from rest_framework.decorators import action
-
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from .models import Producto
+from .serializers import ProductoSerializer
 
 class EmpresaViewSet(viewsets.ModelViewSet):
     queryset = Empresa.objects.all()
@@ -80,3 +82,60 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 'country': loc_empresa.country
             }
         })
+    
+class ProductoViewSet(viewsets.ModelViewSet):
+    queryset = Producto.objects.all()
+    serializer_class = ProductoSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        empresa_id = self.request.query_params.get('empresa_id', None)
+        disponible = self.request.query_params.get('disponible', None)
+
+        if empresa_id:
+            queryset = queryset.filter(empresa_id=empresa_id)
+        if disponible is not None:
+            queryset = queryset.filter(disponible=disponible.lower() == 'true')
+
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        empresa_id = request.data.get('empresa')
+        if not empresa_id:
+            return Response(
+                {'error': 'El campo empresa es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        from .models import Empresa
+        try:
+            empresa = Empresa.objects.get(id=empresa_id)
+        except Empresa.DoesNotExist:
+            return Response({'error': 'Empresa no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if empresa.admin_id != request.user:
+            return Response({'error': 'No tenés permisos para agregar productos a esta empresa'}, status=status.HTTP_403_FORBIDDEN)
+
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.empresa.admin_id != request.user:
+            return Response({'error': 'No tenés permisos para modificar este producto'}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.empresa.admin_id != request.user:
+            return Response({'error': 'No tenés permisos para eliminar este producto'}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['patch'], url_path='toggle-disponible')
+    def toggle_disponible(self, request, pk=None):
+        producto = self.get_object()
+        if producto.empresa.admin_id != request.user:
+            return Response({'error': 'No tenés permisos'}, status=status.HTTP_403_FORBIDDEN)
+        producto.disponible = not producto.disponible
+        producto.save()
+        return Response({'id': producto.id, 'disponible': producto.disponible})

@@ -25,10 +25,13 @@ class UsuarioSortSerializer(serializers.ModelSerializer):
     def get_empresa(self, obj):
         if not obj.is_owner_empresa:
             return None
-
+        from empresas.serializers import EmpresaSerializer
         empresa = obj.empresas_administradas.first()
         if not empresa:
             return None
+        data = EmpresaSerializer(empresa).data
+        data['company_type'] = empresa.company_type  # 👈
+        return data
 
         return EmpresaSerializer(empresa).data
     def get_localizacion_principal(self, obj):
@@ -271,10 +274,10 @@ class RegistroSerializer(serializers.Serializer):
     apellido = serializers.CharField(required=True, max_length=100)
     email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
-    es_empresa = serializers.BooleanField(required=False)
-    trabajo_domicilio = serializers.BooleanField(required=False)
+    es_empresa = serializers.BooleanField(required=False, default=False)
+    trabajo_domicilio = serializers.BooleanField(required=False, default=False)
     telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
-    trabajo_local = serializers.BooleanField(required=False)
+    trabajo_local = serializers.BooleanField(required=False, default=False)
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     direction_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
@@ -283,23 +286,34 @@ class RegistroSerializer(serializers.Serializer):
         required=False,
         allow_empty=True
     )
-    
+    company_type = serializers.ChoiceField(
+        choices=['services', 'products'],
+        required=False,
+        allow_null=True,
+        default=None
+    )
+
     def validate_email(self, value):
         if Usuario.objects.filter(correo=value).exists():
             raise serializers.ValidationError("Ya existe un usuario con este correo electrónico.")
         return value
-    
+
     def validate(self, attrs):
         if attrs.get('latitude') and not attrs.get('longitude'):
             raise serializers.ValidationError({"longitude": "La longitud es requerida cuando se proporciona la latitud."})
         if attrs.get('longitude') and not attrs.get('latitude'):
             raise serializers.ValidationError({"latitude": "La latitud es requerida cuando se proporciona la longitud."})
-        
-        if not attrs.get('trabajo_domicilio') and not attrs.get('trabajo_local') and attrs.get('es_empresa'):
-            raise serializers.ValidationError("Debe seleccionar al menos un tipo de trabajo (domicilio o local).")
-        
-        return attrs
 
+        es_empresa = attrs.get('es_empresa', False)
+        company_type = attrs.get('company_type')
+        es_empresa_productos = es_empresa and company_type == 'products'
+
+        if es_empresa and not es_empresa_productos:
+            if not attrs.get('trabajo_domicilio') and not attrs.get('trabajo_local'):
+                raise serializers.ValidationError("Debe seleccionar al menos un tipo de trabajo (domicilio o local).")
+
+        return attrs
+    
 class FilterUsersMapaSerializer(serializers.Serializer):
     north      = serializers.DecimalField(max_digits=20, decimal_places=15)
     south      = serializers.DecimalField(max_digits=20, decimal_places=15)

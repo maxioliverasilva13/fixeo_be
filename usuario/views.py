@@ -60,26 +60,29 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def registro(self, request):
         serializer = RegistroSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         try:
             with transaction.atomic():
-                if serializer.validated_data['es_empresa']:
+                es_empresa = serializer.validated_data.get('es_empresa', False)
+                company_type = serializer.validated_data.get('company_type', None)
+
+                if es_empresa:
                     if not serializer.validated_data.get('latitude') or not serializer.validated_data.get('longitude'):
                         raise ValueError('Las coordenadas son requeridas para crear una empresa')
-                
+
                 usuario = Usuario.objects.create_user(
                     correo=serializer.validated_data['email'],
                     password=serializer.validated_data['password'],
                     nombre=serializer.validated_data['nombre'],
                     apellido=serializer.validated_data['apellido'],
                     foto_url=serializer.validated_data.get('foto_url', ''),
-                    trabajo_domicilio=serializer.validated_data['trabajo_domicilio'],
-                    trabajo_local=serializer.validated_data['trabajo_local'],
-                    telefono=serializer.validated_data.get('telefono', ''),
-                    is_owner_empresa=serializer.validated_data['es_empresa'],
                     rounded_foto_url=serializer.validated_data.get('rounded_foto_url', ''),
+                    trabajo_domicilio=serializer.validated_data.get('trabajo_domicilio', False),
+                    trabajo_local=serializer.validated_data.get('trabajo_local', False),
+                    telefono=serializer.validated_data.get('telefono', ''),
+                    is_owner_empresa=es_empresa,
                 )
-                
+
                 if serializer.validated_data.get('latitude') and serializer.validated_data.get('longitude'):
                     localizacion = Localizacion.objects.create(
                         ubicacion=serializer.validated_data.get('direction_name', ''),
@@ -92,22 +95,25 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         state='',
                         isPrimary=True
                     )
-                    
                     UsuarioLocalizacion.objects.create(
                         usuario=usuario,
                         localizacion=localizacion
                     )
-                
-                profesion_ids = serializer.validated_data.get('profesion_ids', [])
-                for profesion_id in profesion_ids:
-                    profesion = obtener_profesion_por_id(profesion_id)
-                    if profesion:
-                        UsuarioProfesion.objects.create(
-                            usuario=usuario,
-                            profesion=profesion
-                        )
-                
-                if serializer.validated_data['es_empresa']:
+
+                # Profesiones solo si NO es empresa de productos
+                es_empresa_productos = es_empresa and company_type == 'products'
+
+                if not es_empresa_productos:
+                    profesion_ids = serializer.validated_data.get('profesion_ids', [])
+                    for profesion_id in profesion_ids:
+                        profesion = obtener_profesion_por_id(profesion_id)
+                        if profesion:
+                            UsuarioProfesion.objects.create(
+                                usuario=usuario,
+                                profesion=profesion
+                            )
+
+                if es_empresa:
                     localizacion_empresa = UsuarioLocalizacion.objects.filter(usuario=usuario).first()
                     crear_empresa(
                         nombre=f"{usuario.nombre} {usuario.apellido}",
@@ -117,12 +123,13 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         admin_id=usuario,
                         descripcion='',
                         unipersonal=True,
-                        localizacion=localizacion_empresa.localizacion if localizacion_empresa else None
+                        localizacion=localizacion_empresa.localizacion if localizacion_empresa else None,
+                        company_type=company_type,
                     )
-                
+
                 refresh = RefreshToken.for_user(usuario)
                 user_data = UsuarioSerializer(usuario).data
-                
+
                 return Response({
                     'user': user_data,
                     'tokens': {
@@ -130,18 +137,12 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         'access': str(refresh.access_token),
                     }
                 }, status=status.HTTP_201_CREATED)
-        except ValueError as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except Exception as e:
-            return Response(
-                {'error': f'Error al crear el usuario: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
-    
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': f'Error al crear el usuario: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         serializer = LoginSerializer(data=request.data)
