@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
-from usuario.models import Usuario
+from usuario.models import Usuario, PasswordResetToken
 from usuario.utils import obtener_localizacion_usuario
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
@@ -14,7 +14,8 @@ from usuario.serializers import (
     UsuarioSerializer, UsuarioCreateSerializer,
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
     UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer,
-    UpdateUsuarioSerializer, ValidateEmailExistSerializer, SocialLoginSerializer
+    UpdateUsuarioSerializer, ValidateEmailExistSerializer, SocialLoginSerializer,
+    RequestPasswordResetSerializer, ConfirmPasswordResetSerializer
 )
 from localizacion.models import Localizacion
 from empresas.utils import crear_empresa
@@ -26,7 +27,9 @@ from django.db.models import Avg
 from decimal import Decimal
 import math
 import firebase_admin
-from firebase_admin import credentials,auth as firebase_auth
+from firebase_admin import credentials, auth as firebase_auth
+import resend
+from django.conf import settings
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -38,7 +41,10 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         return UsuarioSerializer
 
     def get_permissions(self):
-        if self.action in ['create', 'login', 'registro', 'validate_email']:
+        if self.action in [
+            'create', 'login', 'registro', 'validate_email', 'social_login',
+            'request_reset_password', 'confirm_reset_password',  # ← agregá estos
+            ]:
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -234,7 +240,89 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         user.save()
         
         return Response({'message': 'Contraseña cambiada exitosamente'})
-    
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='request-reset-password')
+    def request_reset_password(self, request):
+        serializer = RequestPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email']
+        usuario = Usuario.objects.filter(correo=email).first()
+
+        if usuario:
+            PasswordResetToken.objects.filter(usuario=usuario, used=False).update(used=True)
+
+            reset_token = PasswordResetToken.objects.create(usuario=usuario)
+            reset_url = f"{settings.FRONTEND_URL}/resetPassword?token={reset_token.token}"
+
+            resend.api_key = settings.RESEND_API_KEY
+
+            resend.Emails.send({
+                # "from": "noreply@alavuelta.com",
+                "from": "onboarding@resend.dev",
+                "to":      ['alavueltaapp@gmail.com'],
+                # "to":      [email],
+                "subject": "Restablecer tu contraseña",
+                "html": f"""
+                <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#fff;border-radius:16px;">
+                <div style="text-align:center;margin-bottom:32px;">
+                    <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#8972FD,#AFA0FF);
+                                margin:0 auto;line-height:64px;text-align:center;">
+                        <span style="font-size:28px;">🔐</span>
+                    </div>
+                </div>
+
+                <h1 style="font-size:22px;font-weight:700;color:#111;margin:0 0 8px;">
+                    Recuperar contraseña
+                </h1>
+                <p style="font-size:14px;color:#6B7280;margin:0 0 24px;line-height:1.6;">
+                    Recibimos una solicitud para restablecer la contraseña de tu cuenta.
+                    Si no fuiste vos, podés ignorar este correo.
+                </p>
+
+                <a href="{reset_url}"
+                    style="display:block;width:100%;padding:16px;background:linear-gradient(135deg,#8972FD,#AFA0FF);
+                            color:#fff;font-size:15px;font-weight:700;text-align:center;
+                            border-radius:12px;text-decoration:none;box-sizing:border-box;
+                            box-shadow:0 4px 20px rgba(137,114,253,0.4);">
+                    Restablecer contraseña
+                </a>
+
+                <p style="font-size:12px;color:#9CA3AF;margin:24px 0 0;text-align:center;">
+                    Este enlace expira en <strong>1 hora</strong>.
+                </p>
+                </div>
+                """,
+            })
+
+        return Response({'message': 'Si el correo existe, recibirás un enlace.'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='confirm-reset-password')
+    def confirm_reset_password(self, request):
+        serializer = ConfirmPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        token_value  = serializer.validated_data['token']
+        new_password = serializer.validated_data['new_password']
+
+        try:
+            reset_token = PasswordResetToken.objects.select_related('usuario').get(token=token_value)
+        except PasswordResetToken.DoesNotExist:
+            return Response({'error': 'Token inválido o expirado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not reset_token.is_valid():
+            return Response({'error': 'El enlace expiró. Solicitá uno nuevo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        usuario = reset_token.usuario
+        usuario.set_password(new_password)
+        usuario.save()
+
+        reset_token.used = True
+        reset_token.save()
+
+        return Response({'message': 'Contraseña actualizada exitosamente.'}, status=status.HTTP_200_OK)
+
+
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def mis_profesiones(self, request):
         """
@@ -491,13 +579,10 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         if usuario:
             refresh = RefreshToken.for_user(usuario)
             return Response({
-                'ok': True,
-                'data': {
-                    'user': UsuarioSerializer(usuario).data,
-                    'tokens': {
-                        'refresh': str(refresh),
-                        'access': str(refresh.access_token),
-                    }
+                'user': UsuarioSerializer(usuario).data,
+                'tokens': {
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
                 }
             })
         else:

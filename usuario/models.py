@@ -1,7 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from rol.models import Rol
-
+import uuid
+from django.utils import timezone
 
 class UsuarioManager(BaseUserManager):
     def create_user(self, correo, password=None, **extra_fields):
@@ -55,3 +56,19 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.nombre} {self.apellido} ({self.correo})"
+    
+class PasswordResetToken(models.Model):
+    usuario   = models.ForeignKey('usuario.Usuario', on_delete=models.CASCADE, related_name='reset_tokens')
+    token     = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    used      = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def is_valid(self):
+        """Token válido por 1 hora y no utilizado."""
+        return not self.used and (timezone.now() - self.created_at).seconds < 3600
+
+    def __str__(self):
+        return f"Reset token for {self.usuario.correo}"
