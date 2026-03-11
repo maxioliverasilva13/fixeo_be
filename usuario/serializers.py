@@ -399,5 +399,15 @@ class UsuarioInMapaSerializer(serializers.ModelSerializer):
         return None
 
     
+class SocialLoginSerializer(serializers.Serializer):
+    firebase_token = serializers.CharField(required=True)
+    email          = serializers.EmailField(required=True)
+    nombre         = serializers.CharField(required=False, allow_blank=True, default='')
+    foto_url       = serializers.URLField(required=False, allow_blank=True, default='')
 
-    
+class RequestPasswordResetSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class ConfirmPasswordResetSerializer(serializers.Serializer):
+    token        = serializers.UUIDField()
+    new_password = serializers.CharField(min_length=8)

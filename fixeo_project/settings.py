@@ -1,5 +1,8 @@
 from pathlib import Path
 from decouple import config
+import firebase_admin
+from firebase_admin import credentials
+import json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -222,4 +225,12 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
 FIREBASE_CREDENTIALS = config('FIREBASE_CREDENTIALS', default=None)
+
+RESEND_API_KEY = config('RESEND_API_KEY')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8081')
+
+if FIREBASE_CREDENTIALS and not firebase_admin._apps:
+    cred_dict = json.loads(FIREBASE_CREDENTIALS)
+    cred = credentials.Certificate(cred_dict)
+    firebase_admin.initialize_app(cred)
 
