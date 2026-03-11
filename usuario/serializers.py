@@ -295,9 +295,6 @@ class RegistroSerializer(serializers.Serializer):
         if attrs.get('longitude') and not attrs.get('latitude'):
             raise serializers.ValidationError({"latitude": "La latitud es requerida cuando se proporciona la longitud."})
         
-        if not attrs.get('trabajo_domicilio') and not attrs.get('trabajo_local') and attrs.get('es_empresa'):
-            raise serializers.ValidationError("Debe seleccionar al menos un tipo de trabajo (domicilio o local).")
-        
         return attrs
 
 class FilterUsersMapaSerializer(serializers.Serializer):
