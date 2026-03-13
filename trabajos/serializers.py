@@ -27,10 +27,22 @@ class TrabajoUrgenteCreateSerializer(serializers.Serializer):
     direccion = serializers.CharField(required=False, allow_blank=True)
     fecha = serializers.DateField(required=True)
     hora = serializers.TimeField(required=True)
+
     fotos = serializers.ListField(
         child=serializers.URLField(),
         required=False,
         allow_empty=True
+    )
+
+    metodo_pago = serializers.ChoiceField(
+        choices=[
+            'efectivo',
+            'tarjeta',
+            'transferencia',
+            'app'
+        ],
+        required=False,
+        default='efectivo'
     )
 
     def validate_fecha(self, value):

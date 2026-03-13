@@ -15,6 +15,14 @@ class Trabajo(BaseModel):
         ('finalizado', 'Finalizado'),
         ('cancelado', 'Cancelado'), 
     ]
+
+    PAYMENT_METHOD_CHOICES = [
+        ('efectivo', 'Efectivo'),
+        ('tarjeta', 'Tarjeta'),
+        ('transferencia', 'Transferencia'),
+        ('app', 'Pago en app'),
+    ]
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendiente')
     esUrgente = models.BooleanField(default=False)
     fecha_inicio = models.DateTimeField(null=True, blank=True)
@@ -30,7 +38,12 @@ class Trabajo(BaseModel):
     es_domicilio_profesional = models.BooleanField(default=False)
     profesion_urgente = models.ForeignKey(Profesion, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos_urgentes')
     radio_busqueda_km = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='Radio de búsqueda para trabajos urgentes')
-    
+    metodo_pago = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        null=True,
+        blank=True
+    )
     class Meta:
         db_table = 'trabajo'
         verbose_name = 'Trabajo'

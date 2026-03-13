@@ -284,6 +284,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         profesional_id = serializer.validated_data['profesional_id']
         es_domicilio_profesional = serializer.validated_data['es_domicilio_profesional']
         fotos_urls = serializer.validated_data.get('fotos', [])  
+        metodo_pago = serializer.validated_data.get('metodo_pago', 'efectivo')
 
         try:
             profesional = Usuario.objects.get(id=profesional_id)
@@ -343,7 +344,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             es_domicilio_profesional=es_domicilio_profesional,
             precio_final=precio_final,
             localizacion=localizacion,
-            status=newStatus
+            status=newStatus,
+            metodo_pago=metodo_pago
         )
 
         for servicio in servicios:
