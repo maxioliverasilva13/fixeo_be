@@ -3,8 +3,8 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from usuario.utils import obtener_localizacion_usuario
-from .models import Empresa
-from .serializers import EmpresaSerializer
+from .models import Empresa, CategoriaProducto, Producto
+from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
 from .utils import validar_nombre_empresa_unico
 from rest_framework.decorators import action
 
@@ -80,3 +80,90 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 'country': loc_empresa.country
             }
         })
+
+
+class CategoriaProductoViewSet(viewsets.ModelViewSet):
+    queryset = CategoriaProducto.objects.all()
+    serializer_class = CategoriaProductoSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        empresa_id = self.request.query_params.get('empresa_id', None)
+        
+        if empresa_id:
+            queryset = queryset.filter(empresa_id=empresa_id)
+        else:
+            empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
+            queryset = queryset.filter(empresa__in=empresas_usuario)
+        
+        return queryset
+
+    def perform_create(self, serializer):
+        empresa_id = self.request.data.get('empresa')
+        empresa = Empresa.objects.filter(id=empresa_id, admin_id=self.request.user).first()
+        
+        if not empresa:
+            raise serializers.ValidationError({'error': 'No tienes permisos para crear categorías en esta empresa'})
+        
+        serializer.save()
+
+    def perform_update(self, serializer):
+        empresa = serializer.instance.empresa
+        
+        if empresa.admin_id != self.request.user:
+            raise serializers.ValidationError({'error': 'No tienes permisos para modificar esta categoría'})
+        
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.empresa.admin_id != self.request.user:
+            raise serializers.ValidationError({'error': 'No tienes permisos para eliminar esta categoría'})
+        
+        instance.delete()
+
+
+class ProductoViewSet(viewsets.ModelViewSet):
+    queryset = Producto.objects.all()
+    serializer_class = ProductoSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        empresa_id = self.request.query_params.get('empresa_id', None)
+        categoria_id = self.request.query_params.get('categoria_id', None)
+        
+        if empresa_id:
+            queryset = queryset.filter(empresa_id=empresa_id)
+        
+        if categoria_id:
+            queryset = queryset.filter(categoria_id=categoria_id)
+        
+        if not empresa_id and not categoria_id:
+            empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
+            queryset = queryset.filter(empresa__in=empresas_usuario)
+        
+        return queryset.select_related('empresa', 'categoria')
+
+    def perform_create(self, serializer):
+        empresa_id = self.request.data.get('empresa')
+        empresa = Empresa.objects.filter(id=empresa_id, admin_id=self.request.user).first()
+        
+        if not empresa:
+            raise serializers.ValidationError({'error': 'No tienes permisos para crear productos en esta empresa'})
+        
+        serializer.save()
+
+    def perform_update(self, serializer):
+        empresa = serializer.instance.empresa
+        
+        if empresa.admin_id != self.request.user:
+            raise serializers.ValidationError({'error': 'No tienes permisos para modificar este producto'})
+        
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.empresa.admin_id != self.request.user:
+            raise serializers.ValidationError({'error': 'No tienes permisos para eliminar este producto'})
+        
+        instance.delete()
