@@ -12,6 +12,7 @@ class Servicio(BaseModel):
     divisa = models.CharField(max_length=10, default='ARS')
     tiempo = models.IntegerField(help_text='Tiempo estimado en minutos')
     notas = models.TextField(blank=True, default='')
+    foto = models.URLField(max_length=500, blank=True, default='')
 
     class Meta:
         db_table = 'usuario_servicios'

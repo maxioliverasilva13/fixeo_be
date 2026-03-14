@@ -7,6 +7,7 @@ from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
 from .utils import validar_nombre_empresa_unico
 from rest_framework.decorators import action
+from django.db.models import Q
 
 
 class EmpresaViewSet(viewsets.ModelViewSet):
@@ -132,6 +133,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         empresa_id = self.request.query_params.get('empresa_id', None)
         categoria_id = self.request.query_params.get('categoria_id', None)
+        search = self.request.query_params.get('search', None)
         
         if empresa_id:
             queryset = queryset.filter(empresa_id=empresa_id)
@@ -142,6 +144,20 @@ class ProductoViewSet(viewsets.ModelViewSet):
         if not empresa_id and not categoria_id:
             empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
             queryset = queryset.filter(empresa__in=empresas_usuario)
+        
+        # Filtro de búsqueda por palabras
+        if search:
+            palabras = search.strip().split()
+            q_filter = Q()
+            
+            for palabra in palabras:
+                if palabra:
+                    q_filter &= (
+                        Q(nombre__icontains=palabra) | 
+                        Q(descripcion__icontains=palabra)
+                    )
+            
+            queryset = queryset.filter(q_filter)
         
         return queryset.select_related('empresa', 'categoria')
 
@@ -167,3 +183,4 @@ class ProductoViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({'error': 'No tienes permisos para eliminar este producto'})
         
         instance.delete()
+

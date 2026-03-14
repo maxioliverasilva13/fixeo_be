@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     'usuario_localizacion',
     'localizacion',
     'empresas',
+    'carritos',
     'trabajos',
     'mensajeria',
     'notificaciones',

@@ -33,13 +33,19 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             Q(usuario=user) | Q(profesional=user)
         )
 
+        # Filtro por fecha
         fecha = self.request.query_params.get('date')
         if fecha:
             fecha_parsed = parse_date(fecha)
             if fecha_parsed:
                 queryset = queryset.filter(fecha_inicio__date=fecha_parsed)
 
-        return queryset.order_by('-fecha_inicio')
+        # Filtro por estado
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        return queryset.order_by('-created_at')
         
     def get_serializer_class(self):
         if self.action == 'create':
