@@ -62,6 +62,7 @@ class Producto(BaseModel):
     codigo = models.CharField(max_length=100, blank=True, default='')
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='productos')
     categoria = models.ForeignKey(CategoriaProducto, on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
+    foto = models.URLField(max_length=500, blank=True, default='')  # ← nuevo
 
     class Meta:
         db_table = 'producto'
