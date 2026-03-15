@@ -30,6 +30,80 @@ import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
 import resend
 from django.conf import settings
+from django.db import connection
+
+ 
+SQL_QUERY = """
+WITH q AS (
+    SELECT plainto_tsquery('spanish', %(q)s) AS query
+),
+
+usuarios_ranked AS (
+    SELECT
+        u.id,
+        u.nombre || ' ' || u.apellido          AS titulo,
+        u.foto_url,
+        u.rounded_foto_url,
+        string_agg(DISTINCT p.nombre, ', ')     AS profesiones_texto,
+        MAX(ts_rank(
+            to_tsvector('spanish',
+                u.nombre || ' ' || u.apellido || ' ' || COALESCE(p.nombre, '')
+            ),
+            q.query
+        )) AS rank
+    FROM usuario u
+    LEFT JOIN usuario_profesiones up ON up.usuario_id = u.id
+    LEFT JOIN profesion p            ON p.id = up.profesion_id
+    CROSS JOIN q
+    WHERE to_tsvector('spanish',
+            u.nombre || ' ' || u.apellido || ' ' || COALESCE(p.nombre, '')
+          ) @@ q.query
+    GROUP BY u.id, u.nombre, u.apellido, u.foto_url, u.rounded_foto_url
+)
+
+SELECT
+    'usuario'               AS tipo,
+    id,
+    titulo,
+    profesiones_texto       AS extra,
+    foto_url,
+    rounded_foto_url,
+    NULL::numeric           AS precio,
+    NULL::text              AS codigo,
+    NULL::text              AS foto_producto,
+    NULL::text              AS empresa_nombre,
+    NULL::integer           AS empresa_id,
+    rank
+FROM usuarios_ranked
+
+UNION ALL
+
+SELECT
+    'producto'              AS tipo,
+    pr.id,
+    pr.nombre               AS titulo,
+    pr.descripcion          AS extra,
+    NULL                    AS foto_url,
+    NULL                    AS rounded_foto_url,
+    pr.precio,
+    pr.codigo,
+    pr.foto                 AS foto_producto,
+    e.nombre                AS empresa_nombre,
+    e.id                    AS empresa_id,
+    ts_rank(
+        to_tsvector('spanish', pr.nombre || ' ' || pr.descripcion || ' ' || pr.codigo),
+        q.query
+    ) AS rank
+FROM producto pr
+JOIN empresa e ON e.id = pr.empresa_id
+CROSS JOIN q
+WHERE to_tsvector('spanish',
+        pr.nombre || ' ' || pr.descripcion || ' ' || pr.codigo
+      ) @@ q.query
+
+ORDER BY rank DESC
+LIMIT 30;
+"""
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -435,23 +509,23 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
-        q = request.query_params.get('q', '').strip()
+
+        q = request.query_params.get("q", "").strip()
 
         if not q:
-            return Response(
-                {'error': 'Parámetro q es requerido'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": "Parámetro q es requerido"}, status=400)
 
-        usuarios = Usuario.objects.filter(
-            Q(nombre__icontains=q) |
-            Q(apellido__icontains=q) |
-            Q(usuario_profesiones__profesion__nombre__icontains=q)
-        ).distinct()
+        with connection.cursor() as cursor:
+            cursor.execute(SQL_QUERY, {"q": q})
 
-        serializer = self.get_serializer(usuarios, many=True)
-        return Response(serializer.data)
+            columns = [col[0] for col in cursor.description]
 
+            results = [
+                dict(zip(columns, row))
+                for row in cursor.fetchall()
+            ]
+
+        return Response(results)
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):
         """

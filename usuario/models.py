@@ -3,6 +3,8 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from rol.models import Rol
 import uuid
 from django.utils import timezone
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector
 
 class UsuarioManager(BaseUserManager):
     def create_user(self, correo, password=None, **extra_fields):
@@ -51,6 +53,12 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     class Meta:
         db_table = 'usuario'
+        indexes = [
+            GinIndex(
+                SearchVector("nombre", "apellido"),
+                name="usuario_search_idx"
+            )
+        ]
         verbose_name = 'Usuario'
         verbose_name_plural = 'Usuarios'
 

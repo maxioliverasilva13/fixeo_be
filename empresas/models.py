@@ -1,7 +1,8 @@
 from django.db import models
 from usuario.models import Usuario
 from fixeo_project.models import BaseModel
-
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector
 
 class Empresa(BaseModel):
     nombre = models.CharField(max_length=200)
@@ -14,7 +15,7 @@ class Empresa(BaseModel):
     vende_servicios = models.BooleanField(default=False)
     localizacion = models.ForeignKey('localizacion.Localizacion', on_delete=models.SET_NULL, null=True, related_name='empresas')
     admin_id = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='empresas_administradas')
-
+    
     class Meta:
         db_table = 'empresa'
         verbose_name = 'Empresa'
@@ -67,7 +68,14 @@ class Producto(BaseModel):
     class Meta:
         db_table = 'producto'
         verbose_name = 'Producto'
+        indexes = [
+            GinIndex(
+                SearchVector("nombre", "descripcion", "precio", "categoria" ),
+                name="producto_search_idx"
+            )
+        ]
         verbose_name_plural = 'Productos'
+    
 
     def __str__(self):
         return f"{self.empresa.nombre} - {self.nombre}"
