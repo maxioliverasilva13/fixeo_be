@@ -18,7 +18,10 @@ class CategoriaProductoAdmin(admin.ModelAdmin):
 
 @admin.register(Producto)
 class ProductoAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'empresa', 'categoria', 'precio', 'codigo', 'created_at')
+    list_display = ('nombre', 'empresa', 'categoria', 'precio', 'codigo', 'agotado', 'created_at')
     search_fields = ('nombre', 'descripcion', 'codigo', 'empresa__nombre')
-    list_filter = ('created_at', 'empresa', 'categoria')
+    list_filter = ('created_at', 'empresa', 'categoria', 'agotado')
+    list_editable = ('agotado',)
+
+
 

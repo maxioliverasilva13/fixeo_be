@@ -57,26 +57,29 @@ class CategoriaProducto(BaseModel):
 
 
 class Producto(BaseModel):
-    nombre = models.CharField(max_length=200)
+    nombre = models.CharField(max_length=200, db_index=True)
     descripcion = models.TextField(blank=True, default='')
     precio = models.DecimalField(max_digits=10, decimal_places=2)
     codigo = models.CharField(max_length=100, blank=True, default='')
+    agotado = models.BooleanField(default=False)
+    foto = models.URLField(max_length=500, blank=True, default='')
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='productos')
     categoria = models.ForeignKey(CategoriaProducto, on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
-    foto = models.URLField(max_length=500, blank=True, default='')  # ← nuevo
 
     class Meta:
         db_table = 'producto'
         verbose_name = 'Producto'
+        verbose_name_plural = 'Productos'
+        ordering = ['agotado', '-created_at']
         indexes = [
             GinIndex(
-                SearchVector("nombre", "descripcion", "precio", "categoria" ),
+                SearchVector("nombre", "descripcion", "precio", "categoria"),
                 name="producto_search_idx"
-            )
+            ),
+            models.Index(fields=['nombre']),
+            models.Index(fields=['empresa', 'nombre']),
         ]
-        verbose_name_plural = 'Productos'
-    
-
+        
     def __str__(self):
         return f"{self.empresa.nombre} - {self.nombre}"
 

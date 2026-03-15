@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/usuario-localizaciones/', include('usuario_localizacion.urls')),
     path('api/localizaciones/', include('localizacion.urls')),
     path('api/empresas/', include('empresas.urls')),
+    path('api/', include('carritos.urls')),
     path('api/horarios/', include('horarios.urls')),
     path('api/trabajos/', include('trabajos.urls')),
     path('api/mensajeria/', include('mensajeria.urls')),
