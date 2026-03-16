@@ -55,8 +55,14 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
         db_table = 'usuario'
         indexes = [
             GinIndex(
-                SearchVector("nombre", "apellido"),
-                name="usuario_search_idx"
+                fields=["nombre"],
+                name="usuario_nombre_trgm",
+                opclasses=["gin_trgm_ops"]
+            ),
+            GinIndex(
+                fields=["apellido"],
+                name="usuario_apellido_trgm",
+                opclasses=["gin_trgm_ops"]
             )
         ]
         verbose_name = 'Usuario'

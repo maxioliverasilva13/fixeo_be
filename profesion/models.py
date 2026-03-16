@@ -13,8 +13,9 @@ class Profesion(BaseModel):
         db_table = 'profesion'
         indexes = [
             GinIndex(
-                SearchVector("nombre", "descripcion"),
-                name="profesion_search_idx"
+                fields=["nombre"],
+                name="profesion_nombre_trgm",
+                opclasses=["gin_trgm_ops"]
             )
         ]
         verbose_name = 'Profesión'

@@ -73,13 +73,14 @@ class Producto(BaseModel):
         ordering = ['agotado', '-created_at']
         indexes = [
             GinIndex(
-                SearchVector("nombre", "descripcion", "precio", "categoria"),
-                name="producto_search_idx"
+                fields=["nombre"],
+                name="producto_nombre_trgm",
+                opclasses=["gin_trgm_ops"]
             ),
             models.Index(fields=['nombre']),
             models.Index(fields=['empresa', 'nombre']),
         ]
-        
+
     def __str__(self):
         return f"{self.empresa.nombre} - {self.nombre}"
 

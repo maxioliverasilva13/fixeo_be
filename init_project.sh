@@ -8,6 +8,9 @@ docker-compose up -d --build
 echo "⏳ Esperando que la base de datos esté lista..."
 sleep 10
 
+echo "🔧 Activando extensiones de PostgreSQL..."
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"'
+
 echo "🔨 Creando migraciones..."
 docker-compose exec web python manage.py makemigrations
 
