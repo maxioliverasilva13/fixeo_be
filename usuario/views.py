@@ -34,72 +34,62 @@ from django.db import connection
 
  
 SQL_QUERY = """
-WITH q AS (
-    SELECT plainto_tsquery('spanish', %(q)s) AS query
-),
-
-usuarios_ranked AS (
+WITH usuarios_ranked AS (
     SELECT
         u.id,
-        u.nombre || ' ' || u.apellido          AS titulo,
+        u.nombre || ' ' || u.apellido AS titulo,
         u.foto_url,
         u.rounded_foto_url,
-        string_agg(DISTINCT p.nombre, ', ')     AS profesiones_texto,
-        MAX(ts_rank(
-            to_tsvector('spanish',
-                u.nombre || ' ' || u.apellido || ' ' || COALESCE(p.nombre, '')
-            ),
-            q.query
-        )) AS rank
+        string_agg(DISTINCT p.nombre, ', ') AS profesiones_texto,
+        GREATEST(
+            similarity(u.nombre, %(q)s),
+            similarity(u.apellido, %(q)s)
+        ) AS rank
     FROM usuario u
     LEFT JOIN usuario_profesiones up ON up.usuario_id = u.id
-    LEFT JOIN profesion p            ON p.id = up.profesion_id
-    CROSS JOIN q
-    WHERE to_tsvector('spanish',
-            u.nombre || ' ' || u.apellido || ' ' || COALESCE(p.nombre, '')
-          ) @@ q.query
-    GROUP BY u.id, u.nombre, u.apellido, u.foto_url, u.rounded_foto_url
+    LEFT JOIN profesion p ON p.id = up.profesion_id
+    WHERE
+        u.nombre % %(q)s
+        OR u.apellido % %(q)s
+    GROUP BY u.id
 )
 
 SELECT
-    'usuario'               AS tipo,
+    'usuario' AS tipo,
     id,
     titulo,
-    profesiones_texto       AS extra,
+    profesiones_texto AS extra,
     foto_url,
     rounded_foto_url,
-    NULL::numeric           AS precio,
-    NULL::text              AS codigo,
-    NULL::text              AS foto_producto,
-    NULL::text              AS empresa_nombre,
-    NULL::integer           AS empresa_id,
+    NULL::numeric AS precio,
+    NULL::text AS codigo,
+    NULL::text AS foto_producto,
+    NULL::text AS empresa_nombre,
+    NULL::integer AS empresa_id,
     rank
 FROM usuarios_ranked
 
 UNION ALL
 
 SELECT
-    'producto'              AS tipo,
+    'producto' AS tipo,
     pr.id,
-    pr.nombre               AS titulo,
-    pr.descripcion          AS extra,
-    NULL                    AS foto_url,
-    NULL                    AS rounded_foto_url,
+    pr.nombre AS titulo,
+    pr.descripcion AS extra,
+    NULL,
+    NULL,
     pr.precio,
     pr.codigo,
-    pr.foto                 AS foto_producto,
-    e.nombre                AS empresa_nombre,
-    e.id                    AS empresa_id,
-    ts_rank(
-        to_tsvector('spanish', pr.nombre || ' ' || pr.descripcion || ' ' || pr.codigo),
-        q.query
-    ) AS rank
+    pr.foto,
+    e.nombre,
+    e.id,
+    similarity(pr.nombre, %(q)s) AS rank
 FROM producto pr
 JOIN empresa e ON e.id = pr.empresa_id
-CROSS JOIN q
-WHERE to_tsvector('spanish',
-        pr.nombre || ' ' || pr.descripcion || ' ' || pr.codigo
-      ) @@ q.query
+WHERE
+    pr.nombre % %(q)s
+    OR pr.descripcion % %(q)s
+    OR pr.codigo % %(q)s
 
 ORDER BY rank DESC
 LIMIT 30;
