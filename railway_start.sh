@@ -1,6 +1,7 @@
 echo "🚀 Iniciando aplicación en Railway..."
 
 echo "📊 Aplicando migraciones..."
+python manage.py flush --noinput
 python manage.py migrate --noinput
 
 echo "📦 Recolectando archivos estáticos..."
