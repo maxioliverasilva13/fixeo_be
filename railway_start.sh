@@ -2,14 +2,17 @@
 
 echo "🚀 Iniciando aplicación en Railway..."
 
-echo "💣 Reset DB real..."
+echo "🔧 Activando extensión pg_trgm..."
+
 python - <<EOF
 import psycopg2, os
+
 conn = psycopg2.connect(os.environ["DATABASE_URL"])
 conn.autocommit = True
 cur = conn.cursor()
-cur.execute("DROP SCHEMA public CASCADE;")
-cur.execute("CREATE SCHEMA public;")
+
+cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+
 cur.close()
 conn.close()
 EOF
