@@ -32,26 +32,39 @@ import resend
 from django.conf import settings
 from django.db import connection
 
- 
 SQL_QUERY = """
-WITH usuarios_ranked AS (
+WITH empresas_ranked AS (
     SELECT
-        u.id,
-        u.nombre || ' ' || u.apellido AS titulo,
+        e.id,
+        e.nombre AS titulo,
         u.foto_url,
         u.rounded_foto_url,
         string_agg(DISTINCT p.nombre, ', ') AS profesiones_texto,
+        e.latitud,
+        e.longitud,
+        e.descripcion,
         GREATEST(
-            similarity(u.nombre, %(q)s),
-            similarity(u.apellido, %(q)s)
+            similarity(u.nombre, %s),
+            similarity(u.apellido, %s),
+            similarity(u.nombre || ' ' || u.apellido, %s),
+            similarity(e.nombre, %s),
+            MAX(COALESCE(similarity(p.nombre, %s), 0))
         ) AS rank
-    FROM usuario u
-    LEFT JOIN usuario_profesiones up ON up.usuario_id = u.id
+    FROM empresa e
+    JOIN usuario u ON u.id = e.admin_id_id
+    LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
     LEFT JOIN profesion p ON p.id = up.profesion_id
     WHERE
-        u.nombre % %(q)s
-        OR u.apellido % %(q)s
-    GROUP BY u.id
+        u.nombre %% %s
+        OR u.apellido %% %s
+        OR (u.nombre || ' ' || u.apellido) %% %s
+        OR u.nombre ILIKE %s
+        OR u.apellido ILIKE %s
+        OR e.nombre %% %s
+        OR e.nombre ILIKE %s
+        OR p.nombre %% %s
+        OR p.nombre ILIKE %s
+    GROUP BY e.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, e.latitud, e.longitud, e.descripcion
 )
 
 SELECT
@@ -64,10 +77,14 @@ SELECT
     NULL::numeric AS precio,
     NULL::text AS codigo,
     NULL::text AS foto_producto,
-    NULL::text AS empresa_nombre,
-    NULL::integer AS empresa_id,
+    titulo AS empresa_nombre,
+    id AS empresa_id,
+    NULL::text AS ciudad,
+    NULL::text AS pais,
+    latitud,
+    longitud,
     rank
-FROM usuarios_ranked
+FROM empresas_ranked
 
 UNION ALL
 
@@ -83,13 +100,23 @@ SELECT
     pr.foto,
     e.nombre,
     e.id,
-    similarity(pr.nombre, %(q)s) AS rank
+    NULL::text AS ciudad,
+    NULL::text AS pais,
+    e.latitud,
+    e.longitud,
+    GREATEST(
+        similarity(pr.nombre, %s),
+        COALESCE(similarity(pr.descripcion, %s), 0)
+    ) AS rank
 FROM producto pr
 JOIN empresa e ON e.id = pr.empresa_id
 WHERE
-    pr.nombre % %(q)s
-    OR pr.descripcion % %(q)s
-    OR pr.codigo % %(q)s
+    pr.nombre %% %s
+    OR pr.descripcion %% %s
+    OR pr.codigo %% %s
+    OR pr.nombre ILIKE %s
+    OR pr.descripcion ILIKE %s
+    OR pr.codigo ILIKE %s
 
 ORDER BY rank DESC
 LIMIT 30;
@@ -499,21 +526,25 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
-
         q = request.query_params.get("q", "").strip()
-
         if not q:
             return Response({"error": "Parámetro q es requerido"}, status=400)
 
+        like_q = f"%{q}%"
+
         with connection.cursor() as cursor:
-            cursor.execute(SQL_QUERY, {"q": q})
-
+            cursor.execute(SQL_QUERY, [
+                q, q, q, q, q,
+                q, q, q,
+                like_q, like_q,
+                q, like_q,
+                q, like_q,
+                q, q,
+                q, q, q,
+                like_q, like_q, like_q,
+            ])
             columns = [col[0] for col in cursor.description]
-
-            results = [
-                dict(zip(columns, row))
-                for row in cursor.fetchall()
-            ]
+            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
         return Response(results)
     @action(detail=True, methods=['get'], url_path='from-me')
