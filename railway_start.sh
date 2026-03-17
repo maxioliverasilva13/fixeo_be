@@ -1,8 +1,3 @@
-#!/bin/bash
-echo "🧹 Borrando migraciones..."
-find . -path "*/migrations/*.py" -not -name "__init__.py" -delete
-find . -path "*/migrations/*.pyc" -delete
-
 echo "🚀 Iniciando aplicación en Railway..."
 
 echo "📊 Aplicando migraciones..."
