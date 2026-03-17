@@ -1,5 +1,11 @@
 
+
 echo "🚀 Iniciando aplicación en Railway..."
+
+
+echo "💣 Reseteando base de datos..."
+python manage.py flush --noinput || echo "⚠️ flush falló o DB vacía"
+
 
 echo "📊 Aplicando migraciones..."
 python manage.py migrate --noinput
