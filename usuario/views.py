@@ -55,15 +55,18 @@ WITH empresas_ranked AS (
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
     LEFT JOIN profesion p ON p.id = up.profesion_id
     WHERE
-        u.nombre %% %s
-        OR u.apellido %% %s
-        OR (u.nombre || ' ' || u.apellido) %% %s
-        OR u.nombre ILIKE %s
-        OR u.apellido ILIKE %s
-        OR e.nombre %% %s
-        OR e.nombre ILIKE %s
-        OR p.nombre %% %s
-        OR p.nombre ILIKE %s
+        u.id != %s
+        AND (
+            u.nombre %% %s
+            OR u.apellido %% %s
+            OR (u.nombre || ' ' || u.apellido) %% %s
+            OR u.nombre ILIKE %s
+            OR u.apellido ILIKE %s
+            OR e.nombre %% %s
+            OR e.nombre ILIKE %s
+            OR p.nombre %% %s
+            OR p.nombre ILIKE %s
+        )
     GROUP BY e.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, e.latitud, e.longitud, e.descripcion
 )
 
@@ -110,13 +113,17 @@ SELECT
     ) AS rank
 FROM producto pr
 JOIN empresa e ON e.id = pr.empresa_id
+JOIN usuario u ON u.id = e.admin_id_id
 WHERE
-    pr.nombre %% %s
-    OR pr.descripcion %% %s
-    OR pr.codigo %% %s
-    OR pr.nombre ILIKE %s
-    OR pr.descripcion ILIKE %s
-    OR pr.codigo ILIKE %s
+    u.id != %s
+    AND (
+        pr.nombre %% %s
+        OR pr.descripcion %% %s
+        OR pr.codigo %% %s
+        OR pr.nombre ILIKE %s
+        OR pr.descripcion ILIKE %s
+        OR pr.codigo ILIKE %s
+    )
 
 ORDER BY rank DESC
 LIMIT 30;
@@ -531,15 +538,18 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             return Response({"error": "Parámetro q es requerido"}, status=400)
 
         like_q = f"%{q}%"
+        user_id = request.user.id
 
         with connection.cursor() as cursor:
             cursor.execute(SQL_QUERY, [
                 q, q, q, q, q,
+                user_id,
                 q, q, q,
                 like_q, like_q,
                 q, like_q,
                 q, like_q,
                 q, q,
+                user_id,
                 q, q, q,
                 like_q, like_q, like_q,
             ])
@@ -547,6 +557,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
         return Response(results)
+    
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):
         """
