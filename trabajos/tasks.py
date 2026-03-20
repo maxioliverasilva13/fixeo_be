@@ -33,7 +33,17 @@ def finalizar_trabajos_vencidos():
     
     ids_finalizados = [t.id for t in trabajos]
     count = trabajos_qs.update(status='finalizado')
-    
+
+    try:
+        from pagos.services import liberar_pagos_entidad
+        for trabajo in trabajos:
+            if trabajo.metodo_pago == 'mercadopago':
+                liberados = liberar_pagos_entidad('trabajo', trabajo.id)
+                if liberados > 0:
+                    logger.info("Liberados %d pagos para trabajo %s (auto-finalizado)", liberados, trabajo.id)
+    except Exception:
+        logger.exception("Error liberando pagos en finalización automática")
+
     notificaciones_enviadas = 0
     usuarios_notificados = set()
     

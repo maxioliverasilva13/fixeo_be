@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'recursos',
     'servicios',
     'horarios',
+    'pagos',
     'rest_framework_simplejwt.token_blacklist',
     'channels'
 ]
@@ -157,10 +158,13 @@ SIMPLE_JWT = {
 if DEBUG:
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:3000",
+        "https://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://172.20.10.4:3000",
+        "https://172.20.10.4:3000",
     ]
 else:
     CORS_ALLOW_ALL_ORIGINS = True
@@ -230,6 +234,16 @@ FIREBASE_CREDENTIALS = config('FIREBASE_CREDENTIALS', default=None)
 
 RESEND_API_KEY = config('RESEND_API_KEY')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8081')
+
+import logging
+logger = logging.getLogger(__name__)
+# MercadoPago
+MP_ACCESS_TOKEN = config('MP_ACCESS_TOKEN', default='')
+logger.info(f"xd1: {MP_ACCESS_TOKEN}")
+MP_PUBLIC_KEY = config('MP_PUBLIC_KEY', default='')
+PLATFORM_COMMISSION_PERCENT = config('PLATFORM_COMMISSION_PERCENT', default=10, cast=int)
+MP_WEBHOOK_BASE_URL = config('MP_WEBHOOK_BASE_URL', default='http://localhost:8000')
+MP_WEBHOOK_SECRET = config('MP_WEBHOOK_SECRET', default='')
 
 if FIREBASE_CREDENTIALS and not firebase_admin._apps:
     cred_dict = json.loads(FIREBASE_CREDENTIALS)

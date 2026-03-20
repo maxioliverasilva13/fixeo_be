@@ -54,13 +54,16 @@ class OrdenSerializer(serializers.ModelSerializer):
     usuario_nombre = serializers.SerializerMethodField()
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
     localizacion_info = serializers.SerializerMethodField()
+    pago_info = serializers.SerializerMethodField()
     
     class Meta:
         model = Orden
         fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'empresa', 'empresa_nombre',
                   'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega', 'localizacion_info',
-                  'total', 'notas', 'fecha_entrega', 'items', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'localizacion_entrega', 'created_at', 'updated_at']
+                  'total', 'comision_plataforma', 'pago_status', 'notas', 'fecha_entrega', 'items',
+                  'pago_info', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
+                            'pago_status', 'localizacion_entrega', 'created_at', 'updated_at']
 
     def get_usuario_nombre(self, obj):
         return f"{obj.usuario.nombre} {obj.usuario.apellido}"
@@ -76,8 +79,44 @@ class OrdenSerializer(serializers.ModelSerializer):
             }
         return None
 
+    def get_pago_info(self, obj):
+        if obj.metodo_pago != 'mercadopago':
+            return None
+        pago = obj.pagos.order_by('-created_at').first() if hasattr(obj, 'pagos') else None
+        if not pago:
+            return None
+        return {
+            'pago_id': pago.id,
+            'status': pago.status,
+            'mp_status': pago.mp_status,
+            'mp_preference_id': pago.mp_preference_id,
+            'monto': str(pago.monto),
+            'comision': str(pago.comision_plataforma),
+        }
+
 
 class OrdenCreateSerializer(serializers.Serializer):
     metodo_pago = serializers.ChoiceField(choices=Orden.METODO_PAGO_CHOICES, required=True)
     tipo_entrega = serializers.ChoiceField(choices=Orden.TIPO_ENTREGA_CHOICES, required=True)
     notas = serializers.CharField(required=False, allow_blank=True)
+
+    card_token = serializers.CharField(required=False, allow_blank=True, default='')
+    payment_method_id = serializers.CharField(required=False, allow_blank=True, default='')
+    payment_method_type = serializers.CharField(required=False, allow_blank=True, default='')
+    issuer_id = serializers.CharField(required=False, allow_blank=True, default='')
+    installments = serializers.IntegerField(required=False, default=1)
+    bin = serializers.CharField(required=False, allow_blank=True, default='',
+                                help_text='Primeros 6 dígitos de la tarjeta')
+    is_saved_card = serializers.BooleanField(required=False, default=False)
+    tarjeta_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+    def validate(self, data):
+        if data['metodo_pago'] == 'mercadopago' and not data.get('card_token'):
+            raise serializers.ValidationError(
+                {"card_token": "Requerido para pagos con MercadoPago."}
+            )
+        if data.get('is_saved_card') and not data.get('tarjeta_id'):
+            raise serializers.ValidationError(
+                {"tarjeta_id": "Requerido cuando is_saved_card es true."}
+            )
+        return data

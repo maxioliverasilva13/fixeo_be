@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from localizacion.models import Localizacion
 from mensajeria.models import Chat
@@ -23,6 +25,8 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from mensajeria.models import Recurso, Mensajes
 
+logger = logging.getLogger(__name__)
+
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
@@ -40,7 +44,6 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             if fecha_parsed:
                 queryset = queryset.filter(fecha_inicio__date=fecha_parsed)
 
-        # Filtro por estado
         status_filter = self.request.query_params.get('status')
         if status_filter:
             queryset = queryset.filter(status=status_filter)
@@ -221,6 +224,49 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'pendientes': trabajos_pendientes,
                 'total': ofertas_recibidas + trabajos_pendientes
             }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='finalizar')
+    def finalizar_trabajo(self, request, pk=None):
+        trabajo = self.get_object()
+
+        if trabajo.usuario != request.user and trabajo.profesional != request.user:
+            return Response(
+                {'error': 'No tenés permisos para finalizar este trabajo'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if trabajo.status != 'aceptado':
+            return Response(
+                {'error': f'No se puede finalizar un trabajo en estado "{trabajo.status}"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        trabajo.status = 'finalizado'
+        trabajo.save()
+
+        if trabajo.metodo_pago == 'mercadopago':
+            try:
+                from pagos.services import liberar_pagos_entidad
+                liberados = liberar_pagos_entidad('trabajo', trabajo.id)
+                logger.info("Liberados %d pagos para trabajo %s", liberados, trabajo.id)
+            except Exception as e:
+                logger.exception("Error liberando pagos para trabajo %s", trabajo.id)
+
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="Trabajo finalizado",
+            mensaje=f"Tu trabajo ha sido finalizado. ¡Calificá al profesional!",
+            data={
+                'deep_link': f'/historial?trabajoId={trabajo.id}&calificar=true',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_finalizado'
+            }
+        )
+
+        return Response({
+            'message': 'Trabajo finalizado exitosamente',
+            'trabajo': TrabajoDetailSerializer(trabajo).data
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='rechazar')
     def rechazar_trabajo(self, request, pk=None):
@@ -407,7 +453,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     'chat_id': chat.id,
                 })
 
-        return Response({
+        response_data = {
             'id': trabajo.id,
             'descripcion': trabajo.descripcion,
             'fecha_inicio': trabajo.fecha_inicio,
@@ -417,7 +463,18 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'servicios': [{'id': s.id, 'nombre': s.nombre, 'precio': s.precio} for s in servicios],
             'fotos': [r.url for r in trabajo.recursos.all()],
             'status': trabajo.status
-        }, status=status.HTTP_201_CREATED)
+        }
+
+        if metodo_pago == 'mercadopago' and trabajo.precio_final:
+            try:
+                from pagos.services import crear_preferencia_trabajo
+                mp_data = crear_preferencia_trabajo(trabajo, request)
+                response_data['mercadopago'] = mp_data
+            except Exception as e:
+                logger.exception("Error creando preferencia MP para trabajo %s", trabajo.id)
+                response_data['mercadopago_error'] = str(e)
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 class CalificacionViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]

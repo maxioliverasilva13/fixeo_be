@@ -21,6 +21,7 @@ class Trabajo(BaseModel):
         ('tarjeta', 'Tarjeta'),
         ('transferencia', 'Transferencia'),
         ('app', 'Pago en app'),
+        ('mercadopago', 'MercadoPago'),
     ]
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendiente')

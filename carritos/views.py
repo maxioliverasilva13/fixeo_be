@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -12,6 +14,8 @@ from .serializers import (
 )
 from empresas.models import Empresa, Producto
 from notificaciones.models import Notificaciones
+
+logger = logging.getLogger(__name__)
 
 
 class CarritoViewSet(viewsets.ModelViewSet):
@@ -137,7 +141,11 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='checkout')
     def checkout(self, request, pk=None):
-        """Crea una orden a partir del carrito"""
+        """
+        Crea una orden a partir del carrito.
+        Para mercadopago: procesa el pago PRIMERO; la orden solo se crea si
+        el cobro es exitoso, evitando órdenes huérfanas.
+        """
         carrito = self.get_object()
 
         if not carrito.items.exists():
@@ -150,19 +158,43 @@ class CarritoViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        tipo_entrega = serializer.validated_data['tipo_entrega']
+        metodo_pago = serializer.validated_data['metodo_pago']
+        empresa = carrito.empresa
 
-        # Determinar la localización según el tipo de entrega
+        if metodo_pago == 'mercadopago' and not empresa.acepta_tarjeta:
+            return Response(
+                {'error': 'Esta empresa no acepta pagos con tarjeta'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if metodo_pago == 'efectivo':
+            if not empresa.acepta_efectivo:
+                return Response(
+                    {'error': 'Esta empresa no acepta pagos en efectivo'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            from suscripciones.models import Subscripcion
+            from django.utils import timezone as tz
+            tiene_sub = Subscripcion.objects.filter(
+                user_id=empresa.admin_id,
+                cancelada=False,
+                expiracion__gt=tz.now(),
+            ).exists()
+            if not tiene_sub:
+                return Response(
+                    {'error': 'La empresa necesita una suscripción activa para aceptar efectivo'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        tipo_entrega = serializer.validated_data['tipo_entrega']
         if tipo_entrega == 'retiro':
-            # Usar la localización de la empresa
             localizacion_entrega = carrito.empresa.localizacion
             if not localizacion_entrega:
                 return Response(
                     {'error': 'La empresa no tiene localización configurada para retiro'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        else:  # domicilio
-            # Usar la localización principal del usuario
+        else:
             from usuario_localizacion.models import UsuarioLocalizacion
             try:
                 usuario_loc = UsuarioLocalizacion.objects.get(
@@ -176,55 +208,120 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+        # Validar stock antes de cualquier cobro
+        items_carrito = list(carrito.items.select_related('producto').all())
+        for item in items_carrito:
+            if item.producto.agotado:
+                return Response(
+                    {'error': f'El producto "{item.producto.nombre}" está agotado'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        total = carrito.total
+
+        # ── MercadoPago: cobrar ANTES de crear la orden ──────────────
+        mp_response = None
+        if metodo_pago == 'mercadopago':
+            from pagos.services import ejecutar_pago_mp, calcular_comision
+            from pagos.models import MercadoPagoCustomer
+
+            mp_customer_id = ''
+            try:
+                mp_cust = MercadoPagoCustomer.objects.get(usuario=request.user)
+                mp_customer_id = mp_cust.mp_customer_id
+            except MercadoPagoCustomer.DoesNotExist:
+                pass
+
+            try:
+                mp_response = ejecutar_pago_mp(
+                    email=request.user.correo,
+                    monto=total,
+                    card_token=serializer.validated_data['card_token'],
+                    payment_method_id=serializer.validated_data.get('payment_method_id', ''),
+                    issuer_id=serializer.validated_data.get('issuer_id', ''),
+                    installments=serializer.validated_data.get('installments', 1),
+                    descripcion=f"Orden en {empresa.nombre}",
+                    external_ref=f"carrito_{carrito.id}",
+                    bin_tarjeta=serializer.validated_data.get('bin', ''),
+                    mp_customer_id=mp_customer_id,
+                    payment_method_type=serializer.validated_data.get('payment_method_type', ''),
+                )
+            except Exception as e:
+                logger.exception("Pago MP rechazado para carrito %s", carrito.id)
+                return Response(
+                    {'error': f'El pago fue rechazado: {e}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # ── Pago OK (o efectivo): crear orden + registros en una TX ──
         with transaction.atomic():
-            total = carrito.total
+            comision_plataforma = None
+            pago_status = ''
+            if metodo_pago == 'mercadopago':
+                comision_plataforma, _ = calcular_comision(total)
+                pago_status = 'aprobado'
 
             orden = Orden.objects.create(
                 usuario=request.user,
-                empresa=carrito.empresa,
-                metodo_pago=serializer.validated_data['metodo_pago'],
+                empresa=empresa,
+                metodo_pago=metodo_pago,
                 tipo_entrega=tipo_entrega,
                 localizacion_entrega=localizacion_entrega,
                 total=total,
-                notas=serializer.validated_data.get('notas', '')
+                notas=serializer.validated_data.get('notas', ''),
+                comision_plataforma=comision_plataforma,
+                pago_status=pago_status,
             )
 
-            for item in carrito.items.all():
-                if item.producto.agotado:
-                    orden.delete()
-                    return Response(
-                        {'error': f'El producto "{item.producto.nombre}" está agotado'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
+            for item in items_carrito:
                 OrdenItem.objects.create(
                     orden=orden,
                     producto=item.producto,
                     cantidad=item.cantidad,
                     precio_unitario=item.precio_unitario,
-                    subtotal=item.subtotal
+                    subtotal=item.subtotal,
+                )
+
+            # Registrar el Pago si fue mercadopago (Orders API response)
+            if mp_response:
+                from pagos.models import Pago
+                from pagos.services import ORDERS_STATUS_MAP
+                comision, monto_vendedor = calcular_comision(total)
+                order_status = mp_response.get("status", "")
+                payments = mp_response.get("transactions", {}).get("payments", [])
+                mp_payment_id = str(payments[0].get("id", "")) if payments else ""
+                Pago.objects.create(
+                    tipo='orden',
+                    orden=orden,
+                    usuario=request.user,
+                    monto=total,
+                    comision_plataforma=comision,
+                    monto_vendedor=monto_vendedor,
+                    mp_order_id=str(mp_response.get("id", "")),
+                    mp_payment_id=mp_payment_id,
+                    mp_status=order_status,
+                    mp_status_detail=mp_response.get("status_detail", ""),
+                    status=ORDERS_STATUS_MAP.get(order_status, 'pendiente'),
                 )
 
             carrito.activo = False
             carrito.save()
 
-            # Crear notificación para el usuario
             Notificaciones.objects.create(
                 usuario=request.user,
                 titulo='Orden creada',
-                descripcion=f'Tu orden #{orden.numero_orden} de {carrito.empresa.nombre} ha sido creada exitosamente. Total: ${orden.total}',
+                descripcion=f'Tu orden #{orden.numero_orden} de {empresa.nombre} ha sido creada exitosamente. Total: ${orden.total}',
                 deep_link=f'/ordenes/{orden.id}',
-                entity_id=orden.id
+                entity_id=orden.id,
             )
 
-            # Crear notificación para el admin de la empresa
-            if carrito.empresa.admin_id != request.user:
+            if empresa.admin_id != request.user:
                 Notificaciones.objects.create(
-                    usuario=carrito.empresa.admin_id,
+                    usuario=empresa.admin_id,
                     titulo='Nueva orden recibida',
                     descripcion=f'Nueva orden #{orden.numero_orden} de {request.user.nombre} {request.user.apellido}. Total: ${orden.total}',
                     deep_link=f'/ordenes/{orden.id}',
-                    entity_id=orden.id
+                    entity_id=orden.id,
                 )
 
         return Response(OrdenSerializer(orden).data, status=status.HTTP_201_CREATED)
@@ -274,7 +371,31 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
         orden.status = nuevo_estado
         orden.save()
 
-        # Mapeo de estados para mensajes más amigables
+        if nuevo_estado == 'finalizada' and orden.metodo_pago == 'mercadopago':
+            try:
+                from pagos.services import liberar_pagos_entidad
+                liberados = liberar_pagos_entidad('orden', orden.id)
+                if liberados > 0:
+                    orden.pago_status = 'liberado'
+                    orden.save(update_fields=['pago_status'])
+                    logger.info("Liberados %d pagos para orden %s", liberados, orden.id)
+            except Exception as e:
+                logger.exception("Error liberando pagos para orden %s", orden.id)
+
+        if nuevo_estado == 'cancelada' and orden.metodo_pago == 'mercadopago':
+            try:
+                from pagos.models import Pago
+                from pagos.services import reembolsar_pago
+                pagos_aprobados = Pago.objects.filter(
+                    orden=orden, tipo='orden', status='aprobado'
+                )
+                for pago in pagos_aprobados:
+                    reembolsar_pago(pago)
+                orden.pago_status = 'devuelto'
+                orden.save(update_fields=['pago_status'])
+            except Exception as e:
+                logger.exception("Error reembolsando pagos para orden %s", orden.id)
+
         estados_mensajes = {
             'en_proceso': 'está siendo procesada',
             'aceptada': 'ha sido aceptada',
@@ -285,7 +406,6 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
 
         mensaje_estado = estados_mensajes.get(nuevo_estado, f'cambió a {orden.get_status_display()}')
 
-        # Crear notificación para el cliente
         Notificaciones.objects.create(
             usuario=orden.usuario,
             titulo=f'Orden {orden.get_status_display()}',

@@ -13,7 +13,13 @@ class Carrito(BaseModel):
         db_table = 'carrito'
         verbose_name = 'Carrito'
         verbose_name_plural = 'Carritos'
-        unique_together = ['usuario', 'empresa', 'activo']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['usuario', 'empresa'],
+                condition=models.Q(activo=True),
+                name='unique_carrito_activo_por_usuario_empresa',
+            ),
+        ]
 
     def __str__(self):
         return f"Carrito de {self.usuario.nombre} - {self.empresa.nombre}"
@@ -61,6 +67,7 @@ class Orden(BaseModel):
         ('tarjeta', 'Tarjeta'),
         ('transferencia', 'Transferencia'),
         ('app', 'Pago en app'),
+        ('mercadopago', 'MercadoPago'),
     ]
 
     TIPO_ENTREGA_CHOICES = [
@@ -76,8 +83,10 @@ class Orden(BaseModel):
     tipo_entrega = models.CharField(max_length=20, choices=TIPO_ENTREGA_CHOICES)
     localizacion_entrega = models.ForeignKey('localizacion.Localizacion', on_delete=models.SET_NULL, null=True, related_name='ordenes')
     total = models.DecimalField(max_digits=10, decimal_places=2)
+    comision_plataforma = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     notas = models.TextField(blank=True, default='')
     fecha_entrega = models.DateTimeField(null=True, blank=True)
+    pago_status = models.CharField(max_length=20, blank=True, default='', help_text='Estado del pago MP')
 
     class Meta:
         db_table = 'orden'
