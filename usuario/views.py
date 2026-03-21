@@ -68,7 +68,7 @@ WITH empresas_ranked AS (
     JOIN usuario u ON u.id = e.admin_id_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
     LEFT JOIN profesion p ON p.id = up.profesion_id
-    LEFT JOIN calificacion c ON c.receptor_id = u.id
+    LEFT JOIN calificacion c ON c.user_cal_recibe_id = u.id
     WHERE
         u.id != %s
         AND (
