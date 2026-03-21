@@ -48,9 +48,15 @@ WITH empresas_ranked AS (
         u.foto_url,
         u.rounded_foto_url,
         string_agg(DISTINCT p.nombre, ', ') AS profesiones_texto,
+        array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
         e.latitud,
         e.longitud,
         e.descripcion,
+        COALESCE(AVG(c.rating), 0) AS rating,
+        EXISTS(
+            SELECT 1 FROM trabajo t
+            WHERE t.empresa_id = e.id AND t.esUrgente = true
+        ) AS es_urgente,
         GREATEST(
             similarity(u.nombre, %s),
             similarity(u.apellido, %s),
@@ -62,6 +68,7 @@ WITH empresas_ranked AS (
     JOIN usuario u ON u.id = e.admin_id_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
     LEFT JOIN profesion p ON p.id = up.profesion_id
+    LEFT JOIN calificacion c ON c.receptor_id = u.id
     WHERE
         u.id != %s
         AND (
@@ -94,7 +101,11 @@ SELECT
     NULL::text AS pais,
     latitud,
     longitud,
-    rank
+    rank,
+    rating,
+    es_urgente,
+    profesion_ids,
+    NULL::numeric AS precio_servicio
 FROM empresas_ranked
 
 UNION ALL
@@ -118,7 +129,11 @@ SELECT
     GREATEST(
         similarity(pr.nombre, %s),
         COALESCE(similarity(pr.descripcion, %s), 0)
-    ) AS rank
+    ) AS rank,
+    0::numeric AS rating,
+    false AS es_urgente,
+    NULL::integer[] AS profesion_ids,
+    NULL::numeric AS precio_servicio
 FROM producto pr
 JOIN empresa e ON e.id = pr.empresa_id
 JOIN usuario u ON u.id = e.admin_id_id
