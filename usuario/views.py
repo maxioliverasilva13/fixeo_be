@@ -33,6 +33,13 @@ from django.conf import settings
 from django.db import connection
 from django.db.models import Min
 
+def _precio_para_filtro(r: dict) -> float | None:
+    if r.get('tipo') == 'producto':
+        p = r.get('precio')
+    else:
+        p = r.get('precio_servicio') or r.get('precio')
+    return float(p) if p is not None else None
+
 SQL_QUERY = """
 WITH empresas_ranked AS (
     SELECT
@@ -513,7 +520,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 )['avg'] or 0
 
                 min_price = getattr(ul, 'min_price', None)
-                
+
                 results.append({
                     'usuario': usuario,
                     'distance_km': distance_km,
@@ -540,7 +547,12 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         if not q:
             return Response({"error": "Parámetro q es requerido"}, status=400)
 
-        like_q = f"%{q}%"
+        profesion_id = request.query_params.get('profesion_id')
+        sort_by      = request.query_params.get('sort_by')
+        max_price    = request.query_params.get('max_price')
+        is_urgent    = request.query_params.get('is_urgent')
+
+        like_q  = f"%{q}%"
         user_id = request.user.id
 
         with connection.cursor() as cursor:
@@ -559,8 +571,26 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+        if profesion_id:
+            pid = int(profesion_id)
+            results = [r for r in results if pid in (r.get('profesion_ids') or [])]
+
+        if max_price:
+            mp = float(max_price)
+            results = [r for r in results if _precio_para_filtro(r) is None or _precio_para_filtro(r) <= mp]
+
+        if is_urgent == 'true':
+            results = [r for r in results if r.get('es_urgente')]
+
+        if sort_by == 'mejor_valorados':
+            results.sort(key=lambda x: float(x.get('rating') or 0), reverse=True)
+        elif sort_by == 'mas_cercanos':
+            results.sort(key=lambda x: x.get('rank', 0))
+        elif sort_by == 'mejor_precio':
+            results.sort(key=lambda x: (_precio_para_filtro(x) is None, _precio_para_filtro(x) or 0))
+
         return Response(results)
-    
+
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):
         """
