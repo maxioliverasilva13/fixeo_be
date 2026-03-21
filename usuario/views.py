@@ -55,7 +55,7 @@ WITH empresas_ranked AS (
         COALESCE(AVG(c.rating), 0) AS rating,
         EXISTS(
             SELECT 1 FROM trabajo t
-            WHERE t.empresa_id = e.id AND t.esUrgente = true
+            WHERE t.profesional_id = u.id AND t."esUrgente" = true
         ) AS es_urgente,
         GREATEST(
             similarity(u.nombre, %s),
@@ -82,7 +82,7 @@ WITH empresas_ranked AS (
             OR p.nombre %% %s
             OR p.nombre ILIKE %s
         )
-    GROUP BY e.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, e.latitud, e.longitud, e.descripcion
+    GROUP BY e.id, u.id, u.foto_url, u.rounded_foto_url, e.latitud, e.longitud, e.descripcion
 )
 
 SELECT
@@ -151,7 +151,6 @@ WHERE
 ORDER BY rank DESC
 LIMIT 30;
 """
-
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
