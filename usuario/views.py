@@ -31,6 +31,7 @@ from firebase_admin import credentials, auth as firebase_auth
 import resend
 from django.conf import settings
 from django.db import connection
+from django.db.models import Min
 
 SQL_QUERY = """
 WITH empresas_ranked AS (
@@ -482,9 +483,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 )
 
             if max_price:
-                usuarios_loc = usuarios_loc.filter(
-                    usuario__servicios__precio__lte=Decimal(max_price)
-                ).distinct()
+                usuarios_loc = usuarios_loc.annotate(
+                    min_price=Min('usuario__servicios__precio')
+                ).filter(
+                    min_price__lte=Decimal(max_price)
+                )
 
             if is_urgent == 'true':
                 usuarios_loc = usuarios_loc.filter(
@@ -509,8 +512,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     avg=Avg('rating')
                 )['avg'] or 0
 
-                min_price = usuario.servicios.order_by('precio').values_list('precio', flat=True).first()
-
+                min_price = getattr(ul, 'min_price', None)
+                
                 results.append({
                     'usuario': usuario,
                     'distance_km': distance_km,
