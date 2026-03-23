@@ -282,14 +282,12 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     subtotal=item.subtotal,
                 )
 
-            # Registrar el Pago si fue mercadopago (Orders API response)
             if mp_response:
                 from pagos.models import Pago
-                from pagos.services import ORDERS_STATUS_MAP
+                from pagos.services import MP_STATUS_MAP
                 comision, monto_vendedor = calcular_comision(total)
-                order_status = mp_response.get("status", "")
-                payments = mp_response.get("transactions", {}).get("payments", [])
-                mp_payment_id = str(payments[0].get("id", "")) if payments else ""
+                mp_status = mp_response.get("status", "")
+                mp_payment_id = str(mp_response.get("id", ""))
                 Pago.objects.create(
                     tipo='orden',
                     orden=orden,
@@ -297,11 +295,10 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     monto=total,
                     comision_plataforma=comision,
                     monto_vendedor=monto_vendedor,
-                    mp_order_id=str(mp_response.get("id", "")),
                     mp_payment_id=mp_payment_id,
-                    mp_status=order_status,
+                    mp_status=mp_status,
                     mp_status_detail=mp_response.get("status_detail", ""),
-                    status=ORDERS_STATUS_MAP.get(order_status, 'pendiente'),
+                    status=MP_STATUS_MAP.get(mp_status, 'pendiente'),
                 )
 
             carrito.activo = False

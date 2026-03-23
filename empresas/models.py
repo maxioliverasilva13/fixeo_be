@@ -15,6 +15,7 @@ class Empresa(BaseModel):
     vende_servicios = models.BooleanField(default=False)
     acepta_efectivo = models.BooleanField(default=True)
     acepta_tarjeta = models.BooleanField(default=True)
+    is_mercadopago_vinculado = models.BooleanField(default=True)
     localizacion = models.ForeignKey('localizacion.Localizacion', on_delete=models.SET_NULL, null=True, related_name='empresas')
     admin_id = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='empresas_administradas')
     

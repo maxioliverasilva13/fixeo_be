@@ -244,7 +244,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         trabajo.status = 'finalizado'
         trabajo.save()
 
-        if trabajo.metodo_pago == 'mercadopago':
+        if trabajo.metodo_pago in ('mercadopago', 'tarjeta'):
             try:
                 from pagos.services import liberar_pagos_entidad
                 liberados = liberar_pagos_entidad('trabajo', trabajo.id)
@@ -263,9 +263,25 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             }
         )
 
+        trabajo_data = TrabajoDetailSerializer(trabajo).data
+
+        channel_layer = get_channel_layer()
+        ws_payload = {
+            'type': 'trabajo_finalizado',
+            'trabajo_id': trabajo.id,
+            'status': 'finalizado',
+            'metodo_pago': trabajo.metodo_pago or 'efectivo',
+        }
+        for uid in (trabajo.usuario.id, trabajo.profesional.id):
+            room = f"chat_usuario_channel_{uid}"
+            try:
+                async_to_sync(channel_layer.group_send)(room, ws_payload)
+            except Exception as e:
+                logger.warning("Error enviando WS trabajo_finalizado a %s: %s", room, e)
+
         return Response({
             'message': 'Trabajo finalizado exitosamente',
-            'trabajo': TrabajoDetailSerializer(trabajo).data
+            'trabajo': trabajo_data
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='rechazar')

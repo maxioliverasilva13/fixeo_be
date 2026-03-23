@@ -37,7 +37,7 @@ def finalizar_trabajos_vencidos():
     try:
         from pagos.services import liberar_pagos_entidad
         for trabajo in trabajos:
-            if trabajo.metodo_pago == 'mercadopago':
+            if trabajo.metodo_pago in ('mercadopago', 'tarjeta'):
                 liberados = liberar_pagos_entidad('trabajo', trabajo.id)
                 if liberados > 0:
                     logger.info("Liberados %d pagos para trabajo %s (auto-finalizado)", liberados, trabajo.id)

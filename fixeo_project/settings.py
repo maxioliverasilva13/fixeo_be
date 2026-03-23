@@ -165,6 +165,10 @@ if DEBUG:
         "http://127.0.0.1:8000",
         "http://172.20.10.4:3000",
         "https://172.20.10.4:3000",
+        "https://172.20.10.3:3000",
+        "http://172.20.10.3:3000",
+        "http://172.20.10.3:8000",
+        
     ]
 else:
     CORS_ALLOW_ALL_ORIGINS = True
@@ -239,11 +243,11 @@ import logging
 logger = logging.getLogger(__name__)
 # MercadoPago
 MP_ACCESS_TOKEN = config('MP_ACCESS_TOKEN', default='')
-logger.info(f"xd1: {MP_ACCESS_TOKEN}")
 MP_PUBLIC_KEY = config('MP_PUBLIC_KEY', default='')
 PLATFORM_COMMISSION_PERCENT = config('PLATFORM_COMMISSION_PERCENT', default=10, cast=int)
 MP_WEBHOOK_BASE_URL = config('MP_WEBHOOK_BASE_URL', default='http://localhost:8000')
 MP_WEBHOOK_SECRET = config('MP_WEBHOOK_SECRET', default='')
+MP_TEST_MODE = config('MP_TEST_MODE', default=False, cast=bool)
 
 if FIREBASE_CREDENTIALS and not firebase_admin._apps:
     cred_dict = json.loads(FIREBASE_CREDENTIALS)

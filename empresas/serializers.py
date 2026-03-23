@@ -24,6 +24,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'vende_servicios',
             'acepta_efectivo',
             'acepta_tarjeta',
+            'is_mercadopago_vinculado',
             'efectivo_disponible',
             'metodos_pago_disponibles',
             'trabajo_domicilio',
@@ -49,7 +50,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     def get_metodos_pago_disponibles(self, obj):
         """Lista de métodos de pago que la empresa realmente puede usar."""
         metodos = []
-        if obj.acepta_tarjeta:
+        if obj.acepta_tarjeta and obj.is_mercadopago_vinculado:
             metodos.append('mercadopago')
         if obj.acepta_efectivo:
             from suscripciones.models import Subscripcion

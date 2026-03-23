@@ -40,6 +40,10 @@ def get_sdk():
     return mercadopago.SDK(settings.MP_ACCESS_TOKEN)
 
 
+def _is_test_mode() -> bool:
+    return getattr(settings, 'MP_TEST_MODE', False)
+
+
 def _mp_headers(idempotency_key: str = '') -> dict:
     return {
         "Authorization": f"Bearer {settings.MP_ACCESS_TOKEN}",
@@ -67,7 +71,7 @@ def crear_preferencia_orden(orden, request=None):
             "title": item.producto.nombre,
             "quantity": item.cantidad,
             "unit_price": float(item.precio_unitario),
-            "currency_id": "ARS",
+            "currency_id": "UYU",
         })
 
     base_url = settings.MP_WEBHOOK_BASE_URL
@@ -127,7 +131,7 @@ def crear_preferencia_trabajo(trabajo, request=None):
             "title": ts.servicio.nombre,
             "quantity": 1,
             "unit_price": float(ts.precio),
-            "currency_id": "ARS",
+            "currency_id": "UYU",
         })
 
     if not items:
@@ -135,7 +139,7 @@ def crear_preferencia_trabajo(trabajo, request=None):
             "title": f"Trabajo #{trabajo.id}",
             "quantity": 1,
             "unit_price": float(monto),
-            "currency_id": "ARS",
+            "currency_id": "UYU",
         })
 
     base_url = settings.MP_WEBHOOK_BASE_URL
@@ -411,8 +415,9 @@ def obtener_o_crear_customer(usuario):
         pass
 
     sdk = get_sdk()
+    email = usuario.correo
 
-    search = sdk.customer().search({"email": usuario.correo})
+    search = sdk.customer().search({"email": email})
     if search.get("status") == 200:
         results = search.get("response", {}).get("results", [])
         if results:
@@ -424,7 +429,7 @@ def obtener_o_crear_customer(usuario):
             return mp_customer
 
     result = sdk.customer().create({
-        "email": usuario.correo,
+        "email": email,
         "first_name": usuario.nombre,
         "last_name": usuario.apellido,
     })
@@ -495,7 +500,7 @@ def eliminar_tarjeta(usuario, tarjeta_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Pago directo con card_token — Orders API (POST /v1/orders)
+# Pago directo con card_token — Payments API (POST /v1/payments)
 # ---------------------------------------------------------------------------
 
 def _resolver_pm_desde_bin(bin_digits: str) -> dict:
@@ -567,18 +572,15 @@ def ejecutar_pago_mp(*, email: str, monto, card_token: str,
                      mp_customer_id: str = '',
                      payment_method_type: str = '') -> dict:
     """
-    Ejecuta el pago contra la Orders API de MercadoPago (POST /v1/orders).
+    Ejecuta el pago contra la Payments API de MercadoPago (POST /v1/payments).
     NO crea registros en la BD — eso queda a cargo del caller.
     Lanza Exception si MP rechaza el pago.
 
-    Retorna el response completo de la orden creada, incluyendo:
-      - id: Order ID (ORD01...)
+    Retorna el response completo del pago creado, incluyendo:
+      - id: Payment ID
       - status / status_detail
-      - transactions.payments[0].id: Payment ID (PAY01...)
     """
-    resolved_type = payment_method_type
-
-    if not payment_method_id or not issuer_id or not resolved_type:
+    if not payment_method_id or not issuer_id:
         bin_digits = bin_tarjeta
         if not bin_digits:
             bin_digits = _obtener_bin_desde_token(card_token)
@@ -587,12 +589,8 @@ def ejecutar_pago_mp(*, email: str, monto, card_token: str,
             if resolved:
                 payment_method_id = resolved.get("payment_method_id", "") or payment_method_id
                 issuer_id = resolved.get("issuer_id", "") or issuer_id
-                resolved_type = resolved.get("payment_type", "") or resolved_type
 
-    if not resolved_type:
-        resolved_type = "credit_card"
-
-    logger.info("PM final: pm=%s type=%s issuer=%s", payment_method_id, resolved_type, issuer_id)
+    logger.info("PM final: pm=%s issuer=%s", payment_method_id, issuer_id)
 
     if not payment_method_id:
         raise ValueError(
@@ -600,76 +598,55 @@ def ejecutar_pago_mp(*, email: str, monto, card_token: str,
             "El frontend debe enviarlo usando mp.getPaymentMethods({ bin })."
         )
 
-    # Build payer: customer_id for saved cards, email for new cards
     if mp_customer_id:
-        payer = {"customer_id": mp_customer_id}
+        payer = {"type": "customer", "id": mp_customer_id}
     else:
         payer = {"email": email}
 
-    amount_str = f"{float(monto):.2f}"
-
-    order_data = {
-        "type": "online",
-        "processing_mode": "automatic",
-        "total_amount": amount_str,
+    payment_data = {
+        "transaction_amount": float(monto),
+        "token": card_token,
+        "description": descripcion,
+        "installments": installments,
+        "payment_method_id": payment_method_id,
         "external_reference": external_ref,
         "payer": payer,
-        "transactions": {
-            "payments": [
-                {
-                    "amount": amount_str,
-                    "payment_method": {
-                        "id": payment_method_id,
-                        "type": resolved_type,
-                        "token": card_token,
-                        "installments": installments,
-                    },
-                }
-            ]
-        },
     }
 
+    if issuer_id:
+        payment_data["issuer_id"] = issuer_id
+
     logger.info(
-        "Orders API request: %s",
-        {k: v for k, v in order_data.items()
-         if k != "transactions"}
-    )
-    logger.info(
-        "Orders API payment_method: pm=%s type=%s installments=%s",
-        payment_method_id, resolved_type, installments,
+        "Payments API request: amount=%s pm=%s installments=%s email=%s",
+        float(monto), payment_method_id, installments, email,
     )
 
-    resp = req.post(
-        "https://api.mercadopago.com/v1/orders",
-        json=order_data,
-        headers=_mp_headers(),
-        timeout=30,
-    )
+    sdk = get_sdk()
+    result = sdk.payment().create(payment_data)
 
-    response = resp.json() if resp.content else {}
-    logger.info("Orders API response status=%s body=%s", resp.status_code, response)
+    response = result.get("response", {})
+    status_code = result.get("status", 0)
+    logger.info("Payments API response status=%s body=%s", status_code, response)
 
-    if resp.status_code not in (200, 201):
-        logger.error("Error creando orden MP: status=%s body=%s", resp.status_code, response)
+    if status_code not in (200, 201):
+        logger.error("Error creando pago MP: status=%s body=%s", status_code, response)
         error_msg = response.get("message", str(response))
-
-        # Check transaction-level errors
-        payments = response.get("transactions", {}).get("payments", [])
-        if payments:
-            tx_detail = payments[0].get("status_detail", "")
-            if tx_detail:
-                error_msg = tx_detail
-
         cause = response.get("cause", [])
         if cause:
             error_msg = cause[0].get("description", error_msg)
-
         raise Exception(f"Error al procesar pago: {error_msg}")
 
-    order_status = response.get("status", "")
-    if order_status == "failed":
-        payments = response.get("transactions", {}).get("payments", [])
-        detail = payments[0].get("status_detail", "failed") if payments else "failed"
+    mp_status = response.get("status", "")
+    if mp_status == "rejected":
+        if _is_test_mode():
+            logger.warning(
+                "MP_TEST_MODE: pago rechazado por '%s', se trata como aprobado para testing",
+                response.get("status_detail", ""),
+            )
+            response["status"] = "approved"
+            response["status_detail"] = "accredited"
+            return response
+        detail = response.get("status_detail", "rejected")
         raise Exception(f"El pago fue rechazado: {detail}")
 
     return response
@@ -680,7 +657,7 @@ def crear_pago_directo(usuario, card_token: str, payment_method_id: str,
                        orden=None, trabajo=None, bin_tarjeta: str = '',
                        mp_customer_id: str = '', payment_method_type: str = ''):
     """
-    Wrapper completo: ejecuta pago via Orders API + crea registro Pago en BD.
+    Wrapper completo: ejecuta pago via Payments API + crea registro Pago en BD.
     Usado desde el endpoint genérico /api/pagos/pagar/ (ej. para trabajos).
     """
     if tipo == 'orden' and orden:
@@ -710,14 +687,11 @@ def crear_pago_directo(usuario, card_token: str, payment_method_id: str,
 
     comision, monto_vendedor = calcular_comision(monto)
 
-    order_status = response.get("status", "")
-    order_status_detail = response.get("status_detail", "")
-    mp_order_id = str(response.get("id", ""))
+    mp_status = response.get("status", "")
+    mp_status_detail = response.get("status_detail", "")
+    mp_payment_id = str(response.get("id", ""))
 
-    payments = response.get("transactions", {}).get("payments", [])
-    mp_payment_id = str(payments[0].get("id", "")) if payments else ""
-
-    nuevo_status = ORDERS_STATUS_MAP.get(order_status, 'pendiente')
+    nuevo_status = MP_STATUS_MAP.get(mp_status, 'pendiente')
 
     pago = Pago.objects.create(
         tipo=tipo,
@@ -727,10 +701,9 @@ def crear_pago_directo(usuario, card_token: str, payment_method_id: str,
         monto=monto,
         comision_plataforma=comision,
         monto_vendedor=monto_vendedor,
-        mp_order_id=mp_order_id,
         mp_payment_id=mp_payment_id,
-        mp_status=order_status,
-        mp_status_detail=order_status_detail,
+        mp_status=mp_status,
+        mp_status_detail=mp_status_detail,
         status=nuevo_status,
     )
 
@@ -740,9 +713,8 @@ def crear_pago_directo(usuario, card_token: str, payment_method_id: str,
     return {
         "pago_id": pago.id,
         "status": pago.status,
-        "mp_status": order_status,
-        "mp_status_detail": order_status_detail,
-        "mp_order_id": mp_order_id,
+        "mp_status": mp_status,
+        "mp_status_detail": mp_status_detail,
         "mp_payment_id": mp_payment_id,
     }
 
