@@ -14,6 +14,7 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CRE
 echo "🔨 Creando migraciones..."
 docker-compose exec web python manage.py makemigrations
 
+
 echo "📊 Aplicando migraciones..."
 docker-compose exec web python manage.py migrate
 
