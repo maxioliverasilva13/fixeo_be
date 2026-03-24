@@ -26,7 +26,7 @@ class RecursosViewSet(viewsets.ViewSet):
            return [AllowAny()]
        return [IsAuthenticated()]
     
-    def _compress_image(self, image_bytes, max_size=(1200, 1200), quality=85):
+    def _compress_image(self, image_bytes, max_size=(800, 800), quality=75):
         """
         Comprime una imagen manteniendo proporción
         """
@@ -155,8 +155,10 @@ class RecursosViewSet(viewsets.ViewSet):
             
             # Si es imagen, comprimir
             if is_image:
-                file_content = self._compress_image(file_content)
-                result['compressed_size'] = len(file_content)
+                if is_profile:
+                    file_content = self._compress_image(file_content, max_size=(600, 600), quality=80)
+                else:
+                    file_content = self._compress_image(file_content, max_size=(1080, 1080), quality=82)
             
             # Subir archivo principal
             file_path = f"uploads/{base_filename}{file_extension}"
@@ -197,7 +199,7 @@ class RecursosViewSet(viewsets.ViewSet):
         
         Body:
         - url: string (URL del archivo en Supabase)
-        - tipo: string (opcional, auto-detectado si no se proporciona)
+        - tipo: string (opcional, auto-detectfado si no se proporciona)
         - nombre: string (opcional, nombre original del archivo)
         - size: int (opcional)
         - content_type: string (opcional)
