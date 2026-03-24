@@ -43,7 +43,7 @@ def _precio_para_filtro(r: dict) -> float | None:
 SQL_QUERY = """
 WITH empresas_ranked AS (
     SELECT
-        e.id,
+        u.id,
         e.nombre AS titulo,
         u.foto_url,
         u.rounded_foto_url,
@@ -151,6 +151,8 @@ WHERE
 ORDER BY rank DESC
 LIMIT 30;
 """
+
+
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
