@@ -145,7 +145,7 @@ class TrabajoListSerializer(serializers.ModelSerializer):
 
 
 class TrabajoCreateSerializer(serializers.Serializer):
-    descripcion = serializers.CharField(required=True)
+    descripcion = serializers.CharField(required=False, allow_blank=True)
     direccion = serializers.CharField(required=False, allow_blank=True)
     servicios_ids = serializers.ListField(child=serializers.IntegerField(), required=True)
     fecha = serializers.DateField(required=True)
@@ -156,26 +156,31 @@ class TrabajoCreateSerializer(serializers.Serializer):
         child=serializers.CharField(),
         required=False,
         allow_empty=True
-    )    
-    
-def validate_servicios_ids(self, value):
-    if not value:
-        raise serializers.ValidationError("Debe seleccionar al menos un servicio")
-    
-    existing_ids = set(Servicio.objects.filter(
-        id__in=value
-    ).values_list('id', flat=True))
-    
-    requested_ids = set(value)
-    
-    invalid_ids = requested_ids - existing_ids
-    
-    if invalid_ids:
-        raise serializers.ValidationError(
-            f"No se encontraron servicios válidos para los IDs: {sorted(invalid_ids)}"
-        )
-    
-    return value
+    )
+    metodo_pago = serializers.ChoiceField(
+        choices=['efectivo', 'tarjeta', 'mercadopago', 'transferencia', 'app'],
+        default='efectivo',
+        required=False,
+    )
+
+    def validate_servicios_ids(self, value):
+        if not value:
+            raise serializers.ValidationError("Debe seleccionar al menos un servicio")
+        
+        existing_ids = set(Servicio.objects.filter(
+            id__in=value
+        ).values_list('id', flat=True))
+        
+        requested_ids = set(value)
+        
+        invalid_ids = requested_ids - existing_ids
+        
+        if invalid_ids:
+            raise serializers.ValidationError(
+                f"No se encontraron servicios válidos para los IDs: {sorted(invalid_ids)}"
+            )
+        
+        return value
 
 class OfertaTrabajoSerializer(serializers.ModelSerializer):
     profesional_detalle = UsuarioBasicInformationSerializer(source='profesional', read_only=True)

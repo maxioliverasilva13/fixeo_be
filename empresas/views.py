@@ -41,6 +41,47 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
 
+    @action(detail=True, methods=['patch'], url_path='metodos-pago')
+    def actualizar_metodos_pago(self, request, pk=None):
+        empresa = self.get_object()
+
+        if empresa.admin_id != request.user:
+            return Response(
+                {'error': 'No tenés permisos para modificar esta empresa'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        acepta_efectivo = request.data.get('acepta_efectivo')
+        acepta_tarjeta = request.data.get('acepta_tarjeta')
+
+        update_fields = []
+
+        if acepta_tarjeta is not None:
+            empresa.acepta_tarjeta = acepta_tarjeta
+            update_fields.append('acepta_tarjeta')
+
+        if acepta_efectivo is not None:
+            if acepta_efectivo:
+                from suscripciones.models import Subscripcion
+                from django.utils import timezone
+                tiene_sub = Subscripcion.objects.filter(
+                    user_id=empresa.admin_id,
+                    cancelada=False,
+                    expiracion__gt=timezone.now(),
+                ).exists()
+                if not tiene_sub:
+                    return Response(
+                        {'error': 'Necesitás una suscripción activa para habilitar pagos en efectivo'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            empresa.acepta_efectivo = acepta_efectivo
+            update_fields.append('acepta_efectivo')
+
+        if update_fields:
+            empresa.save(update_fields=update_fields)
+
+        return Response(EmpresaSerializer(empresa).data)
+
     @action(detail=True, methods=['get'], url_path='distance-from-me')
     def distance_from_me(self, request, pk=None):
         empresa = self.get_object()
@@ -145,7 +186,6 @@ class ProductoViewSet(viewsets.ModelViewSet):
             empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
             queryset = queryset.filter(empresa__in=empresas_usuario)
         
-        # Filtro de búsqueda por palabras
         if search:
             palabras = search.strip().split()
             q_filter = Q()

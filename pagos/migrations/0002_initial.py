@@ -10,68 +10,85 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('notificaciones', '0001_initial'),
+        ('carritos', '0002_initial'),
+        ('pagos', '0001_initial'),
+        ('trabajos', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='devicetoken',
+            model_name='mercadopagocustomer',
             name='created_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_created', to=settings.AUTH_USER_MODEL, verbose_name='Creado por'),
         ),
         migrations.AddField(
-            model_name='devicetoken',
+            model_name='mercadopagocustomer',
             name='deleted_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_deleted', to=settings.AUTH_USER_MODEL, verbose_name='Eliminado por'),
         ),
         migrations.AddField(
-            model_name='devicetoken',
+            model_name='mercadopagocustomer',
             name='updated_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_updated', to=settings.AUTH_USER_MODEL, verbose_name='Actualizado por'),
         ),
         migrations.AddField(
-            model_name='devicetoken',
+            model_name='mercadopagocustomer',
             name='usuario',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='device_tokens', to=settings.AUTH_USER_MODEL),
+            field=models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='mp_customer', to=settings.AUTH_USER_MODEL),
         ),
         migrations.AddField(
-            model_name='notas',
+            model_name='pago',
             name='created_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_created', to=settings.AUTH_USER_MODEL, verbose_name='Creado por'),
         ),
         migrations.AddField(
-            model_name='notas',
+            model_name='pago',
             name='deleted_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_deleted', to=settings.AUTH_USER_MODEL, verbose_name='Eliminado por'),
         ),
         migrations.AddField(
-            model_name='notas',
+            model_name='pago',
+            name='orden',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='pagos', to='carritos.orden'),
+        ),
+        migrations.AddField(
+            model_name='pago',
+            name='trabajo',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='pagos', to='trabajos.trabajo'),
+        ),
+        migrations.AddField(
+            model_name='pago',
             name='updated_by',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_updated', to=settings.AUTH_USER_MODEL, verbose_name='Actualizado por'),
         ),
         migrations.AddField(
-            model_name='notificaciones',
-            name='created_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_created', to=settings.AUTH_USER_MODEL, verbose_name='Creado por'),
-        ),
-        migrations.AddField(
-            model_name='notificaciones',
-            name='deleted_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_deleted', to=settings.AUTH_USER_MODEL, verbose_name='Eliminado por'),
-        ),
-        migrations.AddField(
-            model_name='notificaciones',
-            name='updated_by',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_updated', to=settings.AUTH_USER_MODEL, verbose_name='Actualizado por'),
-        ),
-        migrations.AddField(
-            model_name='notificaciones',
+            model_name='pago',
             name='usuario',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='notificaciones', to=settings.AUTH_USER_MODEL),
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='pagos', to=settings.AUTH_USER_MODEL),
+        ),
+        migrations.AddField(
+            model_name='tarjeta',
+            name='created_by',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_created', to=settings.AUTH_USER_MODEL, verbose_name='Creado por'),
+        ),
+        migrations.AddField(
+            model_name='tarjeta',
+            name='deleted_by',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_deleted', to=settings.AUTH_USER_MODEL, verbose_name='Eliminado por'),
+        ),
+        migrations.AddField(
+            model_name='tarjeta',
+            name='updated_by',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_updated', to=settings.AUTH_USER_MODEL, verbose_name='Actualizado por'),
+        ),
+        migrations.AddField(
+            model_name='tarjeta',
+            name='usuario',
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tarjetas', to=settings.AUTH_USER_MODEL),
         ),
         migrations.AlterUniqueTogether(
-            name='devicetoken',
-            unique_together={('device_token', 'usuario')},
+            name='tarjeta',
+            unique_together={('usuario', 'mp_card_id')},
         ),
     ]
