@@ -1,7 +1,5 @@
 from pathlib import Path
 from decouple import config
-import firebase_admin
-from firebase_admin import credentials
 import json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -249,8 +247,8 @@ MP_WEBHOOK_BASE_URL = config('MP_WEBHOOK_BASE_URL', default='http://localhost:80
 MP_WEBHOOK_SECRET = config('MP_WEBHOOK_SECRET', default='')
 MP_TEST_MODE = config('MP_TEST_MODE', default=False, cast=bool)
 
-if FIREBASE_CREDENTIALS and not firebase_admin._apps:
-    cred_dict = json.loads(FIREBASE_CREDENTIALS)
-    cred = credentials.Certificate(cred_dict)
-    firebase_admin.initialize_app(cred)
+if FIREBASE_CREDENTIALS:
+    from fixeo_project.firebase_init import ensure_firebase_app
+
+    ensure_firebase_app(FIREBASE_CREDENTIALS)
 

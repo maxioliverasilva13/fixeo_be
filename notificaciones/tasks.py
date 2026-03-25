@@ -1,26 +1,12 @@
 from celery import shared_task
 from django.conf import settings
-import firebase_admin
-from firebase_admin import credentials, messaging
-import json
-import os
+from firebase_admin import messaging
 
-
-_firebase_app = None
+from fixeo_project.firebase_init import ensure_firebase_app
 
 
 def get_firebase_app():
-    global _firebase_app
-    if _firebase_app is None:
-        if settings.FIREBASE_CREDENTIALS:
-            if os.path.isfile(settings.FIREBASE_CREDENTIALS):
-                cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS)
-            else:
-                cred_dict = json.loads(settings.FIREBASE_CREDENTIALS)
-                cred = credentials.Certificate(cred_dict)
-            
-            _firebase_app = firebase_admin.initialize_app(cred)
-    return _firebase_app
+    return ensure_firebase_app()
 
 
 @shared_task(name='notificaciones.notificar_usuario')
@@ -50,7 +36,9 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
     )
     
     try:
-        get_firebase_app()
+        app = get_firebase_app()
+        if app is None:
+            return {'error': 'Firebase no configurado (FIREBASE_CREDENTIALS vacío)'}
     except Exception as e:
         return {'error': f'Firebase no inicializado: {str(e)}'}
     
