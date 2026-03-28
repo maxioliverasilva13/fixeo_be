@@ -12,6 +12,7 @@ from disponibilidad.models import Disponibilidad, Tipo
 from disponibilidad.utils import calcular_rango, hay_conflicto, rango_horario_empresa
 from trabajos.utils import filtrar_trabajos_por_distancia_sql
 from usuario.models import Usuario
+from usuario.utils import foto_usuario_api
 from servicios.models import Servicio
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
@@ -583,7 +584,9 @@ class CalificacionViewSet(viewsets.ViewSet):
                 'created_at': c.created_at,
                 'user_cal_sender_nombre': c.user_cal_sender.nombre,
                 'user_cal_sender_apellido': c.user_cal_sender.apellido,
-                'user_cal_sender_foto': c.user_cal_sender.foto_url if hasattr(c.user_cal_sender, 'foto_url') else None,
+                'user_cal_sender_foto': foto_usuario_api(
+                    c.user_cal_sender.foto_url or c.user_cal_sender.rounded_foto_url
+                ),
                 'trabajo_id': c.trabajo.id if c.trabajo else None,
                 'servicios': servicios_nombres,
             })

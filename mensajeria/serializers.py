@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from usuario.utils import foto_usuario_api
 from .models import Chat, Mensajes, Recurso
 
 
@@ -54,13 +55,15 @@ class ChatSerializer(serializers.ModelSerializer):
         return f"{obj.sender.nombre} {obj.sender.apellido}"
     
     def get_sender_photo_rounded(self, obj):
-        return obj.sender.rounded_foto_url if obj.sender.rounded_foto_url else None
-    
+        u = obj.sender
+        return foto_usuario_api(u.rounded_foto_url or u.foto_url)
+
     def get_receiver_nombre(self, obj):
         return f"{obj.receiver.nombre} {obj.receiver.apellido}"
-    
+
     def get_receiver_photo_rounded(self, obj):
-        return obj.receiver.rounded_foto_url if obj.receiver.rounded_foto_url else None
+        u = obj.receiver
+        return foto_usuario_api(u.rounded_foto_url or u.foto_url)
     
     def get_trabajo_info(self, obj):
         if obj.trabajo:

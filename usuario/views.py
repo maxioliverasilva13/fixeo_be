@@ -7,7 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
 from usuario.models import Usuario, PasswordResetToken
-from usuario.utils import obtener_localizacion_usuario
+from usuario.utils import obtener_localizacion_usuario, foto_usuario_api
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
 from usuario.serializers import (
@@ -586,6 +586,12 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             ])
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        for r in results:
+            if 'foto_url' in r:
+                r['foto_url'] = foto_usuario_api(r.get('foto_url'))
+            if 'rounded_foto_url' in r:
+                r['rounded_foto_url'] = foto_usuario_api(r.get('rounded_foto_url'))
 
         if profesion_id:
             pid = int(profesion_id)

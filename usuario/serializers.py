@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
+from .utils import foto_usuario_api
 from rol.serializers import RolSerializer
 from django.db.models import Prefetch
 from empresas.serializers import EmpresaSerializer
@@ -8,7 +9,20 @@ from localizacion.models import Localizacion
 from django.db import transaction
 from datetime import timedelta
 
-class UsuarioSortSerializer(serializers.ModelSerializer):
+
+class UsuarioFotoApiMixin:
+    """foto_url y rounded_foto_url siempre como string; vacío si el usuario no tiene foto."""
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if 'foto_url' in data:
+            data['foto_url'] = foto_usuario_api(data.get('foto_url'))
+        if 'rounded_foto_url' in data:
+            data['rounded_foto_url'] = foto_usuario_api(data.get('rounded_foto_url'))
+        return data
+
+
+class UsuarioSortSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     rol_detalle = RolSerializer(source='rol', read_only=True)
     empresa = serializers.SerializerMethodField()
     localizacion_principal = serializers.SerializerMethodField()
@@ -41,7 +55,7 @@ class UsuarioSortSerializer(serializers.ModelSerializer):
             return LocalizacionSerializer(relacion.localizacion).data
 
 
-class UsuarioSerializer(serializers.ModelSerializer):
+class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     localizaciones = serializers.SerializerMethodField()
     servicios = serializers.SerializerMethodField()
@@ -109,9 +123,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
         return [ProfesionSerializer(up.profesion).data for up in usuario_profesiones]
 
     def get_foto_map_url(self, obj):
-        if not obj.rounded_foto_url:
-            return obj.foto_url
-        return obj.rounded_foto_url
+        return foto_usuario_api(obj.rounded_foto_url or obj.foto_url)
 
     def get_localizaciones(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
@@ -153,7 +165,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
             .values_list('device_token', flat=True)
         )
 
-class UsuarioBasicInformationSerializer(serializers.ModelSerializer):
+class UsuarioBasicInformationSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()
 
     class Meta:
@@ -312,7 +324,7 @@ class FilterUsersMapaSerializer(serializers.Serializer):
     is_urgent    = serializers.BooleanField(required=False, default=False)
 
 
-class UpdateUsuarioSerializer(serializers.ModelSerializer):
+class UpdateUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     """
     Serializer para actualizar la información del usuario logueado
     """
@@ -367,7 +379,7 @@ class UpdateUsuarioSerializer(serializers.ModelSerializer):
 
         return attrs
 
-class UsuarioInMapaSerializer(serializers.ModelSerializer):
+class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     localizacion = serializers.SerializerMethodField()
 

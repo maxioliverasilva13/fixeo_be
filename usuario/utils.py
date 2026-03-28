@@ -1,3 +1,6 @@
+def foto_usuario_api(valor):
+    """Para respuestas JSON: sin foto (None o vacío) -> string vacía."""
+    return valor if valor else ''
 
 
 def obtener_localizacion_usuario(usuario):
