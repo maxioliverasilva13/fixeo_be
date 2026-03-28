@@ -31,5 +31,5 @@ python manage.py seed_roles || echo "⚠️  Seed roles ya ejecutado o falló"
 python manage.py seed_profesiones || echo "⚠️  Seed profesiones ya ejecutado o falló"
 python manage.py seed_plans|| echo "⚠️  Seed profesiones ya ejecutado o falló"
 
-echo "✅ Iniciando servidor con Gunicorn..."
-gunicorn fixeo_project.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 120
+echo "✅ Iniciando servidor con Daphne (ASGI + WebSockets)..."
+daphne -b 0.0.0.0 -p $PORT fixeo_project.asgi:application
