@@ -612,6 +612,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         elif sort_by == 'mejor_precio':
             results.sort(key=lambda x: (_precio_para_filtro(x) is None, _precio_para_filtro(x) or 0))
 
+        print("SEARCH RESULTS:", results)
         return Response(results)
 
     @action(detail=True, methods=['get'], url_path='from-me')
