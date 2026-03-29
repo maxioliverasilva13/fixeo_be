@@ -21,7 +21,10 @@ from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, Traba
 from rest_framework.decorators import action
 from django.db.models import Avg
 from django.utils.dateparse import parse_date
+from django.utils import timezone as django_timezone
 from django.db.models import Q
+import calendar as calendar_module
+from datetime import date as date_cls, timedelta as timedelta_cls
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from mensajeria.models import Recurso, Mensajes
@@ -225,6 +228,79 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'pendientes': trabajos_pendientes,
                 'total': ofertas_recibidas + trabajos_pendientes
             }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='ocupacion-mes')
+    def ocupacion_mes(self, request):
+        """
+        Ocupación por día del mes para el profesional logueado (trabajos asignados).
+        Una sola query liviana + conteo en memoria (típicamente pocos registros por mes).
+        """
+        user = request.user
+        try:
+            year = int(request.query_params.get('year', django_timezone.now().year))
+            month = int(request.query_params.get('month', django_timezone.now().month))
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'year y month deben ser enteros'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if month < 1 or month > 12:
+            return Response({'error': 'month inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        last_day = calendar_module.monthrange(year, month)[1]
+        start_d = date_cls(year, month, 1)
+        end_d = date_cls(year, month, last_day)
+
+        qs = (
+            Trabajo.objects.filter(profesional=user)
+            .exclude(status='cancelado')
+            .filter(
+                fecha_inicio__isnull=False,
+                fecha_fin__isnull=False,
+                fecha_inicio__date__lte=end_d,
+                fecha_fin__date__gte=start_d,
+            )
+            .only('id', 'fecha_inicio', 'fecha_fin')
+        )
+
+        day_counts = {d: 0 for d in range(1, last_day + 1)}
+        for t in qs.iterator(chunk_size=200):
+            fi = django_timezone.localtime(t.fecha_inicio).date()
+            ff = django_timezone.localtime(t.fecha_fin).date()
+            d_start = max(fi, start_d)
+            d_end = min(ff, end_d)
+            if d_start > d_end:
+                continue
+            current = d_start
+            while current <= d_end:
+                day_counts[current.day] += 1
+                current += timedelta_cls(days=1)
+
+        max_c = max(day_counts.values()) if day_counts else 0
+        dias = []
+        for dia in range(1, last_day + 1):
+            c = day_counts[dia]
+            porcentaje = int(round(100 * c / max_c)) if max_c else 0
+            if c == 0:
+                nivel = 'libre'
+            elif c == 1:
+                nivel = 'medio'
+            else:
+                nivel = 'alto'
+
+            dias.append({
+                'dia': dia,
+                'count': c,
+                'porcentaje': porcentaje,
+                'nivel': nivel,
+            })
+
+        return Response({
+            'year': year,
+            'month': month,
+            'dias': dias,
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='finalizar')
     def finalizar_trabajo(self, request, pk=None):
