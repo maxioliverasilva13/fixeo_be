@@ -18,7 +18,8 @@ def finalizar_trabajos_vencidos():
         status__in=['pendiente', 'pendiente_urgente', 'aceptado'],
         fecha_fin__isnull=False,
         fecha_fin__lte=limite,
-    ).select_related('usuario', 'profesional')
+    ).select_related('usuario', 'profesional')\
+     .prefetch_related('profesional__empresas_administradas')
     
     trabajos = list(trabajos_qs)
     

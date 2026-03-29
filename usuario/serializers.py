@@ -64,7 +64,9 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     foto_map_url = serializers.SerializerMethodField()
     localizacion_principal = serializers.SerializerMethodField()
     device_tokens = serializers.SerializerMethodField()
-    subscripcion_activa = serializers.SerializerMethodField()   
+    subscripcion_activa = serializers.SerializerMethodField()
+    es_visible_en_mapa = serializers.SerializerMethodField()
+    advertencias_mapa = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
@@ -73,7 +75,8 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
                   'is_active', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens',
-                  'subscripcion_activa', 'rating','cant_calif']                        
+                  'subscripcion_activa', 'rating','cant_calif',
+                  'es_visible_en_mapa', 'advertencias_mapa']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_subscripcion_activa(self, obj):
@@ -102,10 +105,9 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
         inicio_periodo = subscripcion.expiracion - timedelta(days=30)
 
-        print('inicio', inicio_periodo)
-
         trabajos_usados = Trabajo.objects.filter(
             profesional=obj,
+            metodo_pago='efectivo',
             created_at__gte=inicio_periodo,
             is_deleted=False,
         ).exclude(status='cancelado').count()
@@ -116,6 +118,79 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         return UsuarioSubscripcionActivaSerializer(subscripcion, context={
             'jobs_restantes': jobs_restantes
         }).data
+
+    def _get_empresa_visibilidad(self, obj):
+        """
+        Devuelve (es_visible, [advertencias]).
+        Solo aplica a propietarios de empresa; devuelve (None, []) para el resto.
+        """
+        if not obj.is_owner_empresa:
+            return None, []
+
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return False, ['No tenés empresa configurada']
+
+        from django.utils import timezone
+        from datetime import timedelta
+        from suscripciones.models import Subscripcion
+        from trabajos.models import Trabajo
+
+        # MercadoPago disponible
+        has_mp = empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado
+
+        has_efectivo = False
+        advertencias = []
+
+        if empresa.acepta_efectivo:
+            subscripcion = (
+                Subscripcion.objects
+                .filter(user_id=obj, cancelada=False, expiracion__gt=timezone.now())
+                .select_related('plan_id')
+                .order_by('-created_at')
+                .first()
+            )
+            if subscripcion:
+                inicio_periodo = subscripcion.expiracion - timedelta(days=30)
+                usados = Trabajo.objects.filter(
+                    profesional=obj,
+                    metodo_pago='efectivo',
+                    created_at__gte=inicio_periodo,
+                    is_deleted=False,
+                ).exclude(status='cancelado').count()
+                jobs_restantes = max(0, subscripcion.plan_id.cantidad_jobs - usados)
+                if jobs_restantes > 0:
+                    has_efectivo = True
+                else:
+                    advertencias.append(
+                        'Alcanzaste el límite de trabajos en efectivo de tu suscripción'
+                    )
+            else:
+                advertencias.append('No tenés suscripción activa para cobrar en efectivo')
+
+        if empresa.acepta_tarjeta and not empresa.is_mercadopago_vinculado:
+            advertencias.append('Vinculá tu cuenta de MercadoPago para cobrar con tarjeta')
+
+        if has_mp or has_efectivo:
+            return True, []
+
+        return False, advertencias if advertencias else ['No tenés ningún método de pago disponible']
+
+    def get_es_visible_en_mapa(self, obj):
+        if not hasattr(self, '_visibilidad_cache'):
+            self._visibilidad_cache = {}
+        if obj.id not in self._visibilidad_cache:
+            self._visibilidad_cache[obj.id] = self._get_empresa_visibilidad(obj)
+        visible, _ = self._visibilidad_cache[obj.id]
+        return visible
+
+    def get_advertencias_mapa(self, obj):
+        if not hasattr(self, '_visibilidad_cache'):
+            self._visibilidad_cache = {}
+        if obj.id not in self._visibilidad_cache:
+            self._visibilidad_cache[obj.id] = self._get_empresa_visibilidad(obj)
+        _, advertencias = self._visibilidad_cache[obj.id]
+        return advertencias
     
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer

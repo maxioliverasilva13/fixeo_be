@@ -357,14 +357,81 @@ def _actualizar_entidad_pago_aprobado(pago):
             orden.save(update_fields=['status', 'updated_at'])
 
 
+def _obtener_empresa_de_pago(pago):
+    """Obtiene la empresa asociada al pago (vía orden o trabajo)."""
+    try:
+        if pago.tipo == 'orden' and pago.orden:
+            # Orden tiene FK directo a empresa
+            return pago.orden.empresa
+        elif pago.tipo == 'trabajo' and pago.trabajo:
+            # El profesional (vendedor) del trabajo administra la empresa
+            profesional = pago.trabajo.profesional
+            if profesional:
+                return profesional.empresas_administradas.first()
+    except Exception as e:
+        logger.warning("No se pudo obtener empresa del pago %s: %s", pago.id, e)
+    return None
+
+
+def transferir_al_vendedor(empresa, monto_vendedor: Decimal) -> bool:
+    """
+    Transfiere monto_vendedor a la cuenta MP del vendedor.
+    Requiere que la empresa tenga mp_access_token y mp_user_id configurados.
+    NOTA: Requiere cuenta Marketplace aprobada por Mercado Pago.
+    """
+    if not empresa or not empresa.mp_user_id:
+        logger.info("Empresa sin MP vinculado — sin transferencia automática")
+        return False
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.MP_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
+            "X-Idempotency-Key": str(uuid.uuid4()),
+        }
+        payload = {
+            "amount": float(monto_vendedor),
+            "receiver_id": int(empresa.mp_user_id),
+            "money_release_days": 0,
+        }
+        resp = req.post(
+            "https://api.mercadopago.com/v1/account/bank_transfers",
+            json=payload,
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code in (200, 201):
+            logger.info(
+                "Transferencia exitosa a empresa_id=%s mp_user_id=%s monto=%s",
+                empresa.id, empresa.mp_user_id, monto_vendedor,
+            )
+            return True
+        else:
+            logger.error(
+                "Error en transferencia MP a empresa_id=%s: %s %s",
+                empresa.id, resp.status_code, resp.text[:300],
+            )
+    except Exception as e:
+        logger.error("Excepción en transferencia MP empresa_id=%s: %s", empresa.id, e)
+
+    return False
+
+
 def liberar_pago(pago):
-    """Marca un pago como liberado (dinero disponible para el vendedor/profesional)."""
+    """
+    Marca un pago como liberado y transfiere el monto al vendedor si tiene MP vinculado.
+    """
     if pago.status != 'aprobado':
         return False
 
     pago.status = 'liberado'
     pago.liberado_at = timezone.now()
     pago.save(update_fields=['status', 'liberado_at', 'updated_at'])
+
+    empresa = _obtener_empresa_de_pago(pago)
+    if empresa and empresa.is_mercadopago_vinculado and empresa.mp_user_id:
+        transferir_al_vendedor(empresa, pago.monto_vendedor)
+
     return True
 
 
@@ -376,7 +443,9 @@ def liberar_pagos_entidad(tipo: str, entidad_id: int):
     elif tipo == 'trabajo':
         filtro['trabajo_id'] = entidad_id
 
-    pagos = Pago.objects.filter(**filtro)
+    pagos = Pago.objects.filter(**filtro)\
+        .select_related('orden__empresa', 'trabajo__profesional')\
+        .prefetch_related('trabajo__profesional__empresas_administradas')
     liberados = 0
     for pago in pagos:
         if liberar_pago(pago):

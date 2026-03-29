@@ -40,6 +40,73 @@ def _precio_para_filtro(r: dict) -> float | None:
         p = r.get('precio_servicio') or r.get('precio')
     return float(p) if p is not None else None
 
+
+def _batch_visibility_data(user_ids: list):
+    """
+    Devuelve (subs_map, efectivo_counts) para un conjunto de user_ids.
+
+    subs_map: {user_id: Subscripcion} — la suscripción activa más reciente por usuario.
+    efectivo_counts: {user_id: int} — cantidad de trabajos en efectivo en los últimos 30 días.
+    """
+    from suscripciones.models import Subscripcion
+    from trabajos.models import Trabajo
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db.models import Count
+
+    now = timezone.now()
+    subs_map = {}
+    for sub in (
+        Subscripcion.objects
+        .filter(user_id__in=user_ids, cancelada=False, expiracion__gt=now)
+        .select_related('plan_id')
+        .order_by('-created_at')
+    ):
+        uid = sub.user_id_id
+        if uid not in subs_map:
+            subs_map[uid] = sub
+
+    hace_30_dias = now - timedelta(days=30)
+    efectivo_counts = dict(
+        Trabajo.objects
+        .filter(
+            profesional__in=user_ids,
+            metodo_pago='efectivo',
+            created_at__gte=hace_30_dias,
+            is_deleted=False,
+        )
+        .exclude(status='cancelado')
+        .values('profesional')
+        .annotate(cnt=Count('id'))
+        .values_list('profesional', 'cnt')
+    )
+    return subs_map, efectivo_counts
+
+
+def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
+    """
+    Devuelve True si la empresa tiene al menos un método de pago activo disponible.
+    Debe llamarse con los datos precargados de _batch_visibility_data.
+    """
+    empresa = usuario.empresas_administradas.first()
+    if not empresa:
+        return False
+
+    # MP disponible
+    if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
+        return True
+
+    # Efectivo disponible
+    if empresa.acepta_efectivo:
+        sub = subs_map.get(usuario.id)
+        if sub:
+            usados = efectivo_counts.get(usuario.id, 0)
+            jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
+            if jobs_restantes > 0:
+                return True
+
+    return False
+
 SQL_QUERY = """
 WITH empresas_ranked AS (
     SELECT
@@ -498,7 +565,9 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 localizacion__isPrimary=True,
                 usuario__is_owner_empresa=True,
                 usuario__is_active=True,
-            ).select_related('usuario', 'localizacion').distinct()
+            ).select_related('usuario', 'localizacion').prefetch_related(
+                'usuario__empresas_administradas'
+            ).distinct()
 
             if profesion_id:
                 usuarios_loc = usuarios_loc.filter(
@@ -517,12 +586,21 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     usuario__trabajos_asignados__esUrgente=True
                 ).distinct()
 
+            # Precargar suscripciones activas y conteo de trabajos en efectivo
+            usuarios_list = list(usuarios_loc)
+            user_ids = [ul.usuario.id for ul in usuarios_list]
+            subs_map, efectivo_counts = _batch_visibility_data(user_ids)
+
             center_lat = float((north + south) / 2)
             center_lng = float((east + west) / 2)
             
             results = []
-            for ul in usuarios_loc:
+            for ul in usuarios_list:
                 usuario = ul.usuario
+
+                if not _es_visible_en_mapa(usuario, subs_map, efectivo_counts):
+                    continue
+
                 lat = float(ul.localizacion.latitud)
                 lng = float(ul.localizacion.longitud)
 
@@ -695,10 +773,18 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             localizacion__isPrimary=True,
             usuario__is_owner_empresa=True,
             usuario__is_active=True,
-        ).select_related('usuario', 'localizacion').distinct()
+        ).select_related('usuario', 'localizacion').prefetch_related(
+            'usuario__empresas_administradas'
+        ).distinct()
+
+        usuarios_list = list(usuarios_loc)
+        user_ids = [ul.usuario.id for ul in usuarios_list]
+        subs_map, efectivo_counts = _batch_visibility_data(user_ids)
 
         results = []
-        for ul in usuarios_loc:
+        for ul in usuarios_list:
+            if not _es_visible_en_mapa(ul.usuario, subs_map, efectivo_counts):
+                continue
             avg_rating = ul.usuario.calificaciones_recibidas.aggregate(avg=Avg('rating'))['avg'] or 0
             min_price = ul.usuario.servicios.order_by('precio').values_list('precio', flat=True).first()
             results.append({

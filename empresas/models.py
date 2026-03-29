@@ -5,17 +5,56 @@ from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
 
 class Empresa(BaseModel):
+    PAIS_CHOICES = [
+        ('AR', 'Argentina'),
+        ('BO', 'Bolivia'),
+        ('BR', 'Brasil'),
+        ('CL', 'Chile'),
+        ('CO', 'Colombia'),
+        ('CR', 'Costa Rica'),
+        ('CU', 'Cuba'),
+        ('DO', 'República Dominicana'),
+        ('EC', 'Ecuador'),
+        ('GT', 'Guatemala'),
+        ('HN', 'Honduras'),
+        ('MX', 'México'),
+        ('NI', 'Nicaragua'),
+        ('PA', 'Panamá'),
+        ('PE', 'Perú'),
+        ('PR', 'Puerto Rico'),
+        ('PY', 'Paraguay'),
+        ('SV', 'El Salvador'),
+        ('UY', 'Uruguay'),
+        ('VE', 'Venezuela'),
+    ]
+
+    # Mapeo de nombres completos de país (Mapbox/Nominatim) a código ISO
+    COUNTRY_NAME_TO_CODE = {
+        'argentina': 'AR', 'bolivia': 'BO', 'brasil': 'BR', 'brazil': 'BR',
+        'chile': 'CL', 'colombia': 'CO', 'costa rica': 'CR', 'cuba': 'CU',
+        'república dominicana': 'DO', 'republica dominicana': 'DO', 'dominican republic': 'DO',
+        'ecuador': 'EC', 'el salvador': 'SV', 'guatemala': 'GT', 'honduras': 'HN',
+        'mexico': 'MX', 'méxico': 'MX', 'nicaragua': 'NI', 'panama': 'PA', 'panamá': 'PA',
+        'peru': 'PE', 'perú': 'PE', 'paraguay': 'PY', 'puerto rico': 'PR',
+        'uruguay': 'UY', 'venezuela': 'VE',
+    }
+
     nombre = models.CharField(max_length=200)
     ubicacion = models.CharField(max_length=255)
     descripcion = models.TextField()
     latitud = models.DecimalField(max_digits=10, decimal_places=7)
     longitud = models.DecimalField(max_digits=10, decimal_places=7)
+    pais = models.CharField(max_length=5, choices=PAIS_CHOICES, default='UY')
     unipersonal = models.BooleanField(default=False)
     vende_productos = models.BooleanField(default=False)
     vende_servicios = models.BooleanField(default=False)
     acepta_efectivo = models.BooleanField(default=True)
     acepta_tarjeta = models.BooleanField(default=True)
-    is_mercadopago_vinculado = models.BooleanField(default=True)
+    is_mercadopago_vinculado = models.BooleanField(default=False)
+    mp_access_token = models.TextField(blank=True, default='')
+    mp_refresh_token = models.TextField(blank=True, default='')
+    mp_user_id = models.CharField(max_length=100, blank=True, default='')
+    mp_email = models.EmailField(blank=True, default='')
     localizacion = models.ForeignKey('localizacion.Localizacion', on_delete=models.SET_NULL, null=True, related_name='empresas')
     admin_id = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='empresas_administradas')
     
