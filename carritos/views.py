@@ -6,7 +6,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from django.db import transaction
 from rest_framework import serializers as drf_serializers
-
+from mensajeria.models import Chat, Mensajes
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from .models import Carrito, CarritoItem, Orden, OrdenItem
 from .serializers import (
     CarritoSerializer, CarritoItemSerializer, CarritoItemCreateSerializer,
@@ -14,6 +16,7 @@ from .serializers import (
 )
 from empresas.models import Empresa, Producto
 from notificaciones.models import Notificaciones
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +275,44 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 comision_plataforma=comision_plataforma,
                 pago_status=pago_status,
             )
+
+        chat = Chat.objects.filter(
+            Q(sender=request.user, receiver=empresa.admin_id) |
+            Q(sender=empresa.admin_id, receiver=request.user)
+        ).first()
+
+        if not chat:
+            chat = Chat.objects.create(
+                sender=empresa.admin_id,
+                receiver=request.user,
+            )
+
+        if empresa.admin_id.defaultMessageReservation:
+            mensaje = Mensajes.objects.create(
+                texto=empresa.admin_id.defaultMessageReservation,
+                sender=empresa.admin_id,
+                chat=chat
+            )
+
+            channel_layer = get_channel_layer()
+            room_name = f"usuario_channel_{request.user.id}"
+
+            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+                'type': 'chat_message',
+                'message': mensaje.texto,
+                'user_id': empresa.admin_id.id,
+                'leido': False,
+                'chat_id': chat.id,
+                'chat': {
+                    'id': chat.id,
+                    'sender_id': empresa.admin_id.id,
+                    'sender_nombre': f"{empresa.admin_id.nombre} {empresa.admin_id.apellido}",
+                    'receiver_id': request.user.id,
+                    'receiver_nombre': f"{request.user.nombre} {request.user.apellido}",
+                    'trabajo_id': None,
+                    'ultimo_mensaje_at': mensaje.created_at.isoformat(),
+                }
+            })
 
             for item in items_carrito:
                 OrdenItem.objects.create(
