@@ -588,7 +588,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-        print("RAW SEARCH RESULTS:", results)
         for r in results:
             if 'foto_url' in r:
                 r['foto_url'] = foto_usuario_api(r.get('foto_url'))
@@ -613,7 +612,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         elif sort_by == 'mejor_precio':
             results.sort(key=lambda x: (_precio_para_filtro(x) is None, _precio_para_filtro(x) or 0))
 
-        print("SEARCH RESULTS:", results)
         return Response(results)
 
     @action(detail=True, methods=['get'], url_path='from-me')
