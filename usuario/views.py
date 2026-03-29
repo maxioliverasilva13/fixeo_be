@@ -588,6 +588,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+        print("RAW SEARCH RESULTS:", results)
         for r in results:
             if 'foto_url' in r:
                 r['foto_url'] = foto_usuario_api(r.get('foto_url'))
