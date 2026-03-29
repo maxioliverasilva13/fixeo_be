@@ -172,14 +172,15 @@ SELECT
     rating,
     es_urgente,
     profesion_ids,
-    NULL::numeric AS precio_servicio
+    NULL::numeric AS precio_servicio,
+    NULL::integer AS producto_id
 FROM empresas_ranked
 
 UNION ALL
 
 SELECT
     'producto' AS tipo,
-    pr.id,
+    u.id,                          -- 👈 cambiado de pr.id a u.id
     pr.nombre AS titulo,
     pr.descripcion AS extra,
     NULL,
@@ -200,7 +201,8 @@ SELECT
     0::numeric AS rating,
     false AS es_urgente,
     NULL::integer[] AS profesion_ids,
-    NULL::numeric AS precio_servicio
+    NULL::numeric AS precio_servicio,
+    pr.id AS producto_id           -- 👈 agregado
 FROM producto pr
 JOIN empresa e ON e.id = pr.empresa_id
 JOIN usuario u ON u.id = e.admin_id_id
@@ -218,7 +220,6 @@ WHERE
 ORDER BY rank DESC
 LIMIT 30;
 """
-
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
