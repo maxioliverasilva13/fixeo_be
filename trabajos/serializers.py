@@ -27,6 +27,16 @@ class TrabajoUrgenteCreateSerializer(serializers.Serializer):
     direccion = serializers.CharField(required=False, allow_blank=True)
     fecha = serializers.DateField(required=True)
     hora = serializers.TimeField(required=True)
+    currency = serializers.ChoiceField(
+        choices=[
+            'ARS', 'BRL', 'CLP', 'COP', 'MXN', 'PEN',
+            'UYU', 'BOB', 'PYG', 'VES', 'CRC', 'DOP',
+            'GTQ', 'HNL', 'NIO', 'PAB', 'USD'
+        ],
+        required=False,
+        allow_null=True,
+        default=None
+    )
 
     fotos = serializers.ListField(
         child=serializers.URLField(),
@@ -99,7 +109,7 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
             'servicios', 'calificaciones',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
             'created_at', 'updated_at', 'localizacion_detalle',
-            'chat_id', 'fotos'  
+            'chat_id', 'fotos', 'currency'
         ]
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario = UsuarioSerializer(read_only=True)
@@ -131,7 +141,8 @@ class TrabajoListSerializer(serializers.ModelSerializer):
             'fecha_inicio',
             'created_at',
             'localizacion_detalle',
-            'esUrgente'
+            'esUrgente',
+            'currency'
         ]
     
     def get_cantidad_servicios(self, obj):
@@ -161,6 +172,16 @@ class TrabajoCreateSerializer(serializers.Serializer):
         choices=['efectivo', 'tarjeta', 'mercadopago', 'transferencia', 'app'],
         default='efectivo',
         required=False,
+    )
+    currency = serializers.ChoiceField(
+        choices=[
+            'ARS', 'BRL', 'CLP', 'COP', 'MXN', 'PEN',
+            'UYU', 'BOB', 'PYG', 'VES', 'CRC', 'DOP',
+            'GTQ', 'HNL', 'NIO', 'PAB', 'USD'
+        ],
+        required=False,
+        allow_null=True,
+        default=None
     )
 
     def validate_servicios_ids(self, value):
@@ -224,7 +245,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'localizacion_detalle', 
                   'profesion_detalle', 'ofertas', 'fecha_inicio', 
-                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones', 'recursos']
+                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones', 'recursos', 'curreny']
         
     def get_recursos(self, obj):
         return list(
