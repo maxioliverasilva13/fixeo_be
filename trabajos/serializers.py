@@ -5,6 +5,7 @@ from servicios.serializers import ServicioSerializer
 from profesion.serializers import ProfesionSerializer 
 from localizacion.serializers import LocalizacionSerializer
 from servicios.models import Servicio
+from enums.enums import CURRENCY_CODES
 
 class CalificacionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -27,7 +28,12 @@ class TrabajoUrgenteCreateSerializer(serializers.Serializer):
     direccion = serializers.CharField(required=False, allow_blank=True)
     fecha = serializers.DateField(required=True)
     hora = serializers.TimeField(required=True)
-
+    currency = serializers.ChoiceField(
+        choices=CURRENCY_CODES,
+        required=False,
+        allow_null=True,
+        default=None
+    )
     fotos = serializers.ListField(
         child=serializers.URLField(),
         required=False,
