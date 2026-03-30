@@ -34,6 +34,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'trabajo_local',
             'created_at',
             'updated_at',
+            'currency'
         ]
 
     def _get_efectivo_jobs_restantes(self, obj):

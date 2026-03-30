@@ -105,7 +105,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         latitud = serializer.validated_data['latitud']
         longitud = serializer.validated_data['longitud']
         direccion = serializer.validated_data.get('direccion', '')
-        
+        currency = serializer.validated_data.get('currency', None)
+
         fecha = serializer.validated_data['fecha']
         hora = serializer.validated_data['hora']
         fecha_inicio_combinada = datetime.combine(fecha, hora)
@@ -143,7 +144,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             profesion_urgente=profesion,
             fecha_inicio=fecha_inicio_combinada,
             radio_busqueda_km=None,
-            es_domicilio_profesional=False
+            es_domicilio_profesional=False,
+            currency=currency, 
         )
 
         fotos = serializer.validated_data.get('fotos', [])

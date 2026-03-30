@@ -3,6 +3,7 @@ from usuario.models import Usuario
 from fixeo_project.models import BaseModel
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
+from enums.enums import CURRENCY_CHOICES
 
 class Empresa(BaseModel):
     PAIS_CHOICES = [
@@ -57,7 +58,13 @@ class Empresa(BaseModel):
     mp_email = models.EmailField(blank=True, default='')
     localizacion = models.ForeignKey('localizacion.Localizacion', on_delete=models.SET_NULL, null=True, related_name='empresas')
     admin_id = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='empresas_administradas')
-    
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        null=True,
+        blank=True,
+        default='UY'
+    )
     class Meta:
         db_table = 'empresa'
         verbose_name = 'Empresa'

@@ -5,7 +5,7 @@ from usuario.models import Usuario
 from servicios.models import Servicio
 from fixeo_project.models import BaseModel
 from profesion.models import Profesion
-
+from enums.enums import CURRENCY_CHOICES
 
 class Trabajo(BaseModel):
     STATUS_CHOICES = [
@@ -44,6 +44,12 @@ class Trabajo(BaseModel):
         choices=PAYMENT_METHOD_CHOICES,
         null=True,
         blank=True
+    )
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        null=True,
+        blank=True,
     )
     class Meta:
         db_table = 'trabajo'

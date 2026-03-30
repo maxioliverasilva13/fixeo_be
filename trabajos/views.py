@@ -428,13 +428,18 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         hora = serializer.validated_data['hora']
         profesional_id = serializer.validated_data['profesional_id']
         es_domicilio_profesional = serializer.validated_data['es_domicilio_profesional']
-        fotos_urls = serializer.validated_data.get('fotos', [])  
+        fotos_urls = serializer.validated_data.get('fotos', [])
         metodo_pago = serializer.validated_data.get('metodo_pago', 'efectivo')
 
         try:
             profesional = Usuario.objects.get(id=profesional_id)
         except Usuario.DoesNotExist:
             return Response({'error': 'Profesional no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        currency = None
+        empresa_profesional = profesional.empresas_administradas.first()
+        if empresa_profesional:
+            currency = empresa_profesional.currency
 
         servicios = Servicio.objects.filter(id__in=servicios_ids)
         if not servicios.exists():
@@ -490,7 +495,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             precio_final=precio_final,
             localizacion=localizacion,
             status=newStatus,
-            metodo_pago=metodo_pago
+            metodo_pago=metodo_pago,
+            currency=currency,  
         )
 
         for servicio in servicios:
@@ -568,6 +574,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 response_data['mercadopago_error'] = str(e)
 
         return Response(response_data, status=status.HTTP_201_CREATED)
+
 
 class CalificacionViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]

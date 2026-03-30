@@ -274,6 +274,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 notas=serializer.validated_data.get('notas', ''),
                 comision_plataforma=comision_plataforma,
                 pago_status=pago_status,
+                currency=empresa.currency or None, 
             )
 
         chat = Chat.objects.filter(
