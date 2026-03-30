@@ -55,7 +55,6 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
             notificar_usuario_task.delay(usuario_id=usuario_id, titulo="Nueva notificación", mensaje="Tienes una nueva notificación")
         return Response({'message': 'Notificación enviada'}, status=status.HTTP_200_OK)
 
-
 class NotificacionesViewSet(viewsets.ModelViewSet):
     queryset = Notificaciones.objects.all()
     serializer_class = NotificacionesSerializer
@@ -66,7 +65,21 @@ class NotificacionesViewSet(viewsets.ModelViewSet):
         usuario_id = self.request.query_params.get('usuario_id', None)
         if usuario_id:
             queryset = queryset.filter(usuario_id=usuario_id)
-        return queryset.order_by('-created_at')
+        return queryset.filter(usuario=self.request.user).order_by('-created_at')
+
+    @action(detail=True, methods=['patch'], url_path='marcar-leida')
+    def marcar_leida(self, request, pk=None):
+        notificacion = self.get_object()
+        if notificacion.usuario != request.user:
+            return Response({'error': 'No tenés permisos'}, status=status.HTTP_403_FORBIDDEN)
+        notificacion.is_deleted = True
+        notificacion.save(update_fields=['is_deleted'])
+        return Response({'ok': True})
+
+    @action(detail=False, methods=['patch'], url_path='marcar-todas-leidas')
+    def marcar_todas_leidas(self, request):
+        Notificaciones.objects.filter(usuario=request.user, is_deleted=False).update(is_deleted=True)
+        return Response({'ok': True})
 
 
 class NotasViewSet(viewsets.ModelViewSet):
