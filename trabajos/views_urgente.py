@@ -109,7 +109,6 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         fecha = serializer.validated_data['fecha']
         hora = serializer.validated_data['hora']
         fecha_inicio_combinada = datetime.combine(fecha, hora)
-        currency = serializer.validated_data.get('currency', None)  # ← agregar
 
         try:
             profesion = Profesion.objects.get(id=profesion_id)
@@ -144,8 +143,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             profesion_urgente=profesion,
             fecha_inicio=fecha_inicio_combinada,
             radio_busqueda_km=None,
-            es_domicilio_profesional=False,
-            currency=currency
+            es_domicilio_profesional=False
         )
 
         fotos = serializer.validated_data.get('fotos', [])

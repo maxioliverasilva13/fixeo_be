@@ -61,7 +61,7 @@ class OrdenSerializer(serializers.ModelSerializer):
         fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'empresa', 'empresa_nombre',
                   'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega', 'localizacion_info',
                   'total', 'comision_plataforma', 'pago_status', 'notas', 'fecha_entrega', 'items',
-                  'pago_info', 'created_at', 'updated_at', 'curreny']
+                  'pago_info', 'created_at', 'updated_at']
         read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
                             'pago_status', 'localizacion_entrega', 'created_at', 'updated_at']
 
@@ -109,12 +109,6 @@ class OrdenCreateSerializer(serializers.Serializer):
                                 help_text='Primeros 6 dígitos de la tarjeta')
     is_saved_card = serializers.BooleanField(required=False, default=False)
     tarjeta_id = serializers.IntegerField(required=False, allow_null=True, default=None)
-    currency = serializers.ChoiceField(
-        choices=['ARS', 'BRL', 'CLP', 'COP', 'MXN', 'PEN', 'UYU', 'BOB', 'PYG', 'VES', 'CRC', 'DOP', 'GTQ', 'HNL', 'NIO', 'PAB', 'USD'],
-        required=False,
-        allow_null=True,
-        default=None
-    )
 
     def validate(self, data):
         if data['metodo_pago'] == 'mercadopago' and not data.get('card_token'):

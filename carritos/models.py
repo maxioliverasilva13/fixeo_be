@@ -3,25 +3,6 @@ from usuario.models import Usuario
 from empresas.models import Empresa, Producto
 from fixeo_project.models import BaseModel
 
-CURRENCY_CHOICES = [
-    ('ARS', 'Peso Argentino'),
-    ('BRL', 'Real Brasileño'),
-    ('CLP', 'Peso Chileno'),
-    ('COP', 'Peso Colombiano'),
-    ('MXN', 'Peso Mexicano'),
-    ('PEN', 'Sol Peruano'),
-    ('UYU', 'Peso Uruguayo'),
-    ('BOB', 'Boliviano'),
-    ('PYG', 'Guaraní Paraguayo'),
-    ('VES', 'Bolívar Venezolano'),
-    ('CRC', 'Colón Costarricense'),
-    ('DOP', 'Peso Dominicano'),
-    ('GTQ', 'Quetzal Guatemalteco'),
-    ('HNL', 'Lempira Hondureño'),
-    ('NIO', 'Córdoba Nicaragüense'),
-    ('PAB', 'Balboa Panameño'),
-    ('USD', 'Dólar Estadounidense'),
-]
 
 class Carrito(BaseModel):
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='carritos')
@@ -106,13 +87,7 @@ class Orden(BaseModel):
     notas = models.TextField(blank=True, default='')
     fecha_entrega = models.DateTimeField(null=True, blank=True)
     pago_status = models.CharField(max_length=20, blank=True, default='', help_text='Estado del pago MP')
-    currency = models.CharField(
-        max_length=3,
-        choices=CURRENCY_CHOICES,
-        null=True,
-        blank=True,
-    )
-    
+
     class Meta:
         db_table = 'orden'
         verbose_name = 'Orden'

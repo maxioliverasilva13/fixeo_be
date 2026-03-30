@@ -6,25 +6,6 @@ from servicios.models import Servicio
 from fixeo_project.models import BaseModel
 from profesion.models import Profesion
 
-CURRENCY_CHOICES = [
-    ('ARS', 'Peso Argentino'),
-    ('BRL', 'Real Brasileño'),
-    ('CLP', 'Peso Chileno'),
-    ('COP', 'Peso Colombiano'),
-    ('MXN', 'Peso Mexicano'),
-    ('PEN', 'Sol Peruano'),
-    ('UYU', 'Peso Uruguayo'),
-    ('BOB', 'Boliviano'),
-    ('PYG', 'Guaraní Paraguayo'),
-    ('VES', 'Bolívar Venezolano'),
-    ('CRC', 'Colón Costarricense'),
-    ('DOP', 'Peso Dominicano'),
-    ('GTQ', 'Quetzal Guatemalteco'),
-    ('HNL', 'Lempira Hondureño'),
-    ('NIO', 'Córdoba Nicaragüense'),
-    ('PAB', 'Balboa Panameño'),
-    ('USD', 'Dólar Estadounidense'),
-]
 
 class Trabajo(BaseModel):
     STATUS_CHOICES = [
@@ -43,12 +24,6 @@ class Trabajo(BaseModel):
         ('mercadopago', 'MercadoPago'),
     ]
 
-    currency = models.CharField(
-        max_length=3,
-        choices=CURRENCY_CHOICES,
-        null=True,
-        blank=True, 
-    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendiente')
     esUrgente = models.BooleanField(default=False)
     fecha_inicio = models.DateTimeField(null=True, blank=True)
