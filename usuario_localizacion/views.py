@@ -104,7 +104,7 @@ class UsuarioLocalizacionViewSet(viewsets.ModelViewSet):
             {'message': 'Localización eliminada exitosamente'},
             status=status.HTTP_200_OK
         )
-    
+        
     @action(detail=True, methods=['post'])
     def marcar_principal(self, request, pk=None):
         usuario_localizacion = self.get_object()
@@ -131,6 +131,13 @@ class UsuarioLocalizacionViewSet(viewsets.ModelViewSet):
         localizacion = usuario_localizacion.localizacion
         localizacion.isPrimary = True
         localizacion.save()
+
+        from empresas.models import Empresa
+        Empresa.objects.filter(admin_id=request.user).update(
+            latitud=localizacion.latitud,
+            longitud=localizacion.longitud,
+            localizacion=localizacion,
+        )
 
         return Response({
             'message': 'Localización marcada como principal',
