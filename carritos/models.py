@@ -3,6 +3,7 @@ from usuario.models import Usuario
 from empresas.models import Empresa, Producto
 from fixeo_project.models import BaseModel
 from localizacion.models import Localizacion
+from enums.enums import CURRENCY_CHOICES
 
 class Carrito(BaseModel):
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='carritos')
