@@ -56,16 +56,13 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Notificación enviada'}, status=status.HTTP_200_OK)
 
 class NotificacionesViewSet(viewsets.ModelViewSet):
-    queryset = Notificaciones.objects.all()
     serializer_class = NotificacionesSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        usuario_id = self.request.query_params.get('usuario_id', None)
-        if usuario_id:
-            queryset = queryset.filter(usuario_id=usuario_id)
-        return queryset.filter(usuario=self.request.user).order_by('-created_at')
+        return Notificaciones.objects.filter(
+            usuario=self.request.user
+        ).order_by('-created_at')
 
     @action(detail=True, methods=['patch'], url_path='marcar-leida')
     def marcar_leida(self, request, pk=None):
@@ -80,8 +77,7 @@ class NotificacionesViewSet(viewsets.ModelViewSet):
     def marcar_todas_leidas(self, request):
         Notificaciones.objects.filter(usuario=request.user, is_deleted=False).update(is_deleted=True)
         return Response({'ok': True})
-
-
+    
 class NotasViewSet(viewsets.ModelViewSet):
     queryset = Notas.objects.all()
     serializer_class = NotasSerializer
