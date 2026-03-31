@@ -257,11 +257,8 @@ class RecursosViewSet(viewsets.ViewSet):
             tipo=tipo,
             nombre=request.data.get('nombre', os.path.basename(url.split('?')[0])),
             chat=chat,
-            size=request.data.get('size'),
-            content_type=content_type or request.data.get('content_type')
         )
         
-        # Notificar al otro usuario vía WebSocket
         received_user = chat.receiver if request.user.id == chat.sender_id else chat.sender
         room_name = f"usuario_channel_{received_user.id}"
         channel_layer = get_channel_layer()
@@ -273,7 +270,6 @@ class RecursosViewSet(viewsets.ViewSet):
                 'url': recurso.url,
                 'tipo': recurso.tipo,
                 'nombre': recurso.nombre,
-                'size': recurso.size,
                 'chat_id': chat.id,
                 'created_at': recurso.created_at.isoformat(),
             },

@@ -210,11 +210,17 @@ class ChatViewSet(viewsets.ModelViewSet):
         payload = {
             'type': 'chat_message',
             'message': mensaje.texto,
-            'mensaje_id': mensaje.mensaje_id,  
+            'mensaje_id': mensaje.mensaje_id,
             'user_id': request.user.id,
             'created_at': mensaje.created_at.isoformat(),
             'chat_id': chat.id,
-            'leido': mensaje.leido
+            'leido': mensaje.leido,
+            'recurso': {
+                'id': recurso.id,
+                'url': recurso.url,
+                'tipo': recurso.tipo,
+                'nombre': recurso.nombre,
+            } if recurso else None,
         }
 
         async_to_sync(channel_layer.group_send)(f'chat_{room_name}', payload)

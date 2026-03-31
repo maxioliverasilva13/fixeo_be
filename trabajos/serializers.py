@@ -105,7 +105,7 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
             'servicios', 'calificaciones',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
             'created_at', 'updated_at', 'localizacion_detalle',
-            'chat_id', 'fotos'  
+            'chat_id', 'fotos', 'currency'
         ]
 class TrabajoListSerializer(serializers.ModelSerializer):
     usuario = UsuarioSerializer(read_only=True)

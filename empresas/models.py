@@ -63,7 +63,7 @@ class Empresa(BaseModel):
         choices=CURRENCY_CHOICES,
         null=True,
         blank=True,
-        default='UY'
+        default='UYU'
     )
     class Meta:
         db_table = 'empresa'

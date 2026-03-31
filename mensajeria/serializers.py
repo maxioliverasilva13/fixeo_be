@@ -30,9 +30,13 @@ class MensajesSerializer(serializers.ModelSerializer):
 
 
 class MensajeCreateSerializer(serializers.Serializer):
-    texto = serializers.CharField(required=True)
-    recurso_id = serializers.IntegerField(required=False, allow_null=True)
+    texto      = serializers.CharField(required=False, allow_blank=True, default='')
+    recurso_id = serializers.IntegerField(required=False)
 
+    def validate(self, data):
+        if not data.get('texto', '').strip() and not data.get('recurso_id'):
+            raise serializers.ValidationError('Debes enviar texto o un recurso.')
+        return data
 
 class ChatSerializer(serializers.ModelSerializer):
     sender_nombre = serializers.SerializerMethodField()
@@ -82,7 +86,8 @@ class ChatSerializer(serializers.ModelSerializer):
                 'texto': ultimo.texto,
                 'sender': ultimo.sender.id,
                 'created_at': ultimo.created_at,
-                'leido': ultimo.leido
+                'leido': ultimo.leido,
+                'type': 'recurso' if ultimo.recursos.exists() else 'texto'
             }
         return None
     

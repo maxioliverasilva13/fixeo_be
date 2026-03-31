@@ -384,21 +384,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated])
     def update_me(self, request):
-        """
-        Actualiza la información del usuario logueado
-        
-        Campos actualizables:
-        - nombre
-        - apellido
-        - telefono
-        - foto_url
-        - trabajo_domicilio
-        - trabajo_local
-        - rango_mapa_km
-        - auto_aprobacion_trabajos
-        - defaultMessageReservation
-        """
         usuario = request.user
+
         serializer = UpdateUsuarioSerializer(
             usuario, 
             data=request.data, 
@@ -406,14 +393,19 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        
+
+        empresa = usuario.empresas_administradas.first()
+        if empresa and 'currency' in request.data:
+            empresa.currency = request.data.get('currency')
+            empresa.save(update_fields=['currency'])
+
         user_data = UsuarioSerializer(usuario).data
-        
+
         return Response({
             'message': 'Información actualizada exitosamente',
             'user': user_data
         })
-
+    
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
     def change_password(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
