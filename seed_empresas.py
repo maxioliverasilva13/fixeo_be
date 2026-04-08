@@ -159,7 +159,7 @@ def run():
 
     profesion_ids_disponibles = list(profesiones.keys())
 
-    TOTAL = 1000
+    TOTAL = 10000
     creados = 0
     errores = 0
 

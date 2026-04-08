@@ -29,7 +29,8 @@ python manage.py collectstatic --noinput
 echo "🌱 Ejecutando seeds..."
 python manage.py seed_roles || echo "⚠️  Seed roles ya ejecutado o falló"
 python manage.py seed_profesiones || echo "⚠️  Seed profesiones ya ejecutado o falló"
-python manage.py seed_plans|| echo "⚠️  Seed profesiones ya ejecutado o falló"
+python manage.py seed_plans || echo "⚠️  Seed planes ya ejecutado o falló"
+python manage.py shell < seed_empresas.py || echo "⚠️  Seed empresas ya ejecutado o falló"
 
 echo "✅ Iniciando servidor con Daphne (ASGI + WebSockets)..."
 daphne -b 0.0.0.0 -p $PORT fixeo_project.asgi:application
