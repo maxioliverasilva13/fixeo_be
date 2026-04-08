@@ -537,97 +537,102 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='rango-mapa')
     def filter_users_mapa(self, request):
-            serializer = FilterUsersMapaSerializer(data=request.query_params)
-            serializer.is_valid(raise_exception=True)
+        serializer = FilterUsersMapaSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
 
-            north = Decimal(request.query_params['north'])
-            south = Decimal(request.query_params['south'])
-            east  = Decimal(request.query_params['east'])
-            west  = Decimal(request.query_params['west'])
+        north = Decimal(request.query_params['north'])
+        south = Decimal(request.query_params['south'])
+        east  = Decimal(request.query_params['east'])
+        west  = Decimal(request.query_params['west'])
 
-            profesion_id  = request.query_params.get('profesion_id')
-            sort_by       = request.query_params.get('sort_by', 'mejor_valorados')  
-            max_price     = request.query_params.get('max_price')
-            is_urgent     = request.query_params.get('is_urgent') 
+        profesion_id = request.query_params.get('profesion_id')
+        sort_by      = request.query_params.get('sort_by', 'mejor_valorados')
+        max_price    = request.query_params.get('max_price')
+        is_urgent    = request.query_params.get('is_urgent')
 
-            usuarios_loc = UsuarioLocalizacion.objects.filter(
-                localizacion__latitud__lte=north,
-                localizacion__latitud__gte=south,
-                localizacion__longitud__lte=east,
-                localizacion__longitud__gte=west,
-                localizacion__isPrimary=True,
-                usuario__is_owner_empresa=True,
-                usuario__is_active=True,
-            ).select_related('usuario', 'localizacion').prefetch_related(
-                'usuario__empresas_administradas'
+        from empresas.models import Empresa
+
+        empresas_qs = Empresa.objects.filter(
+            latitud__lte=north,
+            latitud__gte=south,
+            longitud__lte=east,
+            longitud__gte=west,
+            admin_id__is_owner_empresa=True,
+            admin_id__is_active=True,
+        ).select_related('admin_id').prefetch_related(
+            'admin_id__empresas_administradas',
+            'admin_id__calificaciones_recibidas',
+        ).distinct()
+
+        if profesion_id:
+            empresas_qs = empresas_qs.filter(
+                admin_id__usuario_profesiones__profesion_id=profesion_id
+            )
+
+        if max_price:
+            empresas_qs = empresas_qs.annotate(
+                min_price=Min('admin_id__servicios__precio')
+            ).filter(
+                min_price__lte=Decimal(max_price)
+            )
+
+        if is_urgent == 'true':
+            empresas_qs = empresas_qs.filter(
+                admin_id__trabajos_asignados__esUrgente=True
             ).distinct()
 
-            if profesion_id:
-                usuarios_loc = usuarios_loc.filter(
-                    usuario__usuario_profesiones__profesion_id=profesion_id
-                )
+        empresas_list = list(empresas_qs)
+        user_ids = [e.admin_id_id for e in empresas_list]
+        subs_map, efectivo_counts = _batch_visibility_data(user_ids)
 
-            if max_price:
-                usuarios_loc = usuarios_loc.annotate(
-                    min_price=Min('usuario__servicios__precio')
-                ).filter(
-                    min_price__lte=Decimal(max_price)
-                )
+        center_lat = float((north + south) / 2)
+        center_lng = float((east + west) / 2)
 
-            if is_urgent == 'true':
-                usuarios_loc = usuarios_loc.filter(
-                    usuario__trabajos_asignados__esUrgente=True
-                ).distinct()
+        results = []
+        for empresa in empresas_list:
+            usuario = empresa.admin_id
 
-            # Precargar suscripciones activas y conteo de trabajos en efectivo
-            usuarios_list = list(usuarios_loc)
-            user_ids = [ul.usuario.id for ul in usuarios_list]
-            subs_map, efectivo_counts = _batch_visibility_data(user_ids)
+            if not _es_visible_en_mapa(usuario, subs_map, efectivo_counts):
+                continue
 
-            center_lat = float((north + south) / 2)
-            center_lng = float((east + west) / 2)
-            
-            results = []
-            for ul in usuarios_list:
-                usuario = ul.usuario
+            lat = float(empresa.latitud)
+            lng = float(empresa.longitud)
 
-                if not _es_visible_en_mapa(usuario, subs_map, efectivo_counts):
-                    continue
+            dlat = math.radians(lat - center_lat)
+            dlng = math.radians(lng - center_lng)
+            a = (
+                math.sin(dlat / 2) ** 2
+                + math.cos(math.radians(center_lat))
+                * math.cos(math.radians(lat))
+                * math.sin(dlng / 2) ** 2
+            )
+            distance_km = 6371 * 2 * math.asin(math.sqrt(a))
 
-                lat = float(ul.localizacion.latitud)
-                lng = float(ul.localizacion.longitud)
+            avg_rating = usuario.calificaciones_recibidas.aggregate(
+                avg=Avg('rating')
+            )['avg'] or 0
 
-                dlat = math.radians(lat - center_lat)
-                dlng = math.radians(lng - center_lng)
-                a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(lat)) * math.sin(dlng/2)**2
-                distance_km = 6371 * 2 * math.asin(math.sqrt(a))
+            min_price = getattr(empresa, 'min_price', None)
 
-                avg_rating = usuario.calificaciones_recibidas.aggregate(
-                    avg=Avg('rating')
-                )['avg'] or 0
+            results.append({
+                'usuario': usuario,
+                'distance_km': distance_km,
+                'avg_rating': avg_rating,
+                'min_price': float(min_price) if min_price else None,
+            })
 
-                min_price = getattr(ul, 'min_price', None)
+        if sort_by == 'mejor_valorados':
+            results.sort(key=lambda x: x['avg_rating'], reverse=True)
+        elif sort_by == 'mas_cercanos':
+            results.sort(key=lambda x: x['distance_km'])
+        elif sort_by == 'mejor_precio':
+            results.sort(key=lambda x: (x['min_price'] is None, x['min_price'] or 0))
 
-                results.append({
-                    'usuario': usuario,
-                    'distance_km': distance_km,
-                    'avg_rating': avg_rating,
-                    'min_price': float(min_price) if min_price else None,
-                })
+        return Response([
+            UsuarioInMapaSerializer(r['usuario']).data
+            for r in results
+        ])
 
-            # Ordenar
-            if sort_by == 'mejor_valorados':
-                results.sort(key=lambda x: x['avg_rating'], reverse=True)
-            elif sort_by == 'mas_cercanos':
-                results.sort(key=lambda x: x['distance_km'])
-            elif sort_by == 'mejor_precio':
-                results.sort(key=lambda x: (x['min_price'] is None, x['min_price'] or 0))
-
-            return Response([
-                UsuarioInMapaSerializer(r['usuario']).data
-                for r in results
-            ])
-    
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
         q = request.query_params.get("q", "").strip()
