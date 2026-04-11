@@ -457,15 +457,16 @@ class UpdateUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     localizacion = serializers.SerializerMethodField()
+    esta_abierta = serializers.SerializerMethodField()
 
 
     class Meta:
         model = Usuario
         fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio', 
-                  'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion']
+                  'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta']
         read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 
                             'trabajo_domicilio', 'trabajo_local', 
-                            'rango_mapa_km']
+                            'rango_mapa_km', 'esta_abierta']
         
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer
@@ -481,6 +482,11 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             return UsuarioLocalizacionSerializer(usuario_localizacion).data
         
         return None
+    def get_esta_abierta(self, obj) -> bool:
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return False
+        return empresa.esta_abierta()
 
     
 class SocialLoginSerializer(serializers.Serializer):

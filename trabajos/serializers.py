@@ -229,7 +229,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         model = Trabajo
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'localizacion_detalle', 
-                  'profesion_detalle', 'ofertas', 'fecha_inicio', 
+                  'profesion_detalle', 'ofertas', 'fecha_inicio', 'currency',
                   'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones', 'recursos']
         
     def get_recursos(self, obj):

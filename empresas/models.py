@@ -4,6 +4,7 @@ from fixeo_project.models import BaseModel
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
 from enums.enums import CURRENCY_CHOICES
+from django.utils import timezone
 
 class Empresa(BaseModel):
     PAIS_CHOICES = [
@@ -69,6 +70,18 @@ class Empresa(BaseModel):
         db_table = 'empresa'
         verbose_name = 'Empresa'
         verbose_name_plural = 'Empresas'
+
+    def esta_abierta(self) -> bool:
+        ahora = timezone.localtime()
+        dia = ahora.strftime('%A').lower()  # 'monday', 'tuesday', etc.
+        hora = ahora.time()
+
+        return self.horarios.filter(
+            dia_semana__iexact=dia,
+            hora_inicio__lte=hora,
+            hora_fin__gte=hora,
+            enabled=True,
+        ).exists()
 
     def __str__(self):
         return self.nombre
