@@ -25,6 +25,7 @@ class Notificaciones(BaseModel):
     descripcion = models.TextField()
     entity_id = models.IntegerField()
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='notificaciones')
+    leida = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'notificaciones'

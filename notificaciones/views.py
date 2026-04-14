@@ -60,24 +60,33 @@ class NotificacionesViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Notificaciones.objects.filter(
+        qs = Notificaciones.objects.filter(
             usuario=self.request.user
         ).order_by('-created_at')
+
+        leida = self.request.query_params.get('leida', None)
+        if leida is not None:
+            qs = qs.filter(leida=leida.lower() == 'true')
+
+        return qs
 
     @action(detail=True, methods=['patch'], url_path='marcar-leida')
     def marcar_leida(self, request, pk=None):
         notificacion = self.get_object()
         if notificacion.usuario != request.user:
             return Response({'error': 'No tenés permisos'}, status=status.HTTP_403_FORBIDDEN)
-        notificacion.is_deleted = True
-        notificacion.save(update_fields=['is_deleted'])
+        notificacion.leida = True          
+        notificacion.save(update_fields=['leida'])
         return Response({'ok': True})
 
     @action(detail=False, methods=['patch'], url_path='marcar-todas-leidas')
     def marcar_todas_leidas(self, request):
-        Notificaciones.objects.filter(usuario=request.user, is_deleted=False).update(is_deleted=True)
+        Notificaciones.objects.filter(
+            usuario=request.user,
+            leida=False           
+        ).update(leida=True)
         return Response({'ok': True})
-    
+
 class NotasViewSet(viewsets.ModelViewSet):
     queryset = Notas.objects.all()
     serializer_class = NotasSerializer

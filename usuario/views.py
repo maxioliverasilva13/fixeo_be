@@ -84,29 +84,23 @@ def _batch_visibility_data(user_ids: list):
 
 
 def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
-    """
-    Devuelve True si la empresa tiene al menos un método de pago activo disponible.
-    Debe llamarse con los datos precargados de _batch_visibility_data.
-    """
     empresa = usuario.empresas_administradas.first()
     if not empresa:
         return False
 
-    # # MP disponible
-    # if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
-    #     return True
+    if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
+        return True
 
-    # # Efectivo disponible
-    # if empresa.acepta_efectivo:
-    #     sub = subs_map.get(usuario.id)
-    #     if sub:
-    #         usados = efectivo_counts.get(usuario.id, 0)
-    #         jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
-    #         if jobs_restantes > 0:
-    #             return True
+    if empresa.acepta_efectivo:
+        sub = subs_map.get(usuario.id)
+        if sub:
+            usados = efectivo_counts.get(usuario.id, 0)
+            jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
+            print(jobs_restantes)
+            if jobs_restantes > 0:
+                return True
 
-    return True
-
+    return False 
 
 SQL_QUERY = """
 WITH empresas_ranked AS (
@@ -121,6 +115,7 @@ WITH empresas_ranked AS (
         e.longitud,
         e.descripcion,
         COALESCE(AVG(c.rating), 0) AS rating,
+        u.cant_calif,                        
         EXISTS(
             SELECT 1 FROM trabajo t
             WHERE t.profesional_id = u.id AND t."esUrgente" = true
@@ -132,6 +127,7 @@ WITH empresas_ranked AS (
             similarity(e.nombre, %s),
             MAX(COALESCE(similarity(p.nombre, %s), 0))
         ) AS rank
+
     FROM empresa e
     JOIN usuario u ON u.id = e.admin_id_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
@@ -174,14 +170,15 @@ SELECT
     es_urgente,
     profesion_ids,
     NULL::numeric AS precio_servicio,
-    NULL::integer AS producto_id
+    NULL::integer AS producto_id,
+    cant_calif                         -- ← agregado
 FROM empresas_ranked
 
 UNION ALL
 
 SELECT
     'producto' AS tipo,
-    u.id,                          -- 👈 cambiado de pr.id a u.id
+    u.id,
     pr.nombre AS titulo,
     pr.descripcion AS extra,
     NULL,
@@ -203,7 +200,8 @@ SELECT
     false AS es_urgente,
     NULL::integer[] AS profesion_ids,
     NULL::numeric AS precio_servicio,
-    pr.id AS producto_id           -- 👈 agregado
+    pr.id AS producto_id,
+    0::integer AS cant_calif           -- ← productos no tienen, va en 0
 FROM producto pr
 JOIN empresa e ON e.id = pr.empresa_id
 JOIN usuario u ON u.id = e.admin_id_id

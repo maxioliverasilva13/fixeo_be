@@ -62,6 +62,25 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         elif self.action == 'list':
             return TrabajoListSerializer
         return TrabajoDetailSerializer
+
+    def _enviar_mensaje_chat_ws(self, chat, mensaje):
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', {
+            'type': 'chat_message',
+            'message': mensaje.texto,
+            'user_id': chat.sender.id,
+            'leido': False,
+            'chat_id': chat.id,
+            'chat': {
+                'id': chat.id,
+                'sender_id': chat.sender.id,
+                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'receiver_id': chat.receiver.id,
+                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                'ultimo_mensaje_at': mensaje.created_at.isoformat(),
+            }
+        })
     
     @action(detail=False, methods=['get'], url_path='calificaciones-usuario/(?P<usuario_id>[^/.]+)')
     def listado_por_usuario(self, request, usuario_id=None):
@@ -129,9 +148,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         )
 
         channel_layer = get_channel_layer()
-        room_name = f"usuario_channel_{chat.receiver.id}"
-
-        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
+        async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', {
             'type': 'chat_message',
             'message': mensaje.texto,
             'user_id': chat.sender.id,
@@ -350,7 +367,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'metodo_pago': trabajo.metodo_pago or 'efectivo',
         }
         for uid in (trabajo.usuario.id, trabajo.profesional.id):
-            room = f"chat_usuario_channel_{uid}"
+            room = f"user_{uid}"
             try:
                 async_to_sync(channel_layer.group_send)(room, ws_payload)
             except Exception as e:
@@ -535,23 +552,13 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     trabajo=trabajo
                 )
 
-                mensaaje = Mensajes.objects.create(
-                    texto=chat.sender.defaultMessageReservation,
-                    sender=chat.sender,
-                    chat=chat
-                )
-
-                channel_layer = get_channel_layer()
-                room_name = f"usuario_channel_{chat.receiver.id}"
-
-                async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
-                    'type': 'chat_message',
-                    'message': mensaaje.texto,
-                    'user_id': chat.sender.id,
-                    'leido': False,
-                    'chat_id': chat.id,
-                })
-
+            mensaje = Mensajes.objects.create(
+                texto=trabajo.profesional.defaultMessageReservation,
+                sender=trabajo.profesional,
+                chat=chat
+            )
+            self._enviar_mensaje_chat_ws(chat, mensaje)
+            
         response_data = {
             'id': trabajo.id,
             'descripcion': trabajo.descripcion,

@@ -138,7 +138,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             }
         }
 
-        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', payload)
+        async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', payload)
         
         print('10')
         return Response(
@@ -223,7 +223,7 @@ class ChatViewSet(viewsets.ModelViewSet):
             } if recurso else None,
         }
 
-        async_to_sync(channel_layer.group_send)(f'chat_{room_name}', payload)
+        async_to_sync(channel_layer.group_send)(f'user_{received_user.id}', payload)
 
         userNameToReceive = None
         userIdToReceive = None
@@ -329,12 +329,8 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         channel_layer = get_channel_layer()
 
-        async_to_sync(channel_layer.group_send)(
-            f'chat_{room_name}',
-            payload
-        )
+        async_to_sync(channel_layer.group_send)(f'user_{received_user.id}', payload)
 
-        
         return Response({
             'message': f'{mensajes_actualizados} mensajes marcados como leídos'
         })
