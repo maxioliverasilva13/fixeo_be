@@ -84,6 +84,8 @@ def _batch_visibility_data(user_ids: list):
 
 
 def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
+
+    return True
     empresa = usuario.empresas_administradas.first()
     if not empresa:
         return False
@@ -538,7 +540,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def filter_users_mapa(self, request):
             serializer = FilterUsersMapaSerializer(data=request.query_params)
             serializer.is_valid(raise_exception=True)
-
+            limit = int(request.query_params.get('limit', 50))  
             north = Decimal(request.query_params['north'])
             south = Decimal(request.query_params['south'])
             east  = Decimal(request.query_params['east'])
@@ -624,7 +626,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
             return Response([
                 UsuarioInMapaSerializer(r['usuario']).data
-                for r in results
+                for r in results[:limit] 
             ])
     
     @action(detail=False, methods=['get'], url_path='search')
@@ -632,6 +634,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         q = request.query_params.get("q", "").strip()
         if not q:
             return Response({"error": "Parámetro q es requerido"}, status=400)
+        
+        limit = int(request.query_params.get("limit", 50))  # ← agregar esto
 
         profesion_id = request.query_params.get('profesion_id')
         sort_by      = request.query_params.get('sort_by')
@@ -730,7 +734,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-nacionales')
     def top_nacionales(self, request):
-        limit = int(request.query_params.get('limit', 50))
+        limit = int(request.query_params.get('limit', 25))
         sort_by = request.query_params.get('sort_by', 'mejor_valorados')
 
         usuarios = Usuario.objects.filter(
@@ -738,14 +742,23 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             is_active=True,
         ).annotate(
             avg_rating=Avg('calificaciones_recibidas__rating')
-        )
+        ).prefetch_related('empresas_administradas')
 
         if sort_by == 'mejor_valorados':
             usuarios = usuarios.order_by('-avg_rating')
         elif sort_by == 'mejor_precio':
             usuarios = usuarios.order_by('servicios__precio')
 
-        return Response(UsuarioInMapaSerializer(usuarios[:limit], many=True).data)
+        usuarios_list = list(usuarios)
+        user_ids = [u.id for u in usuarios_list]
+        subs_map, efectivo_counts = _batch_visibility_data(user_ids)
+
+        visibles = [
+            u for u in usuarios_list
+            if _es_visible_en_mapa(u, subs_map, efectivo_counts)
+        ]
+
+        return Response(UsuarioInMapaSerializer(visibles[:limit], many=True).data)
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-zona')
     def top_zona(self, request):

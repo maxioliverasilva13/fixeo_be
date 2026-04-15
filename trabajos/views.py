@@ -128,6 +128,17 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         trabajo.status = 'aceptado'
         trabajo.save()
 
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="¡Trabajo aceptado!",
+            mensaje=f"{request.user.nombre} aceptó tu solicitud de trabajo",
+            data={
+                'deep_link': f'/trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_aceptado'
+            }
+        )
+
         chat = Chat.objects.filter(
             Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
             Q(sender=trabajo.profesional, receiver=trabajo.usuario)

@@ -12,8 +12,8 @@ from decimal import Decimal
 from django.db import transaction
 
 # ── Límites geográficos de Uruguay ───────────────────────────────────────────
-UY_LAT_MIN, UY_LAT_MAX = -34.95, -30.08
-UY_LNG_MIN, UY_LNG_MAX = -58.44, -53.09
+UY_LAT_MIN, UY_LAT_MAX = -34.42, -34.26
+UY_LNG_MIN, UY_LNG_MAX = -56.82, -56.60
 
 # ── Ciudades reales de Uruguay ────────────────────────────────────────────────
 CIUDADES = [
@@ -159,7 +159,7 @@ def run():
 
     profesion_ids_disponibles = list(profesiones.keys())
 
-    TOTAL = 10000
+    TOTAL = 250
     creados = 0
     errores = 0
 
@@ -288,7 +288,7 @@ def run():
                             usuario=usuario,
                             profesion=profesiones[pid],
                             nombre=svc_nombre,
-                            precio=rand_precio(500, 10000),
+                            precio=rand_precio(500, 250),
                             divisa="UYU",
                             tiempo=random.choice(TIEMPOS_POSIBLES),
                         )
