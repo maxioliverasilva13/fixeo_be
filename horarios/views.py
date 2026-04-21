@@ -37,14 +37,17 @@ class HorariosViewSet(viewsets.ModelViewSet):
                     dia = serializer.validated_data['dia_semana']
                     dias_recibidos.append(dia)
 
-                    Horarios.objects.update_or_create(
+                    qs = Horarios.objects.filter(empresa=empresa, dia_semana=dia)
+                    
+                    if qs.exists():
+                        qs.delete()
+                    
+                    Horarios.objects.create(
                         empresa=empresa,
                         dia_semana=dia,
-                        defaults={
-                            "hora_inicio": serializer.validated_data["hora_inicio"],
-                            "hora_fin": serializer.validated_data["hora_fin"],
-                            "enabled": serializer.validated_data.get("enabled", True),
-                        }
+                        hora_inicio=serializer.validated_data["hora_inicio"],
+                        hora_fin=serializer.validated_data["hora_fin"],
+                        enabled=serializer.validated_data.get("enabled", True),
                     )
 
             Horarios.objects.filter(

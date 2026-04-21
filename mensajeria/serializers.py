@@ -22,12 +22,21 @@ class MensajesSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Mensajes
-        fields = ['mensaje_id', 'texto', 'sender', 'sender_nombre', 'chat', 'leido', 'recursos', 'created_at', 'updated_at']
+        fields = [
+            'mensaje_id', 'texto', 'tipo', 'metadata', 
+            'sender', 'sender_nombre', 'chat', 'leido', 
+            'recursos', 'created_at', 'updated_at', 'trabajo'
+        ]
         read_only_fields = ['mensaje_id', 'sender', 'created_at', 'updated_at']
     
     def get_sender_nombre(self, obj):
         return f"{obj.sender.nombre} {obj.sender.apellido}"
-
+    
+    def get_trabajo(self, obj):
+        if not obj.trabajo:
+            return None
+        from trabajos.serializers import TrabajoDetailSerializer
+        return TrabajoDetailSerializer(obj.trabajo).data
 
 class MensajeCreateSerializer(serializers.Serializer):
     texto      = serializers.CharField(required=False, allow_blank=True, default='')
@@ -87,10 +96,11 @@ class ChatSerializer(serializers.ModelSerializer):
                 'sender': ultimo.sender.id,
                 'created_at': ultimo.created_at,
                 'leido': ultimo.leido,
-                'type': 'recurso' if ultimo.recursos.exists() else 'texto'
+                'tipo': ultimo.tipo,           # ← antes era 'type' hardcodeado
+                'metadata': ultimo.metadata,   # ← agregado
             }
         return None
-    
+        
     def get_mensajes_no_leidos(self, obj):
         request = self.context.get('request')
         if request and request.user:

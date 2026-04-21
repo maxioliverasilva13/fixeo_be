@@ -20,20 +20,31 @@ class Chat(BaseModel):
 
 
 class Mensajes(BaseModel):
+    
+    class TipoMensaje(models.TextChoices):
+        TEXTO = 'texto', 'Texto'
+        CALIFICACION = 'calificacion', 'Calificación'
+        IMAGEN = 'imagen', 'Imagen'
+        ARCHIVO = 'archivo', 'Archivo'
+
     mensaje_id = models.AutoField(primary_key=True)
-    texto = models.TextField()
+    texto = models.TextField(blank=True)  
+    tipo = models.CharField(
+        max_length=20,
+        choices=TipoMensaje.choices,
+        default=TipoMensaje.TEXTO
+    )
     sender = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='mensajes_enviados')
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='mensajes')
+    trabajo = models.ForeignKey(                          
+        'trabajos.Trabajo',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='mensajes'
+    )
     leido = models.BooleanField(default=False)
-
-    class Meta:
-        db_table = 'mensajes'
-        verbose_name = 'Mensaje'
-        verbose_name_plural = 'Mensajes'
-        ordering = ['-created_at']
-
-    def __str__(self):
-        return f"Mensaje {self.mensaje_id} - Chat {self.chat}"
+    metadata = models.JSONField(null=True, blank=True)
 
 
 class Recurso(BaseModel):

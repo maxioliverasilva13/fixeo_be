@@ -8,7 +8,7 @@ from empresas.serializers import EmpresaSerializer
 from localizacion.models import Localizacion
 from django.db import transaction
 from datetime import timedelta
-
+from empresas.models import Horarios
 
 class UsuarioFotoApiMixin:
     """foto_url y rounded_foto_url siempre como string; vacío si el usuario no tiene foto."""
@@ -67,14 +67,16 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     subscripcion_activa = serializers.SerializerMethodField()
     es_visible_en_mapa = serializers.SerializerMethodField()
     advertencias_mapa = serializers.SerializerMethodField()
+    esta_abierta = serializers.SerializerMethodField()
+    horarios_semana = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 'foto_map_url',
-                  'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa',
+                  'trabajo_domicilio','esta_abierta','trabajo_local', 'is_owner_empresa',
                   'is_active', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
-                  'auto_aprobacion_trabajos', 'device_tokens',
+                  'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana',
                   'subscripcion_activa', 'rating','cant_calif',
                   'es_visible_en_mapa', 'advertencias_mapa']
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -239,6 +241,58 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             .filter(enabled=True)
             .values_list('device_token', flat=True)
         )
+
+    def get_esta_abierta(self, obj):
+        import datetime
+        from django.utils import timezone
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return None
+
+        now = timezone.localtime()
+        dia_semana = str(now.weekday() + 1)
+
+        horarios = empresa.horarios.filter(dia_semana=dia_semana, enabled=True).values(
+            'hora_inicio', 'hora_fin'
+        )
+
+        if not horarios.exists():
+            return None
+
+        hoy = now.date()
+        tz = now.tzinfo
+
+        return [
+            {
+                'hora_inicio': datetime.datetime.combine(hoy, h['hora_inicio']).replace(tzinfo=tz).isoformat(),
+                'hora_fin': datetime.datetime.combine(hoy, h['hora_fin']).replace(tzinfo=tz).isoformat(),
+            }
+            for h in horarios
+        ]
+
+    def get_horarios_semana(self, obj):
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return None
+
+        horarios = empresa.horarios.filter(enabled=True).values(
+            'dia_semana', 'hora_inicio', 'hora_fin'
+        ).order_by('dia_semana', 'hora_inicio')
+
+        if not horarios.exists():
+            return None
+
+        result = {}
+        for h in horarios:
+            dia = str(h['dia_semana'])
+            if dia not in result:
+                result[dia] = []
+            result[dia].append({
+                'hora_inicio': h['hora_inicio'].strftime('%H:%M'),
+                'hora_fin': h['hora_fin'].strftime('%H:%M'),
+            })
+
+        return result
 
 class UsuarioBasicInformationSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()
@@ -482,13 +536,35 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             return UsuarioLocalizacionSerializer(usuario_localizacion).data
         
         return None
-    def get_esta_abierta(self, obj) -> bool:
+
+    def get_esta_abierta(self, obj):
+        import datetime
+        from django.utils import timezone
         empresa = obj.empresas_administradas.first()
         if not empresa:
-            return False
-        return empresa.esta_abierta()
+            return None
 
-    
+        now = timezone.localtime()
+        dia_semana = str(now.weekday() + 1)
+
+        horarios = empresa.horarios.filter(dia_semana=dia_semana, enabled=True).values(
+            'hora_inicio', 'hora_fin'
+        )
+
+        if not horarios.exists():
+            return None
+
+        hoy = now.date()
+        tz = now.tzinfo
+
+        return [
+            {
+                'hora_inicio': datetime.datetime.combine(hoy, h['hora_inicio']).replace(tzinfo=tz).isoformat(),
+                'hora_fin': datetime.datetime.combine(hoy, h['hora_fin']).replace(tzinfo=tz).isoformat(),
+            }
+            for h in horarios
+        ]
+
 class SocialLoginSerializer(serializers.Serializer):
     firebase_token = serializers.CharField(required=True)
     email          = serializers.EmailField(required=True)

@@ -34,7 +34,37 @@ class ChatViewSet(viewsets.ModelViewSet):
     serializer_class = ChatSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = ChatPagination
-    
+
+    @staticmethod
+    def _crear_mensaje_calificacion(chat, sender, puntaje, comentario=''):
+        mensaje = Mensajes.objects.create(
+            texto='',
+            sender=sender,
+            chat=chat,
+            tipo=Mensajes.TipoMensaje.CALIFICACION,
+            metadata={
+                'puntaje': puntaje,
+                'comentario': comentario,
+            }
+        )
+        chat.ultimo_mensaje_at = mensaje.created_at
+        chat.save()
+
+        received_user = chat.receiver if sender.id == chat.sender_id else chat.sender
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(f'user_{received_user.id}', {
+            'type': 'chat_message',
+            'mensaje_id': mensaje.mensaje_id,
+            'user_id': sender.id,
+            'created_at': mensaje.created_at.isoformat(),
+            'chat_id': chat.id,
+            'leido': False,
+            'tipo': Mensajes.TipoMensaje.CALIFICACION,
+            'metadata': mensaje.metadata,
+            'recurso': None,
+        })
+        return mensaje
+        
     def get_queryset(self):
         user = self.request.user
         return Chat.objects.filter(
@@ -110,7 +140,9 @@ class ChatViewSet(viewsets.ModelViewSet):
             Mensajes.objects.create(
                 texto=mensaje_inicial,
                 sender=request.user,
-                chat=chat
+                chat=chat,
+                tipo=Mensajes.TipoMensaje.TEXTO, 
+
             )
             chat.ultimo_mensaje_at = chat.created_at
             chat.save()
@@ -198,7 +230,8 @@ class ChatViewSet(viewsets.ModelViewSet):
         mensaje = Mensajes.objects.create(
             texto=serializer.validated_data['texto'],
             sender=request.user,
-            chat=chat
+            chat=chat,
+            tipo=Mensajes.TipoMensaje.TEXTO,  
         )
 
         received_user = chat.receiver if request.user.id == chat.sender_id else chat.sender
@@ -215,6 +248,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             'created_at': mensaje.created_at.isoformat(),
             'chat_id': chat.id,
             'leido': mensaje.leido,
+            'tipo': mensaje.tipo,        # ← agregar
+            'metadata': mensaje.metadata, # ← agregar
             'recurso': {
                 'id': recurso.id,
                 'url': recurso.url,

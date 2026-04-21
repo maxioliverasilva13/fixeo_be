@@ -63,7 +63,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             return TrabajoListSerializer
         return TrabajoDetailSerializer
 
-    def _enviar_mensaje_chat_ws(self, chat, mensaje):
+    def _enviar_mensaje_chat_ws(self, chat, mensaje, trabajo):
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', {
             'type': 'chat_message',
@@ -71,6 +71,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'user_id': chat.sender.id,
             'leido': False,
             'chat_id': chat.id,
+            'trabajo': TrabajoDetailSerializer(trabajo).data,
             'chat': {
                 'id': chat.id,
                 'sender_id': chat.sender.id,
@@ -155,7 +156,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         mensaje = Mensajes.objects.create(
             texto=chat.sender.defaultMessageReservation,
             sender=chat.sender,
-            chat=chat
+            chat=chat,
+            trabajo=trabajo
         )
 
         channel_layer = get_channel_layer()
@@ -165,6 +167,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'user_id': chat.sender.id,
             'leido': False,
             'chat_id': chat.id,
+            'trabajo': TrabajoDetailSerializer(trabajo).data,
             'chat': {
                 'id': chat.id,
                 'sender_id': chat.sender.id,
@@ -349,6 +352,53 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         trabajo.status = 'finalizado'
         trabajo.save()
 
+        chat = Chat.objects.filter(trabajo=trabajo).first()
+        if not chat:
+            chat = Chat.objects.filter(
+                Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
+                Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+            ).first()
+
+        logger.info(f"[FINALIZAR] trabajo_id={trabajo.id} chat={chat} usuario={trabajo.usuario.id} profesional={trabajo.profesional.id}")
+
+        if chat:
+            ya_existe = Mensajes.objects.filter(
+                chat=chat,
+                tipo=Mensajes.TipoMensaje.CALIFICACION,
+                metadata__trabajo_id=trabajo.id
+            ).exists()
+
+            logger.info(f"[FINALIZAR] ya_existe_cal={ya_existe}")
+
+            if not ya_existe:
+                mensaje_cal = Mensajes.objects.create(
+                    texto='',
+                    sender=trabajo.profesional,
+                    chat=chat,
+                    tipo=Mensajes.TipoMensaje.CALIFICACION,
+                    metadata={
+                        'trabajo_id': trabajo.id,
+                        'puntaje': None,
+                        'comentario': None,
+                    }
+                )
+                chat.ultimo_mensaje_at = mensaje_cal.created_at
+                chat.save()
+
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(f'user_{trabajo.usuario.id}', {
+                    'type': 'chat_message',
+                    'mensaje_id': mensaje_cal.mensaje_id,
+                    'user_id': trabajo.profesional.id,
+                    'created_at': mensaje_cal.created_at.isoformat(),
+                    'chat_id': chat.id,
+                    'leido': False,
+                    'tipo': Mensajes.TipoMensaje.CALIFICACION,
+                    'metadata': mensaje_cal.metadata,
+                    'recurso': None,
+                })
+        else:
+            logger.warning(f"[FINALIZAR] No se encontró chat para trabajo_id={trabajo.id}")
         if trabajo.metodo_pago in ('mercadopago', 'tarjeta'):
             try:
                 from pagos.services import liberar_pagos_entidad
@@ -377,6 +427,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'status': 'finalizado',
             'metodo_pago': trabajo.metodo_pago or 'efectivo',
         }
+
         for uid in (trabajo.usuario.id, trabajo.profesional.id):
             room = f"user_{uid}"
             try:
@@ -566,9 +617,11 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             mensaje = Mensajes.objects.create(
                 texto=trabajo.profesional.defaultMessageReservation,
                 sender=trabajo.profesional,
-                chat=chat
+                chat=chat,
+                trabajo=trabajo
+
             )
-            self._enviar_mensaje_chat_ws(chat, mensaje)
+            self._enviar_mensaje_chat_ws(chat, mensaje, trabajo)
             
         response_data = {
             'id': trabajo.id,

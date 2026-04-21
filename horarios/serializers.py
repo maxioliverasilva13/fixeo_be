@@ -21,13 +21,13 @@ class HorariosSerializer(serializers.ModelSerializer):
         hora_fin = data.get('hora_fin')
 
         if hora_inicio and hora_fin:
-            if hora_inicio >= hora_fin:
+            if hora_fin != time(0, 0) and hora_inicio >= hora_fin:
                 raise serializers.ValidationError(
                     'hora_inicio debe ser menor que hora_fin'
                 )
 
         return data
-
+        
     def create(self, validated_data):
         empresa = validated_data['empresa']
         dia_semana = validated_data['dia_semana']
