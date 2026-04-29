@@ -48,3 +48,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def trabajo_finalizado(self, event):
         await self.send(text_data=json.dumps(event))
+
+    async def mensaje_eliminado(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    async def calificacion_recibida(self, event):
+        await self.send(text_data=json.dumps(event))

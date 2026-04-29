@@ -648,6 +648,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
 
 
 class CalificacionViewSet(viewsets.ViewSet):
+
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
@@ -691,11 +692,32 @@ class CalificacionViewSet(viewsets.ViewSet):
         )
 
         if mensajeId:
-            mensaje = Mensajes.objects.filter(id=mensajeId).first()
+            mensaje = Mensajes.objects.filter(mensaje_id=mensajeId).first()
             if mensaje:
                 mensaje.calificado = True
+                mensaje.metadata = {
+                    **mensaje.metadata,
+                    'puntaje': float(rating),
+                    'comentario': comentario,
+                }
                 mensaje.save()
-                
+
+                channel_layer = get_channel_layer()
+                payload = {
+                    'type': 'calificacion_recibida',
+                    'mensaje_id': mensaje.mensaje_id,
+                    'chat_id': mensaje.chat_id,
+                    'puntaje': float(rating),
+                    'comentario': comentario,
+                    'trabajo_id': trabajo.id,
+                }
+                async_to_sync(channel_layer.group_send)(
+                    f'user_{profesional.id}', payload
+                )
+                async_to_sync(channel_layer.group_send)(
+                    f'user_{usuario.id}', payload
+                )
+                        
         # actualizar rating del profesional
         if created:
             total_rating = profesional.rating * profesional.cant_calif

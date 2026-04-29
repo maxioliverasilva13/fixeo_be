@@ -401,7 +401,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         trabajo.fecha_inicio = fecha_inicio
         trabajo.fecha_fin = fecha_fin
         trabajo.disponibilidad = disponibilidad_ocupada
-        trabajo.save()
+        trabajo.save(update_fields=[
+            'status', 'profesional', 'precio_final',
+            'fecha_inicio', 'fecha_fin', 'disponibilidad'
+        ])
+
+        trabajo.refresh_from_db()
         
         trabajo.ofertas.exclude(id=oferta.id).update(status='rechazada')
         

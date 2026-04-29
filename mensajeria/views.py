@@ -386,3 +386,53 @@ class ChatViewSet(viewsets.ModelViewSet):
         ).count()
 
         return Response({'no_leidos': count})
+
+    @action(detail=True, methods=['delete'], url_path='mensajes/(?P<mensaje_id>[^/.]+)')
+    def eliminar_mensaje(self, request, pk=None, mensaje_id=None):
+        """
+        Elimina un mensaje del chat.
+        Solo el sender del mensaje puede eliminarlo.
+        """
+        chat = self.get_object()
+        
+        if chat.sender != request.user and chat.receiver != request.user:
+            return Response(
+                {'error': 'No tienes permiso para eliminar mensajes en este chat'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            mensaje = Mensajes.objects.get(mensaje_id=mensaje_id, chat=chat)
+        except Mensajes.DoesNotExist:
+            return Response(
+                {'error': 'El mensaje no existe'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if mensaje.sender != request.user:
+            return Response(
+                {'error': 'Solo puedes eliminar tus propios mensajes'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        other_user = chat.receiver if request.user.id == chat.sender_id else chat.sender
+        
+        deleted_mensaje_id = mensaje.mensaje_id
+        
+        mensaje.delete()
+        
+        channel_layer = get_channel_layer()
+        payload = {
+            'type': 'mensaje_eliminado',
+            'chat_id': chat.id,
+            'mensaje_id': deleted_mensaje_id,
+            'deleted_by': request.user.id,
+        }
+        
+        async_to_sync(channel_layer.group_send)(f'user_{chat.sender.id}', payload)
+        async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', payload)
+        
+        return Response(
+            {'message': 'Mensaje eliminado correctamente', 'mensaje_id': deleted_mensaje_id},
+            status=status.HTTP_200_OK
+        )
