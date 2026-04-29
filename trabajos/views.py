@@ -656,6 +656,7 @@ class CalificacionViewSet(viewsets.ViewSet):
         trabajo_id = request.data.get('trabajo_id')
         rating = request.data.get('rating')
         comentario = request.data.get('comentario', '')
+        mensajeId = request.data.get('mensajeId', '')
 
         if not trabajo_id or not rating:
             return Response(
@@ -689,6 +690,12 @@ class CalificacionViewSet(viewsets.ViewSet):
             }
         )
 
+        if mensajeId:
+            mensaje = Mensajes.objects.filter(id=mensajeId).first()
+            if mensaje:
+                mensaje.calificado = True
+                mensaje.save()
+                
         # actualizar rating del profesional
         if created:
             total_rating = profesional.rating * profesional.cant_calif

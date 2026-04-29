@@ -25,7 +25,7 @@ class MensajesSerializer(serializers.ModelSerializer):
         fields = [
             'mensaje_id', 'texto', 'tipo', 'metadata', 
             'sender', 'sender_nombre', 'chat', 'leido', 
-            'recursos', 'created_at', 'updated_at', 'trabajo'
+            'recursos', 'created_at', 'updated_at', 'trabajo', 'calificado'
         ]
         read_only_fields = ['mensaje_id', 'sender', 'created_at', 'updated_at']
     

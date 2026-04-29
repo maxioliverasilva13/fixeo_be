@@ -45,6 +45,7 @@ class Mensajes(BaseModel):
     )
     leido = models.BooleanField(default=False)
     metadata = models.JSONField(null=True, blank=True)
+    calificado = models.BooleanField(default=False)
 
 
 class Recurso(BaseModel):

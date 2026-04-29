@@ -299,7 +299,7 @@ class UsuarioBasicInformationSerializer(UsuarioFotoApiMixin, serializers.ModelSe
 
     class Meta:
         model = Usuario
-        fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'telefono', 'localizacion']
+        fields = ['id', 'nombre','cant_calif', 'rating', 'apellido', 'foto_url', 'rounded_foto_url', 'telefono', 'localizacion']
 
     def get_localizacion(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer

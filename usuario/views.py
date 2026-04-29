@@ -105,31 +105,37 @@ def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
     return False 
 
 SQL_QUERY = """
-WITH empresas_ranked AS (
+SELECT *
+FROM (
     SELECT
+        'usuario' AS tipo,
         u.id,
         e.nombre AS titulo,
+        string_agg(DISTINCT p.nombre, ', ') AS extra,
         u.foto_url,
         u.rounded_foto_url,
-        string_agg(DISTINCT p.nombre, ', ') AS profesiones_texto,
-        array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
+        NULL::numeric AS precio,
+        NULL::text AS codigo,
+        NULL::text AS foto_producto,
+        e.nombre AS empresa_nombre,
+        u.id AS empresa_id,
+        NULL::text AS ciudad,
+        NULL::text AS pais,
         e.latitud,
         e.longitud,
-        e.descripcion,
+        GREATEST(
+            similarity(e.nombre, %s),
+            MAX(COALESCE(similarity(p.nombre, %s), 0))
+        ) AS rank,
         COALESCE(AVG(c.rating), 0) AS rating,
-        u.cant_calif,                        
         EXISTS(
             SELECT 1 FROM trabajo t
             WHERE t.profesional_id = u.id AND t."esUrgente" = true
         ) AS es_urgente,
-        GREATEST(
-            similarity(u.nombre, %s),
-            similarity(u.apellido, %s),
-            similarity(u.nombre || ' ' || u.apellido, %s),
-            similarity(e.nombre, %s),
-            MAX(COALESCE(similarity(p.nombre, %s), 0))
-        ) AS rank
-
+        array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
+        NULL::numeric AS precio_servicio,
+        NULL::integer AS producto_id,
+        u.cant_calif
     FROM empresa e
     JOIN usuario u ON u.id = e.admin_id_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
@@ -138,86 +144,55 @@ WITH empresas_ranked AS (
     WHERE
         u.id != %s
         AND (
-            u.nombre %% %s
-            OR u.apellido %% %s
-            OR (u.nombre || ' ' || u.apellido) %% %s
-            OR u.nombre ILIKE %s
-            OR u.apellido ILIKE %s
-            OR e.nombre %% %s
+            e.nombre %% %s
             OR e.nombre ILIKE %s
             OR p.nombre %% %s
             OR p.nombre ILIKE %s
         )
     GROUP BY e.id, u.id, u.foto_url, u.rounded_foto_url, e.latitud, e.longitud, e.descripcion
-)
 
-SELECT
-    'usuario' AS tipo,
-    id,
-    titulo,
-    profesiones_texto AS extra,
-    foto_url,
-    rounded_foto_url,
-    NULL::numeric AS precio,
-    NULL::text AS codigo,
-    NULL::text AS foto_producto,
-    titulo AS empresa_nombre,
-    id AS empresa_id,
-    NULL::text AS ciudad,
-    NULL::text AS pais,
-    latitud,
-    longitud,
-    rank,
-    rating,
-    es_urgente,
-    profesion_ids,
-    NULL::numeric AS precio_servicio,
-    NULL::integer AS producto_id,
-    cant_calif                         -- ← agregado
-FROM empresas_ranked
+    UNION ALL
 
-UNION ALL
-
-SELECT
-    'producto' AS tipo,
-    u.id,
-    pr.nombre AS titulo,
-    pr.descripcion AS extra,
-    NULL,
-    NULL,
-    pr.precio,
-    pr.codigo,
-    pr.foto,
-    e.nombre,
-    e.id,
-    NULL::text AS ciudad,
-    NULL::text AS pais,
-    e.latitud,
-    e.longitud,
-    GREATEST(
-        similarity(pr.nombre, %s),
-        COALESCE(similarity(pr.descripcion, %s), 0)
-    ) AS rank,
-    0::numeric AS rating,
-    false AS es_urgente,
-    NULL::integer[] AS profesion_ids,
-    NULL::numeric AS precio_servicio,
-    pr.id AS producto_id,
-    0::integer AS cant_calif           -- ← productos no tienen, va en 0
-FROM producto pr
-JOIN empresa e ON e.id = pr.empresa_id
-JOIN usuario u ON u.id = e.admin_id_id
-WHERE
-    u.id != %s
-    AND (
-        pr.nombre %% %s
-        OR pr.descripcion %% %s
-        OR pr.codigo %% %s
-        OR pr.nombre ILIKE %s
-        OR pr.descripcion ILIKE %s
-        OR pr.codigo ILIKE %s
-    )
-
+    SELECT
+        'producto' AS tipo,
+        u.id,
+        pr.nombre AS titulo,
+        pr.descripcion AS extra,
+        NULL,
+        NULL,
+        pr.precio,
+        pr.codigo,
+        pr.foto,
+        e.nombre,
+        e.id,
+        NULL::text AS ciudad,
+        NULL::text AS pais,
+        e.latitud,
+        e.longitud,
+        GREATEST(
+            similarity(pr.nombre, %s),
+            COALESCE(similarity(pr.descripcion, %s), 0)
+        ) AS rank,
+        0::numeric AS rating,
+        false AS es_urgente,
+        NULL::integer[] AS profesion_ids,
+        NULL::numeric AS precio_servicio,
+        pr.id AS producto_id,
+        0::integer AS cant_calif
+    FROM producto pr
+    JOIN empresa e ON e.id = pr.empresa_id
+    JOIN usuario u ON u.id = e.admin_id_id
+    WHERE
+        u.id != %s
+        AND (
+            pr.nombre %% %s
+            OR pr.descripcion %% %s
+            OR pr.codigo %% %s
+            OR pr.nombre ILIKE %s
+            OR pr.descripcion ILIKE %s
+            OR pr.codigo ILIKE %s
+        )
+) combined
 ORDER BY rank DESC
 LIMIT 30;
 """
@@ -647,13 +622,15 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         with connection.cursor() as cursor:
             cursor.execute(SQL_QUERY, [
-                q, q, q, q, q,
-                user_id,
-                q, q, q,
-                like_q, like_q,
-                q, like_q,
-                q, like_q,
+                # rank empresa
                 q, q,
+                # WHERE empresa
+                user_id,
+                q, like_q,
+                q, like_q,
+                # rank producto
+                q, q,
+                # WHERE producto
                 user_id,
                 q, q, q,
                 like_q, like_q, like_q,
