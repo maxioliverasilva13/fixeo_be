@@ -372,17 +372,13 @@ class ChatViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='no-leidos')
     def mensajes_no_leidos(self, request):
-        ultimo_mensaje = Mensajes.objects.filter(
-            chat=OuterRef('pk')
-        ).order_by('-created_at').values('pk')[:1]
-
-        count = Chat.objects.filter(
-            Q(sender=request.user) | Q(receiver=request.user)
-        ).filter(
-            mensajes__mensaje_id=Subquery(ultimo_mensaje),
-            mensajes__leido=False,
+        count = Mensajes.objects.filter(
+            chat__in=Chat.objects.filter(
+                Q(sender=request.user) | Q(receiver=request.user)
+            ),
+            leido=False,
         ).exclude(
-            mensajes__sender=request.user
+            sender=request.user
         ).count()
 
         return Response({'no_leidos': count})
