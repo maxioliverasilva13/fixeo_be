@@ -7,6 +7,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenRefreshView
 from suscripciones.urls import planes_urlpatterns, suscripciones_urlpatterns
+from .views import SurveyResponseCreateView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -29,6 +30,7 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/planes/', include(planes_urlpatterns)),
     path('api/suscripciones/', include(suscripciones_urlpatterns))
+    path('survey/', SurveyResponseCreateView.as_view(), name='survey-create'),
 ]
 
 
