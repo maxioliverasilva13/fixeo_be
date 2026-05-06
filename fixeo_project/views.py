@@ -6,6 +6,7 @@ from django.utils.decorators import method_decorator
 
 from .models import SurveyResponse
 
+
 @method_decorator(csrf_exempt, name='dispatch')
 class SurveyResponseCreateView(View):
 
