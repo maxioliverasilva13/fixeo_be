@@ -1,7 +1,7 @@
 from pathlib import Path
 from decouple import config
 import json
-
+from models import SurveyResponse
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY')
@@ -37,7 +37,6 @@ INSTALLED_APPS = [
     'servicios',
     'horarios',
     'pagos',
-    'survey',
     'rest_framework_simplejwt.token_blacklist',
     'channels'
 ]
