@@ -33,7 +33,15 @@ class UsuarioSubscripcionActivaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Subscripcion
-        fields = ['id', 'plan_detalle', 'jobs_restantes', 'expiracion', 'cancelada']
+        fields = [
+            'id',
+            'plan_detalle',
+            'jobs_restantes',
+            'expiracion',
+            'cancelada',
+            'source',
+            'status',
+        ]
 
     def get_jobs_restantes(self, obj):
         return self.context.get('jobs_restantes', obj.jobs_restantes)

@@ -24,12 +24,42 @@ class Plan(BaseModel):
         return f"Plan {self.nombre}"
 
 
+class SubscripcionSource(models.TextChoices):
+    MANUAL = 'manual', 'Manual'
+    GOOGLE_PLAY = 'google_play', 'Google Play'
+    APP_STORE = 'app_store', 'App Store'
+
+
+class SubscripcionStatus(models.TextChoices):
+    ACTIVE = 'active', 'Active'
+    TRIALING = 'trialing', 'Trialing'
+    CANCELED = 'canceled', 'Canceled'
+    EXPIRED = 'expired', 'Expired'
+    PAST_DUE = 'past_due', 'Past due'
+    PAUSED = 'paused', 'Paused'
+    REFUNDED = 'refunded', 'Refunded'
+
+
 class Subscripcion(BaseModel):
     expiracion = models.DateTimeField()
     plan_id = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name='subscripciones')
     user_id = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='subscripciones')
     cancelada = models.BooleanField(default=False)
-    jobs_restantes = models.IntegerField(default=0)         
+    jobs_restantes = models.IntegerField(default=0)
+    source = models.CharField(
+        max_length=20,
+        choices=SubscripcionSource.choices,
+        default=SubscripcionSource.MANUAL,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=SubscripcionStatus.choices,
+        default=SubscripcionStatus.ACTIVE,
+    )
+    google_play_subscription_id = models.CharField(max_length=200, blank=True, null=True)
+    google_play_purchase_token = models.TextField(blank=True, null=True)
+    appstore_transaction_id = models.CharField(max_length=200, blank=True, null=True)
+    appstore_original_transaction_id = models.CharField(max_length=200, blank=True, null=True, db_index=True)
 
     class Meta:
         db_table = 'subscripcion'

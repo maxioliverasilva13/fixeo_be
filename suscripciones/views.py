@@ -1,6 +1,11 @@
+import base64
+import json
+import logging
+
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -11,6 +16,11 @@ from .serializers import (
     SubscripcionCreateSerializer,
     UsuarioSubscripcionActivaSerializer,
 )
+from .services.app_store_service import get_app_store_service
+from .services.google_play_service import get_google_play_service
+
+
+logger = logging.getLogger(__name__)
 
 
 class PlanListView(APIView):
@@ -132,3 +142,155 @@ class AdminSubscripcionListView(APIView):
         subs = Subscripcion.objects.select_related('plan_id', 'user_id').order_by('-created_at')
         serializer = SubscripcionSerializer(subs, many=True)
         return Response(serializer.data)
+
+
+# ---------------------------------------------------------------------------
+# Google Play
+# ---------------------------------------------------------------------------
+
+class GooglePlaySubscribeView(APIView):
+    """
+    POST /suscripciones/google-play/subscribe/
+    Body: { plan_id, purchase_token, product_id, package_name? }
+    Verifica la compra contra Google Play y crea/actualiza la suscripción.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        plan_id = request.data.get('plan_id') or request.data.get('planId')
+        purchase_token = request.data.get('purchase_token') or request.data.get('purchaseToken')
+        product_id = request.data.get('product_id') or request.data.get('productId')
+
+        missing = [
+            field
+            for field, value in (
+                ('plan_id', plan_id),
+                ('purchase_token', purchase_token),
+                ('product_id', product_id),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValidationError(f'Faltan campos: {", ".join(missing)}')
+
+        subscription = get_google_play_service().create_or_update_subscription(
+            usuario=request.user,
+            plan_id=plan_id,
+            purchase_token=purchase_token,
+            product_id=product_id,
+        )
+        return Response(
+            UsuarioSubscripcionActivaSerializer(subscription).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class GooglePlayCancelView(APIView):
+    """
+    DELETE /suscripciones/google-play/cancel/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        get_google_play_service().cancel_subscription(request.user)
+        return Response({'detail': 'Suscripción cancelada exitosamente.'})
+
+
+class GooglePlayWebhookView(APIView):
+    """
+    POST /suscripciones/google-play/webhook/
+    Pub/Sub envía mensajes con el payload en `message.data` (base64 JSON).
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        try:
+            body = request.data or {}
+            message = body.get('message') if isinstance(body, dict) else None
+            if message and message.get('data'):
+                decoded = base64.b64decode(message['data']).decode('utf-8')
+                notification_data = json.loads(decoded)
+                get_google_play_service().process_webhook(notification_data)
+            return Response({'received': True}, status=status.HTTP_200_OK)
+        except APIException:
+            raise
+        except Exception as exc:
+            logger.exception('❌ Error procesando webhook de Google Play')
+            return Response(
+                {'received': False, 'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+# ---------------------------------------------------------------------------
+# App Store
+# ---------------------------------------------------------------------------
+
+class AppStoreSubscribeView(APIView):
+    """
+    POST /suscripciones/app-store/subscribe/
+    Body: { plan_id, transaction_id, receipt_data }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        plan_id = request.data.get('plan_id') or request.data.get('planId')
+        transaction_id = request.data.get('transaction_id') or request.data.get('transactionId')
+        receipt_data = request.data.get('receipt_data') or request.data.get('receiptData')
+
+        missing = [
+            field
+            for field, value in (
+                ('plan_id', plan_id),
+                ('transaction_id', transaction_id),
+                ('receipt_data', receipt_data),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValidationError(f'Faltan campos: {", ".join(missing)}')
+
+        subscription = get_app_store_service().create_or_update_subscription(
+            usuario=request.user,
+            plan_id=plan_id,
+            receipt_data=receipt_data,
+            transaction_id=transaction_id,
+        )
+        return Response(
+            UsuarioSubscripcionActivaSerializer(subscription).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class AppStoreCancelView(APIView):
+    """
+    DELETE /suscripciones/app-store/cancel/
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        get_app_store_service().cancel_subscription(request.user)
+        return Response({'detail': 'Suscripción cancelada exitosamente.'})
+
+
+class AppStoreWebhookView(APIView):
+    """
+    POST /suscripciones/app-store/webhook/
+    Procesa Server Notifications V2 de App Store.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        try:
+            get_app_store_service().process_server_notification(request.data or {})
+            return Response({'received': True}, status=status.HTTP_200_OK)
+        except APIException:
+            raise
+        except Exception as exc:
+            logger.exception('❌ Error procesando webhook de App Store')
+            return Response(
+                {'received': False, 'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )

@@ -6,6 +6,12 @@ from .views import (
     MiSubscripcionActivaView,
     CancelarSubscripcionView,
     AdminSubscripcionListView,
+    GooglePlaySubscribeView,
+    GooglePlayCancelView,
+    GooglePlayWebhookView,
+    AppStoreSubscribeView,
+    AppStoreCancelView,
+    AppStoreWebhookView,
 )
 
 planes_urlpatterns = [
@@ -18,6 +24,16 @@ suscripciones_urlpatterns = [
     path('mi-plan/', MiSubscripcionActivaView.as_view(), name='mi-subscripcion'),
     path('<int:pk>/cancelar/', CancelarSubscripcionView.as_view(), name='subscripcion-cancelar'),
     path('admin/', AdminSubscripcionListView.as_view(), name='admin-subscripcion-list'),
+
+    # Google Play (in-app subscriptions)
+    path('google-play/subscribe/', GooglePlaySubscribeView.as_view(), name='google-play-subscribe'),
+    path('google-play/cancel/', GooglePlayCancelView.as_view(), name='google-play-cancel'),
+    path('google-play/webhook/', GooglePlayWebhookView.as_view(), name='google-play-webhook'),
+
+    # Apple App Store (in-app subscriptions)
+    path('app-store/subscribe/', AppStoreSubscribeView.as_view(), name='app-store-subscribe'),
+    path('app-store/cancel/', AppStoreCancelView.as_view(), name='app-store-cancel'),
+    path('app-store/webhook/', AppStoreWebhookView.as_view(), name='app-store-webhook'),
 ]
 
-urlpatterns = planes_urlpatterns 
+urlpatterns = planes_urlpatterns

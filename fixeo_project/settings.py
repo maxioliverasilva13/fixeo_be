@@ -168,7 +168,7 @@ if DEBUG:
         "http://172.20.10.3:3000",
         "http://172.20.10.3:8000",
         "https://172.20.10.3:8000",
-        "https://landingquestionalavuelta-production.up.railway.app/"
+        "https://landingquestionalavuelta-production.up.railway.app",
     ]
 else:
     CORS_ALLOW_ALL_ORIGINS = True
@@ -257,4 +257,17 @@ if FIREBASE_CREDENTIALS:
     from fixeo_project.firebase_init import ensure_firebase_app
 
     ensure_firebase_app(FIREBASE_CREDENTIALS)
+
+
+# ---------------------------------------------------------------------------
+# In-App Purchases (Google Play + Apple App Store)
+# ---------------------------------------------------------------------------
+# Todas las variables son opcionales: si no están seteadas, los servicios se
+# inicializan en modo "no configurado" y la app sigue arrancando normal.
+# Solo los endpoints específicos devolverán un mensaje claro cuando se llamen.
+GOOGLE_SERVICE_ACCOUNT_KEY = config('GOOGLE_SERVICE_ACCOUNT_KEY', default='')
+GOOGLE_PLAY_PACKAGE_NAME = config('GOOGLE_PLAY_PACKAGE_NAME', default='')
+
+APP_STORE_SHARED_SECRET = config('APP_STORE_SHARED_SECRET', default='')
+APP_STORE_ENVIRONMENT = config('APP_STORE_ENVIRONMENT', default='sandbox')
 
