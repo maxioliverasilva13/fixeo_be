@@ -22,7 +22,7 @@ from empresas.utils import crear_empresa
 from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, F
 from django.db.models import Avg
 from decimal import Decimal
 import math
@@ -85,7 +85,6 @@ def _batch_visibility_data(user_ids: list):
 
 def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
 
-    return True
     empresa = usuario.empresas_administradas.first()
     if not empresa:
         return False
@@ -722,7 +721,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         ).prefetch_related('empresas_administradas')
 
         if sort_by == 'mejor_valorados':
-            usuarios = usuarios.order_by('-avg_rating')
+            usuarios = usuarios.order_by(F('avg_rating').desc(nulls_last=True))
         elif sort_by == 'mejor_precio':
             usuarios = usuarios.order_by('servicios__precio')
 

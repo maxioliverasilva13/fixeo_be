@@ -169,6 +169,8 @@ if DEBUG:
         "http://172.20.10.3:8000",
         "https://172.20.10.3:8000",
         "https://landingquestionalavuelta-production.up.railway.app",
+        "http://172.20.10.2:8000",
+        "http://172.20.10.2:3000"
     ]
 else:
     CORS_ALLOW_ALL_ORIGINS = True

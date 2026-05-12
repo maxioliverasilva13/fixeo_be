@@ -170,9 +170,6 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             else:
                 advertencias.append('No tenés suscripción activa para cobrar en efectivo')
 
-        if empresa.acepta_tarjeta and not empresa.is_mercadopago_vinculado:
-            advertencias.append('Vinculá tu cuenta de MercadoPago para cobrar con tarjeta')
-
         if has_mp or has_efectivo:
             return True, []
 

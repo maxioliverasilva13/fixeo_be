@@ -188,7 +188,7 @@ class ChatViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        mensajes = chat.mensajes.select_related('sender').prefetch_related('recursos').order_by('-created_at')
+        mensajes = chat.mensajes.select_related('sender', 'trabajo').prefetch_related('recursos').order_by('-created_at')
         
         paginator = MensajePagination()
         page = paginator.paginate_queryset(mensajes, request)

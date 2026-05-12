@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.management.base import BaseCommand
 from datetime import timedelta
 from suscripciones.models import Plan
@@ -55,39 +57,61 @@ PLANES_SEED = [
     },
 ]
 
+_STORE_FIELDS = ('google_play_id', 'appstore_id')
+
+
+def _defaults_from_seed(plan_data):
+    """Valores listos para create/update (sin nombre; precio como Decimal; IDs vacíos → None)."""
+    out = {}
+    for key, value in plan_data.items():
+        if key == 'nombre':
+            continue
+        if key == 'precio':
+            out[key] = Decimal(str(value))
+        elif key in _STORE_FIELDS:
+            out[key] = value or None
+        else:
+            out[key] = value
+    return out
+
 
 class Command(BaseCommand):
-    help = 'Crea los planes iniciales del sistema (incluyendo IDs de Google Play y App Store)'
+    help = (
+        'Crea o actualiza los planes desde PLANES_SEED (precio, descripción, jobs, tiendas, etc.). '
+        'La clave natural es nombre.'
+    )
 
     def handle(self, *args, **kwargs):
         for plan_data in PLANES_SEED:
+            defaults = _defaults_from_seed(plan_data)
             plan, created = Plan.objects.get_or_create(
                 nombre=plan_data['nombre'],
-                defaults=plan_data,
+                defaults=defaults,
             )
             if created:
                 self.stdout.write(
                     self.style.SUCCESS(f'✓ Plan "{plan.nombre}" creado ({plan.cantidad_jobs} jobs)')
                 )
+                continue
+
+            changed_fields = []
+            for field, new_value in defaults.items():
+                current = getattr(plan, field)
+                if current != new_value:
+                    setattr(plan, field, new_value)
+                    changed_fields.append(field)
+
+            if changed_fields:
+                plan.save()
+                self.stdout.write(
+                    self.style.WARNING(
+                        f'~ Plan "{plan.nombre}" actualizado: {", ".join(changed_fields)}'
+                    )
+                )
             else:
-                # Mantener IDs de Google Play / App Store al día sin pisar otros campos manuales
-                changed = False
-                for field in ('google_play_id', 'appstore_id'):
-                    new_value = plan_data.get(field, '') or ''
-                    if (getattr(plan, field) or '') != new_value:
-                        setattr(plan, field, new_value or None)
-                        changed = True
-                if changed:
-                    plan.save(update_fields=['google_play_id', 'appstore_id', 'updated_at'])
-                    self.stdout.write(
-                        self.style.WARNING(
-                            f'~ Plan "{plan.nombre}" actualizado (IDs de tienda)'
-                        )
-                    )
-                else:
-                    self.stdout.write(
-                        self.style.WARNING(f'- Plan "{plan.nombre}" ya existe')
-                    )
+                self.stdout.write(
+                    self.style.WARNING(f'- Plan "{plan.nombre}" sin cambios')
+                )
 
         self.stdout.write(
             self.style.SUCCESS('\n✅ Seed de planes completado')

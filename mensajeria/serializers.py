@@ -19,24 +19,25 @@ class RecursoCreateSerializer(serializers.Serializer):
 class MensajesSerializer(serializers.ModelSerializer):
     recursos = RecursoSerializer(many=True, read_only=True)
     sender_nombre = serializers.SerializerMethodField()
-    
+    trabajo = serializers.SerializerMethodField()
+
     class Meta:
         model = Mensajes
         fields = [
-            'mensaje_id', 'texto', 'tipo', 'metadata', 
-            'sender', 'sender_nombre', 'chat', 'leido', 
+            'mensaje_id', 'texto', 'tipo', 'metadata',
+            'sender', 'sender_nombre', 'chat', 'leido',
             'recursos', 'created_at', 'updated_at', 'trabajo', 'calificado'
         ]
         read_only_fields = ['mensaje_id', 'sender', 'created_at', 'updated_at']
-    
+
     def get_sender_nombre(self, obj):
         return f"{obj.sender.nombre} {obj.sender.apellido}"
-    
+
     def get_trabajo(self, obj):
-        if not obj.trabajo:
+        if not obj.trabajo_id:
             return None
-        from trabajos.serializers import TrabajoDetailSerializer
-        return TrabajoDetailSerializer(obj.trabajo).data
+        from trabajos.serializers import TrabajoMensajeResumenSerializer
+        return TrabajoMensajeResumenSerializer(obj.trabajo).data
 
 class MensajeCreateSerializer(serializers.Serializer):
     texto      = serializers.CharField(required=False, allow_blank=True, default='')

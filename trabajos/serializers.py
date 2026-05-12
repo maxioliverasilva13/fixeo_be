@@ -73,6 +73,24 @@ class CalificacionDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'rating', 'comentario', 'user_cal_sender', 
                   'user_cal_sender_nombre', 'user_cal_sender_apellido', 'created_at']
 
+class TrabajoMensajeResumenSerializer(serializers.ModelSerializer):
+    """Resumen ligero para anidar en mensajes (evita el peso de TrabajoDetailSerializer)."""
+
+    class Meta:
+        model = Trabajo
+        fields = [
+            'id',
+            'descripcion',
+            'status',
+            'esUrgente',
+            'precio_final',
+            'fecha_inicio',
+            'fecha_fin',
+            'currency',
+            'metodo_pago',
+        ]
+
+
 class TrabajoDetailSerializer(serializers.ModelSerializer):
     usuario = UsuarioSortSerializer(read_only=True)
     profesional = UsuarioSortSerializer(read_only=True)
