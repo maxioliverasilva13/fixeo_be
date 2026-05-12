@@ -509,12 +509,14 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     localizacion = serializers.SerializerMethodField()
     esta_abierta = serializers.SerializerMethodField()
-
+    vende_productos = serializers.SerializerMethodField()
+    vende_servicios = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio', 
-                  'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta']
+                  'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta',
+                  'vende_productos', 'vende_servicios']
         read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 
                             'trabajo_domicilio', 'trabajo_local', 
                             'rango_mapa_km', 'esta_abierta']
@@ -534,10 +536,23 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         
         return None
 
+    def _get_empresa(self, obj):
+        if not hasattr(obj, '_cached_empresa_mapa'):
+            obj._cached_empresa_mapa = obj.empresas_administradas.first()
+        return obj._cached_empresa_mapa
+
+    def get_vende_productos(self, obj):
+        empresa = self._get_empresa(obj)
+        return empresa.vende_productos if empresa else False
+
+    def get_vende_servicios(self, obj):
+        empresa = self._get_empresa(obj)
+        return empresa.vende_servicios if empresa else False
+
     def get_esta_abierta(self, obj):
         import datetime
         from django.utils import timezone
-        empresa = obj.empresas_administradas.first()
+        empresa = self._get_empresa(obj)
         if not empresa:
             return None
 

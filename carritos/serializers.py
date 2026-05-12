@@ -6,12 +6,13 @@ class CarritoItemSerializer(serializers.ModelSerializer):
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_precio = serializers.DecimalField(source='producto.precio', max_digits=10, decimal_places=2, read_only=True)
     producto_agotado = serializers.BooleanField(source='producto.agotado', read_only=True)
+    producto_foto = serializers.CharField(source='producto.foto', read_only=True)
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     
     class Meta:
         model = CarritoItem
         fields = ['id', 'carrito', 'producto', 'producto_nombre', 'producto_precio', 
-                  'producto_agotado', 'cantidad', 'precio_unitario', 'subtotal', 'created_at']
+                  'producto_agotado', 'producto_foto', 'cantidad', 'precio_unitario', 'subtotal', 'created_at']
         read_only_fields = ['id', 'carrito', 'precio_unitario', 'created_at']
 
     def validate_producto(self, value):
@@ -41,11 +42,12 @@ class CarritoItemCreateSerializer(serializers.Serializer):
 class OrdenItemSerializer(serializers.ModelSerializer):
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_codigo = serializers.CharField(source='producto.codigo', read_only=True)
+    producto_foto = serializers.CharField(source='producto.foto', read_only=True)
     
     class Meta:
         model = OrdenItem
         fields = ['id', 'orden', 'producto', 'producto_nombre', 'producto_codigo', 
-                  'cantidad', 'precio_unitario', 'subtotal']
+                  'producto_foto', 'cantidad', 'precio_unitario', 'subtotal']
         read_only_fields = ['id', 'orden']
 
 
