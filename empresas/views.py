@@ -236,7 +236,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
         # Defaults before parsing state
         web_base = f"{settings.FRONTEND_URL}/perfil/empresaMetodosPago"
-        app_scheme = getattr(settings, 'MP_APP_SCHEME', 'com.alavuelta.app')
+        app_scheme = getattr(settings, 'MP_APP_SCHEME', 'com.alavueltaapp')
         platform = 'web'
         empresa_id_str = state or ''
 
