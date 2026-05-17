@@ -109,7 +109,10 @@ FROM (
     SELECT
         'usuario' AS tipo,
         u.id,
-        e.nombre AS titulo,
+        CASE
+            WHEN e.id IS NOT NULL THEN e.nombre
+            ELSE TRIM(u.nombre || ' ' || u.apellido)
+        END AS titulo,
         string_agg(DISTINCT p.nombre, ', ') AS extra,
         u.foto_url,
         u.rounded_foto_url,
@@ -120,67 +123,22 @@ FROM (
         e.id AS empresa_id,
         NULL::text AS ciudad,
         NULL::text AS pais,
-        e.latitud,
-        e.longitud,
-        GREATEST(
-            similarity(e.nombre, %s),
-            COALESCE(similarity(e.descripcion, %s), 0),
-            COALESCE(similarity(e.ubicacion, %s), 0),
-            COALESCE(MAX(similarity(p.nombre, %s)), 0)
-        ) AS rank,
-        COALESCE(AVG(c.rating), 0) AS rating,
-        EXISTS(
-            SELECT 1 FROM trabajo t
-            WHERE t.profesional_id = u.id AND t."esUrgente" = true
-        ) AS es_urgente,
-        array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
-        NULL::numeric AS precio_servicio,
-        NULL::integer AS producto_id,
-        u.cant_calif
-    FROM empresa e
-    JOIN usuario u ON u.id = e.admin_id_id
-    LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
-    LEFT JOIN profesion p ON p.id = up.profesion_id
-    LEFT JOIN calificacion c ON c.user_cal_recibe_id = u.id
-    WHERE
-        u.id != %s
-        AND u.is_active = true
-        AND (
-            e.nombre %% %s
-            OR e.nombre ILIKE %s
-            OR e.descripcion %% %s
-            OR e.descripcion ILIKE %s
-            OR e.ubicacion %% %s
-            OR e.ubicacion ILIKE %s
-            OR p.nombre %% %s
-            OR p.nombre ILIKE %s
-        )
-    GROUP BY e.id, u.id, u.foto_url, u.rounded_foto_url, e.latitud, e.longitud,
-        e.nombre, e.descripcion, e.ubicacion, u.cant_calif
-
-    UNION ALL
-
-    SELECT
-        'usuario' AS tipo,
-        u.id,
-        TRIM(u.nombre || ' ' || u.apellido) AS titulo,
-        string_agg(DISTINCT p.nombre, ', ') AS extra,
-        u.foto_url,
-        u.rounded_foto_url,
-        NULL::numeric AS precio,
-        NULL::text AS codigo,
-        NULL::text AS foto_producto,
-        NULL::text AS empresa_nombre,
-        NULL::integer AS empresa_id,
-        NULL::text AS ciudad,
-        NULL::text AS pais,
-        loc.latitud,
-        loc.longitud,
-        GREATEST(
-            similarity(u.nombre, %s),
-            similarity(u.apellido, %s),
-            COALESCE(MAX(similarity(p.nombre, %s)), 0)
-        ) AS rank,
+        COALESCE(e.latitud, loc.latitud) AS latitud,
+        COALESCE(e.longitud, loc.longitud) AS longitud,
+        CASE WHEN e.id IS NOT NULL THEN
+            GREATEST(
+                similarity(e.nombre, %s),
+                COALESCE(similarity(e.descripcion, %s), 0),
+                COALESCE(similarity(e.ubicacion, %s), 0),
+                COALESCE(MAX(similarity(p.nombre, %s)), 0)
+            )
+        ELSE
+            GREATEST(
+                similarity(u.nombre, %s),
+                similarity(u.apellido, %s),
+                COALESCE(MAX(similarity(p.nombre, %s)), 0)
+            )
+        END AS rank,
         COALESCE(AVG(c.rating), 0) AS rating,
         EXISTS(
             SELECT 1 FROM trabajo t
@@ -191,25 +149,44 @@ FROM (
         NULL::integer AS producto_id,
         u.cant_calif
     FROM usuario u
-    INNER JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
-    INNER JOIN localizacion loc ON loc.id = ul.localizacion_id
+    LEFT JOIN empresa e ON e.admin_id_id = u.id
+    LEFT JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
+    LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
     LEFT JOIN profesion p ON p.id = up.profesion_id
     LEFT JOIN calificacion c ON c.user_cal_recibe_id = u.id
     WHERE
         u.id != %s
         AND u.is_active = true
-        AND NOT EXISTS (SELECT 1 FROM empresa em WHERE em.admin_id_id = u.id)
         AND (
-            u.nombre %% %s
-            OR u.nombre ILIKE %s
-            OR u.apellido %% %s
-            OR u.apellido ILIKE %s
-            OR p.nombre %% %s
-            OR p.nombre ILIKE %s
+            (
+                e.id IS NOT NULL
+                AND (
+                    e.nombre %% %s
+                    OR e.nombre ILIKE %s
+                    OR e.descripcion %% %s
+                    OR e.descripcion ILIKE %s
+                    OR e.ubicacion %% %s
+                    OR e.ubicacion ILIKE %s
+                    OR p.nombre %% %s
+                    OR p.nombre ILIKE %s
+                )
+            )
+            OR (
+                e.id IS NULL
+                AND (
+                    u.nombre %% %s
+                    OR u.nombre ILIKE %s
+                    OR u.apellido %% %s
+                    OR u.apellido ILIKE %s
+                    OR p.nombre %% %s
+                    OR p.nombre ILIKE %s
+                )
+            )
         )
-    GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido,
-        loc.latitud, loc.longitud, u.cant_calif
+    GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif,
+        e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud,
+        loc.latitud, loc.longitud
 
     UNION ALL
 
@@ -683,19 +660,15 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         with connection.cursor() as cursor:
             cursor.execute(SQL_QUERY, [
-                # 1 — usuario con empresa: rank (nombre, descripción, ubicación, profesión)
+                # usuario: rank (4 params empresa + 3 freelancer; el CASE elige por fila)
                 q, q, q, q,
-                # 1 — where
+                q, q, q,
+                # usuario: where
                 user_id,
                 q, like_q, q, like_q, q, like_q, q, like_q,
-                # 2 — usuario sin empresa: rank (nombre, apellido, profesión)
-                q, q, q,
-                # 2 — where
-                user_id,
                 q, like_q, q, like_q, q, like_q,
-                # 3 — producto: rank
+                # producto: rank + where
                 q, q,
-                # 3 — where
                 user_id,
                 q, q, q,
                 like_q, like_q, like_q,
