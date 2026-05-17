@@ -18,7 +18,7 @@ from usuario.serializers import (
     RequestPasswordResetSerializer, ConfirmPasswordResetSerializer
 )
 from localizacion.models import Localizacion
-from empresas.utils import crear_empresa
+from empresas.utils import crear_empresa, validar_nombre_empresa_unico
 from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from django.shortcuts import get_object_or_404
@@ -110,7 +110,25 @@ FROM (
         'usuario' AS tipo,
         u.id,
         CASE
-            WHEN e.id IS NOT NULL THEN e.nombre
+            WHEN e.id IS NOT NULL THEN
+                CASE
+                    WHEN
+                        LOWER(TRIM(REGEXP_REPLACE(e.nombre, '\s+', ' ', 'g')))
+                        = LOWER(TRIM(REGEXP_REPLACE(
+                            CONCAT_WS(
+                                ' ',
+                                NULLIF(TRIM(u.nombre), ''),
+                                NULLIF(TRIM(u.apellido), '')
+                            ),
+                            '\s+', ' ', 'g'
+                        )))
+                    THEN
+                        COALESCE(
+                            NULLIF(string_agg(DISTINCT p.nombre, ', '), ''),
+                            e.nombre
+                        )
+                    ELSE e.nombre
+                END
             ELSE TRIM(u.nombre || ' ' || u.apellido)
         END AS titulo,
         string_agg(DISTINCT p.nombre, ', ') AS extra,
@@ -119,7 +137,28 @@ FROM (
         NULL::numeric AS precio,
         NULL::text AS codigo,
         NULL::text AS foto_producto,
-        e.nombre AS empresa_nombre,
+        CASE
+            WHEN e.id IS NOT NULL THEN
+                CASE
+                    WHEN
+                        LOWER(TRIM(REGEXP_REPLACE(e.nombre, '\s+', ' ', 'g')))
+                        = LOWER(TRIM(REGEXP_REPLACE(
+                            CONCAT_WS(
+                                ' ',
+                                NULLIF(TRIM(u.nombre), ''),
+                                NULLIF(TRIM(u.apellido), '')
+                            ),
+                            '\s+', ' ', 'g'
+                        )))
+                    THEN
+                        COALESCE(
+                            NULLIF(string_agg(DISTINCT p.nombre, ', '), ''),
+                            e.nombre
+                        )
+                    ELSE e.nombre
+                END
+            ELSE NULL::text
+        END AS empresa_nombre,
         e.id AS empresa_id,
         NULL::text AS ciudad,
         NULL::text AS pais,
@@ -320,8 +359,17 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 
                 if serializer.validated_data['es_empresa']:
                     localizacion_empresa = UsuarioLocalizacion.objects.filter(usuario=usuario).first()
+                    nombre_empresa = (
+                        serializer.validated_data.get('nombre_empresa') or ''
+                    ).strip()
+                    if not nombre_empresa:
+                        nombre_empresa = f"{usuario.nombre} {usuario.apellido}".strip()
+                    if not validar_nombre_empresa_unico(nombre_empresa):
+                        raise ValueError(
+                            f"Ya existe una empresa con el nombre '{nombre_empresa}'"
+                        )
                     crear_empresa(
-                        nombre=f"{usuario.nombre} {usuario.apellido}",
+                        nombre=nombre_empresa,
                         ubicacion=serializer.validated_data.get('direction_name', ''),
                         latitud=serializer.validated_data['latitude'],
                         longitud=serializer.validated_data['longitude'],

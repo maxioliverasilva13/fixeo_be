@@ -410,6 +410,7 @@ class RegistroSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
     es_empresa = serializers.BooleanField(required=False)
+    nombre_empresa = serializers.CharField(required=False, allow_blank=True, max_length=200)
     trabajo_domicilio = serializers.BooleanField(required=False)
     telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
     trabajo_local = serializers.BooleanField(required=False)
