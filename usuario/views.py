@@ -18,7 +18,11 @@ from usuario.serializers import (
     RequestPasswordResetSerializer, ConfirmPasswordResetSerializer
 )
 from localizacion.models import Localizacion
+from empresas.models import Empresa
 from empresas.utils import crear_empresa, validar_nombre_empresa_unico
+
+# Columna real en BD para admin_id (p. ej. admin_id_id); el SQL evita suposiciones.
+_EMPRESA_ADMIN_FK_COL = Empresa._meta.get_field("admin_id").column
 from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from django.shortcuts import get_object_or_404
@@ -103,33 +107,18 @@ def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
 
     return False 
 
-SQL_QUERY = """
+SQL_QUERY = f"""
 SELECT *
 FROM (
     SELECT
         'usuario' AS tipo,
         u.id,
         CASE
-            WHEN e.id IS NOT NULL THEN
-                CASE
-                    WHEN
-                        LOWER(TRIM(REGEXP_REPLACE(e.nombre, '\s+', ' ', 'g')))
-                        = LOWER(TRIM(REGEXP_REPLACE(
-                            CONCAT_WS(
-                                ' ',
-                                NULLIF(TRIM(u.nombre), ''),
-                                NULLIF(TRIM(u.apellido), '')
-                            ),
-                            '\s+', ' ', 'g'
-                        )))
-                    THEN
-                        COALESCE(
-                            NULLIF(string_agg(DISTINCT p.nombre, ', '), ''),
-                            e.nombre
-                        )
-                    ELSE e.nombre
-                END
-            ELSE TRIM(u.nombre || ' ' || u.apellido)
+            WHEN e.id IS NOT NULL THEN e.nombre
+            ELSE NULLIF(
+                TRIM(CONCAT_WS(' ', NULLIF(TRIM(u.nombre), ''), NULLIF(TRIM(u.apellido), ''))),
+                ''
+            )
         END AS titulo,
         string_agg(DISTINCT p.nombre, ', ') AS extra,
         u.foto_url,
@@ -137,28 +126,7 @@ FROM (
         NULL::numeric AS precio,
         NULL::text AS codigo,
         NULL::text AS foto_producto,
-        CASE
-            WHEN e.id IS NOT NULL THEN
-                CASE
-                    WHEN
-                        LOWER(TRIM(REGEXP_REPLACE(e.nombre, '\s+', ' ', 'g')))
-                        = LOWER(TRIM(REGEXP_REPLACE(
-                            CONCAT_WS(
-                                ' ',
-                                NULLIF(TRIM(u.nombre), ''),
-                                NULLIF(TRIM(u.apellido), '')
-                            ),
-                            '\s+', ' ', 'g'
-                        )))
-                    THEN
-                        COALESCE(
-                            NULLIF(string_agg(DISTINCT p.nombre, ', '), ''),
-                            e.nombre
-                        )
-                    ELSE e.nombre
-                END
-            ELSE NULL::text
-        END AS empresa_nombre,
+        CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS empresa_nombre,
         e.id AS empresa_id,
         NULL::text AS ciudad,
         NULL::text AS pais,
@@ -188,7 +156,20 @@ FROM (
         NULL::integer AS producto_id,
         u.cant_calif
     FROM usuario u
-    LEFT JOIN empresa e ON e.admin_id_id = u.id
+    LEFT JOIN LATERAL (
+        SELECT
+            e0.id,
+            e0.nombre,
+            e0.descripcion,
+            e0.ubicacion,
+            e0.latitud,
+            e0.longitud
+        FROM empresa e0
+        WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
+          AND NOT COALESCE(e0.is_deleted, false)
+        ORDER BY e0.id
+        LIMIT 1
+    ) e ON TRUE
     LEFT JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
     LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
@@ -256,8 +237,8 @@ FROM (
         pr.id AS producto_id,
         0::integer AS cant_calif
     FROM producto pr
-    JOIN empresa e ON e.id = pr.empresa_id
-    JOIN usuario u ON u.id = e.admin_id_id
+    JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
+    JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
     WHERE
         u.id != %s
         AND (
