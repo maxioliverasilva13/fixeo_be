@@ -31,3 +31,15 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
+# Shrink context (less I/O during build)
+*.md
+Fixeo*.json
+GUIA*.json
+README*
+RAILWAY*.md
+SISTEMA*.md
+celerybeat-schedule
+docker-compose*.yml
+.docker
+.cursor
+
