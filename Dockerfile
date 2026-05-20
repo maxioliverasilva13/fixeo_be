@@ -1,28 +1,29 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Set work directory
 WORKDIR /app
 
-# psycopg2-binary and other deps ship as wheels; no apt build toolchain needed.
+COPY requirements.txt .
+RUN pip install --prefix=/install -r requirements.txt
 
-# Install Python dependencies
-COPY requirements.txt /app/
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+FROM python:3.11-slim
 
-# Copy project
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/install/bin:$PATH" \
+    PYTHONPATH="/install/lib/python3.11/site-packages"
+
+WORKDIR /app
+
+COPY --from=builder /install /install
 COPY . /app/
 
-# Create media and static directories
-RUN mkdir -p /app/media /app/static
+RUN mkdir -p /app/media /app/staticfiles
 
-# Expose port
 EXPOSE 8000
 
-# Run the application
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
-
