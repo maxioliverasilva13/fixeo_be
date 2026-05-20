@@ -217,31 +217,102 @@ class GooglePlayService:
         13: SubscripcionStatus.EXPIRED,      # SUBSCRIPTION_EXPIRED
     }
 
-    def process_webhook(self, notification_data: dict[str, Any]) -> None:
+    NOTIFICATION_TYPE_LABELS = {
+        1: 'SUBSCRIPTION_RECOVERED',
+        2: 'SUBSCRIPTION_RENEWED',
+        3: 'SUBSCRIPTION_CANCELED',
+        4: 'SUBSCRIPTION_PURCHASED',
+        5: 'SUBSCRIPTION_ON_HOLD',
+        6: 'SUBSCRIPTION_IN_GRACE_PERIOD',
+        7: 'SUBSCRIPTION_RESTARTED',
+        10: 'SUBSCRIPTION_PAUSED',
+        12: 'SUBSCRIPTION_REVOKED',
+        13: 'SUBSCRIPTION_EXPIRED',
+    }
+
+    @staticmethod
+    def _mask_token(token: Optional[str]) -> str:
+        if not token:
+            return '(vacío)'
+        if len(token) <= 12:
+            return '***'
+        return f'{token[:8]}…{token[-4:]}'
+
+    def process_webhook(self, notification_data: dict[str, Any]) -> bool:
+        """
+        Procesa RTDN de Google Play. Devuelve True si se aplicó un cambio en BD.
+        """
+        package = (notification_data or {}).get('packageName')
+        event_ms = (notification_data or {}).get('eventTimeMillis')
         sub_notification = (notification_data or {}).get('subscriptionNotification')
+
+        logger.info(
+            '📥 [GOOGLE PLAY WEBHOOK] payload package=%s eventTimeMillis=%s keys=%s',
+            package,
+            event_ms,
+            list((notification_data or {}).keys()),
+        )
+
         if not sub_notification:
-            return
+            logger.warning(
+                '⚠️ [GOOGLE PLAY WEBHOOK] Sin subscriptionNotification (test/voided/otro evento). '
+                'Payload completo (sin tokens): %s',
+                {k: v for k, v in (notification_data or {}).items() if 'token' not in k.lower()},
+            )
+            return False
 
         purchase_token = sub_notification.get('purchaseToken')
         subscription_id = sub_notification.get('subscriptionId')
         notification_type = sub_notification.get('notificationType')
+        type_label = self.NOTIFICATION_TYPE_LABELS.get(
+            notification_type, f'UNKNOWN_{notification_type}'
+        )
+
+        logger.info(
+            '📥 [GOOGLE PLAY WEBHOOK] subscriptionNotification type=%s (%s) '
+            'product_id=%s purchase_token=%s',
+            notification_type,
+            type_label,
+            subscription_id,
+            self._mask_token(purchase_token),
+        )
 
         subscription = (
             Subscripcion.objects.filter(google_play_purchase_token=purchase_token)
+            .select_related('plan_id', 'user_id')
             .order_by('-created_at')
             .first()
         )
         if not subscription:
-            logger.info('🔔 [GOOGLE PLAY] Webhook sin suscripción asociada')
-            return
+            logger.warning(
+                '⚠️ [GOOGLE PLAY WEBHOOK] Sin fila en BD para purchase_token=%s product_id=%s',
+                self._mask_token(purchase_token),
+                subscription_id,
+            )
+            return False
+
+        logger.info(
+            '📋 [GOOGLE PLAY WEBHOOK] Suscripción encontrada id=%s user_id=%s plan=%s '
+            'status_actual=%s expiracion=%s cancelada=%s',
+            subscription.pk,
+            subscription.user_id_id,
+            subscription.plan_id.nombre if subscription.plan_id_id else None,
+            subscription.status,
+            subscription.expiracion,
+            subscription.cancelada,
+        )
 
         new_status = self.NOTIFICATION_TYPES.get(notification_type)
         if new_status is None:
-            logger.info(
-                '🔔 [GOOGLE PLAY] Notificación %s sin manejo específico', notification_type
+            logger.warning(
+                '⚠️ [GOOGLE PLAY WEBHOOK] notificationType=%s (%s) no mapeado; sin cambios en BD',
+                notification_type,
+                type_label,
             )
-            return
+            return False
 
+        old_status = subscription.status
+        old_expiracion = subscription.expiracion
         update_fields = ['status', 'updated_at']
         subscription.status = new_status
 
@@ -249,13 +320,29 @@ class GooglePlayService:
             try:
                 purchase_data = self.verify_purchase(purchase_token, subscription_id)
                 expiry_millis = purchase_data.get('expiryTimeMillis')
+                payment_state = purchase_data.get('paymentState')
                 if expiry_millis:
                     subscription.expiracion = datetime.fromtimestamp(
                         int(expiry_millis) / 1000, tz=dt_timezone.utc
                     )
                     update_fields.append('expiracion')
+                logger.info(
+                    '✅ [GOOGLE PLAY WEBHOOK] verify_purchase OK paymentState=%s '
+                    'expiryTimeMillis=%s → expiracion=%s',
+                    payment_state,
+                    expiry_millis,
+                    subscription.expiracion,
+                )
             except Exception:
-                logger.exception('⚠️ [GOOGLE PLAY] No se pudo refrescar expiración')
+                logger.exception(
+                    '⚠️ [GOOGLE PLAY WEBHOOK] verify_purchase falló (se guarda status igual)'
+                )
+        elif notification_type in (1, 2, 4, 7) and not self.is_configured:
+            logger.warning(
+                '⚠️ [GOOGLE PLAY WEBHOOK] Google Play API no configurada; '
+                'no se refresca expiracion (tipo %s)',
+                type_label,
+            )
 
         if new_status in (SubscripcionStatus.CANCELED, SubscripcionStatus.EXPIRED):
             subscription.cancelada = True
@@ -263,11 +350,20 @@ class GooglePlayService:
 
         subscription.save(update_fields=update_fields)
         logger.info(
-            '🔔 [GOOGLE PLAY] Suscripción %s → %s (tipo %s)',
+            '✅ [GOOGLE PLAY WEBHOOK] Procesado OK subscripcion_id=%s user_id=%s '
+            'tipo=%s (%s) status %s→%s expiracion %s→%s cancelada=%s fields=%s',
             subscription.pk,
-            new_status,
+            subscription.user_id_id,
             notification_type,
+            type_label,
+            old_status,
+            subscription.status,
+            old_expiracion,
+            subscription.expiracion,
+            subscription.cancelada,
+            update_fields,
         )
+        return True
 
 
 # Singleton perezoso para evitar múltiples handshakes con Google.

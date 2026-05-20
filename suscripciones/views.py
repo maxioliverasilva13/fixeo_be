@@ -206,17 +206,68 @@ class GooglePlayWebhookView(APIView):
 
     def post(self, request):
         try:
-            body = request.data or {}
+            body = request.data if isinstance(request.data, dict) else {}
+            pubsub_subscription = body.get('subscription', '')
             message = body.get('message') if isinstance(body, dict) else None
-            if message and message.get('data'):
-                decoded = base64.b64decode(message['data']).decode('utf-8')
-                notification_data = json.loads(decoded)
-                get_google_play_service().process_webhook(notification_data)
-            return Response({'received': True}, status=status.HTTP_200_OK)
+
+            logger.info(
+                '📬 [GOOGLE PLAY WEBHOOK] POST recibido content_type=%s '
+                'pubsub_subscription=%s body_keys=%s',
+                request.content_type,
+                pubsub_subscription or '(sin subscription)',
+                list(body.keys()) if body else [],
+            )
+
+            if not message:
+                logger.warning(
+                    '⚠️ [GOOGLE PLAY WEBHOOK] Body sin "message" (¿ping manual?). body=%s',
+                    body,
+                )
+                return Response(
+                    {'received': True, 'processed': False, 'reason': 'no_message'},
+                    status=status.HTTP_200_OK,
+                )
+
+            message_id = message.get('messageId')
+            publish_time = message.get('publishTime')
+            raw_data = message.get('data')
+
+            if not raw_data:
+                logger.warning(
+                    '⚠️ [GOOGLE PLAY WEBHOOK] message sin data messageId=%s',
+                    message_id,
+                )
+                return Response(
+                    {'received': True, 'processed': False, 'reason': 'empty_data'},
+                    status=status.HTTP_200_OK,
+                )
+
+            decoded = base64.b64decode(raw_data).decode('utf-8')
+            logger.info(
+                '📬 [GOOGLE PLAY WEBHOOK] Pub/Sub messageId=%s publishTime=%s '
+                'decoded_len=%s preview=%s',
+                message_id,
+                publish_time,
+                len(decoded),
+                decoded[:500] + ('…' if len(decoded) > 500 else ''),
+            )
+
+            notification_data = json.loads(decoded)
+            processed = get_google_play_service().process_webhook(notification_data)
+
+            logger.info(
+                '✅ [GOOGLE PLAY WEBHOOK] Fin request messageId=%s processed=%s',
+                message_id,
+                processed,
+            )
+            return Response(
+                {'received': True, 'processed': processed, 'messageId': message_id},
+                status=status.HTTP_200_OK,
+            )
         except APIException:
             raise
         except Exception as exc:
-            logger.exception('❌ Error procesando webhook de Google Play')
+            logger.exception('❌ [GOOGLE PLAY WEBHOOK] Error no controlado')
             return Response(
                 {'received': False, 'error': str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
