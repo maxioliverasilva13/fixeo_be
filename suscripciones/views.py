@@ -217,6 +217,7 @@ class GooglePlayWebhookView(APIView):
                 pubsub_subscription or '(sin subscription)',
                 list(body.keys()) if body else [],
             )
+            
 
             if not message:
                 logger.warning(
