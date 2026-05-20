@@ -7,15 +7,7 @@ ENV PYTHONUNBUFFERED=1
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client \
-    gcc \
-    python3-dev \
-    musl-dev \
-    libpq-dev \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+# psycopg2-binary and other deps ship as wheels; no apt build toolchain needed.
 
 # Install Python dependencies
 COPY requirements.txt /app/
