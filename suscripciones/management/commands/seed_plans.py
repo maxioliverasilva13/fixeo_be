@@ -30,7 +30,7 @@ PLANES_SEED = [
         'duracion': timedelta(days=30),
         'cantidad_jobs': 200,
         'activo': True,
-        'google_play_id': 'fixeo_basico_monthly',
+        'google_play_id': 'alavuelta_monthly',
         'appstore_id': 'com.alavueltaapp.basico.monthly',
         'caracteristicas': [
             'Hasta 200 trabajos por mes',
@@ -46,7 +46,7 @@ PLANES_SEED = [
         'duracion': timedelta(days=30),
         'cantidad_jobs': 1000,
         'activo': True,
-        'google_play_id': 'fixeo_pro_monthly',
+        'google_play_id': 'alavuelta_monthly_pro',
         'appstore_id': 'com.alavueltaapp.pro.monthly',
         'caracteristicas': [
             'Hasta 1000 trabajos por mes',
