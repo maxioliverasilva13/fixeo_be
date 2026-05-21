@@ -101,7 +101,6 @@ def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
         if sub:
             usados = efectivo_counts.get(usuario.id, 0)
             jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
-            print(jobs_restantes)
             if jobs_restantes > 0:
                 return True
 
@@ -779,29 +778,56 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-nacionales')
     def top_nacionales(self, request):
-        limit = int(request.query_params.get('limit', 25))
+        try:
+            limit = int(request.query_params.get('limit', 25))
+        except (TypeError, ValueError):
+            limit = 25
+        limit = max(1, min(limit, 100))
+
         sort_by = request.query_params.get('sort_by', 'mejor_valorados')
 
-        usuarios = Usuario.objects.filter(
-            is_owner_empresa=True,
-            is_active=True,
-        ).annotate(
-            avg_rating=Avg('calificaciones_recibidas__rating')
-        ).prefetch_related('empresas_administradas')
+        base_qs = (
+            Usuario.objects.filter(
+                is_owner_empresa=True,
+                is_active=True,
+            )
+            .annotate(avg_rating=Avg('calificaciones_recibidas__rating'))
+            .prefetch_related('empresas_administradas')
+        )
 
-        if sort_by == 'mejor_valorados':
-            usuarios = usuarios.order_by(F('avg_rating').desc(nulls_last=True))
-        elif sort_by == 'mejor_precio':
-            usuarios = usuarios.order_by('servicios__precio')
+        if sort_by == 'mejor_precio':
+            queryset = base_qs.annotate(
+                min_precio_servicio=Min('servicios__precio')
+            ).order_by(
+                F('min_precio_servicio').asc(nulls_last=True),
+                'id',
+            )
+        else:
+            queryset = base_qs.order_by(F('avg_rating').desc(nulls_last=True), 'id')
 
-        usuarios_list = list(usuarios)
-        user_ids = [u.id for u in usuarios_list]
-        subs_map, efectivo_counts = _batch_visibility_data(user_ids)
+        batch_size = min(200, max(limit + 40, limit * 5))
+        max_scan = 3000
 
-        visibles = [
-            u for u in usuarios_list
-            if _es_visible_en_mapa(u, subs_map, efectivo_counts)
-        ]
+        visibles = []
+        offset = 0
+        scanned = 0
+
+        while len(visibles) < limit and scanned < max_scan:
+            batch = list(queryset[offset : offset + batch_size])
+            if not batch:
+                break
+            scanned += len(batch)
+
+            ids = [u.id for u in batch]
+            subs_map, efectivo_counts = _batch_visibility_data(ids)
+
+            for u in batch:
+                if _es_visible_en_mapa(u, subs_map, efectivo_counts):
+                    visibles.append(u)
+                    if len(visibles) >= limit:
+                        break
+
+            offset += batch_size
 
         return Response(UsuarioInMapaSerializer(visibles[:limit], many=True).data)
 
