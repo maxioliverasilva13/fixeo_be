@@ -333,6 +333,14 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'dias': dias,
         }, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['get'], url_path='contador-pendientes-cliente')
+    def contador_pendientes_cliente(self, request):
+        """
+        Trabajos que el cliente solicitó y el profesional aún no aceptó (status pendiente).
+        """
+        n = Trabajo.objects.filter(usuario=request.user, status='pendiente').count()
+        return Response({'count': n}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='finalizar')
     def finalizar_trabajo(self, request, pk=None):
         trabajo = self.get_object()
