@@ -91,16 +91,25 @@ class ChatSerializer(serializers.ModelSerializer):
     
     def get_ultimo_mensaje(self, obj):
         ultimo = obj.mensajes.first()
-        if ultimo:
-            return {
-                'texto': ultimo.texto,
-                'sender': ultimo.sender.id,
-                'created_at': ultimo.created_at,
-                'leido': ultimo.leido,
-                'tipo': ultimo.tipo,           # ← antes era 'type' hardcodeado
-                'metadata': ultimo.metadata,   # ← agregado
-            }
-        return None
+        if not ultimo:
+            return None
+        
+        texto = ultimo.texto
+        if ultimo.tipo == 'imagen':
+            recurso = ultimo.recursos.first()
+            texto = recurso.url if recurso else ''
+        elif ultimo.tipo == 'archivo':
+            recurso = ultimo.recursos.first()
+            texto = recurso.nombre or recurso.url if recurso else ''
+
+        return {
+            'texto': texto,
+            'sender': ultimo.sender.id,
+            'created_at': ultimo.created_at,
+            'leido': ultimo.leido,
+            'tipo': ultimo.tipo,
+            'metadata': ultimo.metadata,
+        }
         
     def get_mensajes_no_leidos(self, obj):
         request = self.context.get('request')

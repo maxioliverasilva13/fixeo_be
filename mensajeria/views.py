@@ -69,8 +69,11 @@ class ChatViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return Chat.objects.filter(
             Q(sender=user) | Q(receiver=user)
-        ).select_related('sender', 'receiver', 'trabajo').prefetch_related('mensajes').order_by('-ultimo_mensaje_at')
-    
+        ).select_related('sender', 'receiver', 'trabajo').prefetch_related(
+            'mensajes',
+            'mensajes__recursos'
+        ).order_by('-ultimo_mensaje_at')
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
@@ -227,11 +230,18 @@ class ChatViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
+        tipo = Mensajes.TipoMensaje.TEXTO
+        if recurso:
+            if recurso.tipo.startswith('image'):
+                tipo = Mensajes.TipoMensaje.IMAGEN
+            else:
+                tipo = Mensajes.TipoMensaje.ARCHIVO
+
         mensaje = Mensajes.objects.create(
             texto=serializer.validated_data['texto'],
             sender=request.user,
             chat=chat,
-            tipo=Mensajes.TipoMensaje.TEXTO,  
+            tipo=tipo,
         )
 
         received_user = chat.receiver if request.user.id == chat.sender_id else chat.sender
