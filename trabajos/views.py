@@ -223,19 +223,20 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 online_count = len(trabajo_ids_cercanos)
             else:
                 online_count = 0
-            
-            pendientes_count = Trabajo.objects.filter(
+
+            urgente_asignado_pendiente = Trabajo.objects.filter(
                 esUrgente=True,
                 status='pendiente',
                 profesional=logged_user
             ).count()
-            
-            total = online_count + pendientes_count
-            
+
+            pendientes_ui = online_count + urgente_asignado_pendiente
+            total = pendientes_ui
+
             return Response({
                 'online': online_count,
-                'pendientes': pendientes_count,
-                'total': total
+                'pendientes': pendientes_ui,
+                'total': total,
             }, status=status.HTTP_200_OK)
         
         else:
