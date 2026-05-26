@@ -77,26 +77,32 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            with transaction.atomic():
-                carrito_item, created = CarritoItem.objects.get_or_create(
-                    carrito=carrito,
-                    producto=producto,
-                    defaults={'cantidad': cantidad, 'precio_unitario': producto.precio}
-                )
-        except IntegrityError:
-            carrito_item = CarritoItem.objects.select_for_update().get(
+        carrito_item = CarritoItem.all_objects.filter(
+            carrito=carrito,
+            producto=producto,
+        ).first()
+
+        if carrito_item:
+            if carrito_item.is_deleted:
+                carrito_item.is_deleted = False
+                carrito_item.deleted_at = None
+                carrito_item.deleted_by = None
+                carrito_item.cantidad = cantidad
+                carrito_item.precio_unitario = producto.precio
+                carrito_item.save()
+            else:
+                carrito_item.cantidad += cantidad
+                carrito_item.save()
+        else:
+            carrito_item = CarritoItem.objects.create(
                 carrito=carrito,
                 producto=producto,
+                cantidad=cantidad,
+                precio_unitario=producto.precio,
             )
-            created = False
-
-        if not created:
-            carrito_item.cantidad += cantidad
-            carrito_item.save()
 
         return Response(CarritoItemSerializer(carrito_item).data)
-    
+
     @action(detail=True, methods=['post'], url_path='actualizar-item')
     def actualizar_item(self, request, pk=None):
         """Actualiza la cantidad de un item del carrito"""
