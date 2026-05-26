@@ -338,7 +338,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         """
         Trabajos que el cliente solicitó y el profesional aún no aceptó (status pendiente).
         """
-        n = Trabajo.objects.filter(usuario=request.user, status='pendiente').count()
+        n = Trabajo.objects.filter(profesional=request.user, status='pendiente').count()
         return Response({'count': n}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='finalizar')
