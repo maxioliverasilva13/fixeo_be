@@ -1,5 +1,5 @@
 import logging
-
+from django.db import IntegrityError
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -54,7 +54,6 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='agregar-item')
     def agregar_item(self, request, pk=None):
-        """Agrega o actualiza un producto en el carrito"""
         carrito = self.get_object()
         serializer = CarritoItemCreateSerializer(data=request.data)
         
@@ -78,18 +77,31 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        carrito_item, created = CarritoItem.objects.get_or_create(
-            carrito=carrito,
-            producto=producto,
-            defaults={'cantidad': cantidad, 'precio_unitario': producto.precio}
-        )
-
-        if not created:
+        try:
+            carrito_item = CarritoItem.objects.select_for_update().get(
+                carrito=carrito,
+                producto=producto,
+            )
             carrito_item.cantidad += cantidad
             carrito_item.save()
+        except CarritoItem.DoesNotExist:
+            try:
+                carrito_item = CarritoItem.objects.create(
+                    carrito=carrito,
+                    producto=producto,
+                    cantidad=cantidad,
+                    precio_unitario=producto.precio,
+                )
+            except IntegrityError:
+                carrito_item = CarritoItem.objects.select_for_update().get(
+                    carrito=carrito,
+                    producto=producto,
+                )
+                carrito_item.cantidad += cantidad
+                carrito_item.save()
 
         return Response(CarritoItemSerializer(carrito_item).data)
-
+        
     @action(detail=True, methods=['post'], url_path='actualizar-item')
     def actualizar_item(self, request, pk=None):
         """Actualiza la cantidad de un item del carrito"""
