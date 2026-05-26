@@ -1,5 +1,5 @@
 import logging
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -78,30 +78,25 @@ class CarritoViewSet(viewsets.ModelViewSet):
             )
 
         try:
+            with transaction.atomic():
+                carrito_item, created = CarritoItem.objects.get_or_create(
+                    carrito=carrito,
+                    producto=producto,
+                    defaults={'cantidad': cantidad, 'precio_unitario': producto.precio}
+                )
+        except IntegrityError:
             carrito_item = CarritoItem.objects.select_for_update().get(
                 carrito=carrito,
                 producto=producto,
             )
+            created = False
+
+        if not created:
             carrito_item.cantidad += cantidad
             carrito_item.save()
-        except CarritoItem.DoesNotExist:
-            try:
-                carrito_item = CarritoItem.objects.create(
-                    carrito=carrito,
-                    producto=producto,
-                    cantidad=cantidad,
-                    precio_unitario=producto.precio,
-                )
-            except IntegrityError:
-                carrito_item = CarritoItem.objects.select_for_update().get(
-                    carrito=carrito,
-                    producto=producto,
-                )
-                carrito_item.cantidad += cantidad
-                carrito_item.save()
 
         return Response(CarritoItemSerializer(carrito_item).data)
-        
+    
     @action(detail=True, methods=['post'], url_path='actualizar-item')
     def actualizar_item(self, request, pk=None):
         """Actualiza la cantidad de un item del carrito"""
