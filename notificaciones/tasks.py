@@ -19,21 +19,23 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
     except Usuario.DoesNotExist:
         return {'error': f'Usuario {usuario_id} no encontrado'}
     
-    device_tokens = DeviceToken.objects.filter(
-        usuario=usuario,
-        enabled=True
-    ).values_list('device_token', flat=True)
-    
-    if not device_tokens:
-        return {'error': f'Usuario {usuario_id} no tiene device tokens'}
-    
     Notificaciones.objects.create(
         usuario=usuario,
         titulo=titulo,
         descripcion=mensaje,
         deep_link=data.get('deep_link', '') if data else '',
-        entity_id=data.get('entity_id', 0) if data else 0
+        entity_id=data.get('entity_id', 0) if data else 0,
     )
+
+    device_tokens = list(
+        DeviceToken.objects.filter(
+            usuario=usuario,
+            enabled=True,
+        ).values_list('device_token', flat=True)
+    )
+
+    if not device_tokens:
+        return {'success': True, 'usuario_id': usuario_id, 'push_skipped': True}
     
     try:
         app = get_firebase_app()
