@@ -258,8 +258,8 @@ class ChatViewSet(viewsets.ModelViewSet):
             'created_at': mensaje.created_at.isoformat(),
             'chat_id': chat.id,
             'leido': mensaje.leido,
-            'tipo': mensaje.tipo,        # ← agregar
-            'metadata': mensaje.metadata, # ← agregar
+            'tipo': mensaje.tipo,        
+            'metadata': mensaje.metadata,
             'recurso': {
                 'id': recurso.id,
                 'url': recurso.url,

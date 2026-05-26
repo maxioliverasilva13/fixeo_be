@@ -224,11 +224,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         trabajos_urgentes_qs = Trabajo.objects.filter(
             esUrgente=True,
-            profesion_urgente_id__in=usuario_profesiones
+            profesion_urgente_id__in=usuario_profesiones,
+            fecha_inicio__gte=timezone.now(),
         ).exclude(
             usuario=usuario
         ).exclude(
-            ofertas__profesional=usuario  
+            ofertas__profesional=usuario
         ).select_related(
             'usuario',
             'localizacion',
