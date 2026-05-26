@@ -481,3 +481,28 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = queryset.select_related('empresa', 'usuario').prefetch_related('items__producto')
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='contador-pendientes')
+    def contador_pendientes(self, request):
+        """
+        Órdenes en estado inicial (equivalente UI "pendientes" de productos):
+        - como_cliente: compras tuyas en_proceso
+        - como_empresa: pedidos recibidos en tu negocio (admin empresa) en_proceso
+        - total: suma de ambos
+        """
+        user = request.user
+        como_cliente = Orden.objects.filter(usuario=user, status='en_proceso').count()
+        empresas = Empresa.objects.filter(admin_id=user)
+        como_empresa = (
+            Orden.objects.filter(empresa__in=empresas, status='en_proceso').count()
+            if empresas.exists()
+            else 0
+        )
+        return Response(
+            {
+                'como_cliente': como_cliente,
+                'como_empresa': como_empresa,
+                'total': como_cliente + como_empresa,
+            },
+            status=status.HTTP_200_OK,
+        )
