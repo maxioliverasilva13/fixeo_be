@@ -711,6 +711,13 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             if 'rounded_foto_url' in r:
                 r['rounded_foto_url'] = foto_usuario_api(r.get('rounded_foto_url'))
 
+        usuario_ids = [r['id'] for r in results if r.get('tipo') == 'usuario']
+        if usuario_ids:
+            usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
+            subs_map, efectivo_counts = _batch_visibility_data(usuario_ids)
+            visibles = {u.id for u in usuarios_qs if _es_visible_en_mapa(u, subs_map, efectivo_counts)}
+            results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
+
         if profesion_id:
             pid = int(profesion_id)
             results = [r for r in results if pid in (r.get('profesion_ids') or [])]
