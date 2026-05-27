@@ -240,26 +240,32 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
         
         else:
-            trabajos_pendientes = Trabajo.objects.filter(
+            # Cliente sin empresa: badges "Urgente" sólo muestran subastas abiertas
+            # (trabajo aún en pendiente_urgente, sin profesional elegido).
+            # No incluye trabajo aprobado/en curso, aunque existan muchas ofertas en otros estados viejos.
+            trabajos_sin_aprobacion = Trabajo.objects.filter(
                 esUrgente=True,
-                status__in=['pendiente', 'aceptado'],
-                usuario=logged_user
+                usuario=logged_user,
+                status='pendiente_urgente',
             ).count()
 
-            ofertas_recibidas = OfertaTrabajo.objects.filter(
+            ofertas_sobre_trabajo_abierto = OfertaTrabajo.objects.filter(
                 trabajo__usuario=logged_user,
                 trabajo__esUrgente=True,
-                trabajo__status__in=['pendiente_urgente', 'pendiente'],
+                trabajo__status='pendiente_urgente',
                 status='pendiente',
-                status__in=['pendiente']
-            ).select_related('trabajo', 'trabajo__profesion_urgente', 'trabajo__usuario').count()
-            
+            ).count()
 
-            return Response({
-                'online': ofertas_recibidas,
-                'pendientes': trabajos_pendientes,
-                'total': ofertas_recibidas + trabajos_pendientes
-            }, status=status.HTTP_200_OK)
+            return Response(
+                {
+                    # Ofertas pendientes sólo dentro de trabajo aún sin aprobación del cliente (informativo)
+                    'online': ofertas_sobre_trabajo_abierto,
+                    'pendientes': trabajos_sin_aprobacion,
+                    # Usado por la BottomBar cliente: cuenta publicaciones pendientes de resolver, no ofertas
+                    'total': trabajos_sin_aprobacion,
+                },
+                status=status.HTTP_200_OK,
+            )
 
     @action(detail=False, methods=['get'], url_path='ocupacion-mes')
     def ocupacion_mes(self, request):
