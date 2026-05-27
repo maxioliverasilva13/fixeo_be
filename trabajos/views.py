@@ -195,12 +195,13 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             trabajos_online_qs = Trabajo.objects.filter(
                 esUrgente=True,
                 status='pendiente_urgente',
-                profesion_urgente_id__in=profesiones_ids
+                profesion_urgente_id__in=profesiones_ids,
+                fecha_inicio__gte=django_timezone.now(),
             ).exclude(
                 usuario=logged_user
             ).exclude(
                 ofertas__profesional=logged_user
-            )
+            ).distinct()
             
             localizacion_usuario = UsuarioLocalizacion.objects.filter(
                 usuario=logged_user,
@@ -230,13 +231,11 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 profesional=logged_user
             ).count()
 
-            pendientes_ui = online_count + urgente_asignado_pendiente
-            total = pendientes_ui
-
+            # online/total = solo urgentes públicos en zona. No sumar trabajo ya ganado/asignado (badge sirena).
             return Response({
                 'online': online_count,
-                'pendientes': pendientes_ui,
-                'total': total,
+                'pendientes': urgente_asignado_pendiente,
+                'total': online_count,
             }, status=status.HTTP_200_OK)
         
         else:

@@ -239,6 +239,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         if status_filter:
             trabajos_urgentes_qs = trabajos_urgentes_qs.filter(status=status_filter)
 
+        trabajos_urgentes_qs = trabajos_urgentes_qs.distinct()
+
         trabajo_ids_cercanos = filtrar_trabajos_por_distancia_sql(
             trabajos_urgentes_qs,
             usuario,
