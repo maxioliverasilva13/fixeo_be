@@ -12,7 +12,7 @@ import math
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Avg, Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Subquery
+from django.db.models import Avg, Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery
 from django.utils import timezone
 
 from empresas.models import Empresa, Horarios
@@ -308,6 +308,117 @@ def bounds_usuarios_loc_qs(
     return qs.distinct().order_by('usuario_id')
 
 
+def _empresa_geo_q(north, south, east, west):
+    return Q(
+        latitud__lte=north,
+        latitud__gte=south,
+        longitud__lte=east,
+        longitud__gte=west,
+    )
+
+
+def _empresas_en_bounds_qs(
+    north,
+    south,
+    east,
+    west,
+    *,
+    profesion_id=None,
+    max_price=None,
+    is_urgent=None,
+):
+    """Profesionales cuya empresa cae en el bbox (usa coords de empresa, no solo UL principal)."""
+    qs = (
+        Empresa.objects.filter(
+            is_deleted=False,
+            admin_id__is_owner_empresa=True,
+            admin_id__is_active=True,
+        )
+        .filter(_empresa_geo_q(north, south, east, west))
+        .select_related('admin_id', 'localizacion')
+    )
+
+    if profesion_id:
+        qs = qs.filter(admin_id__usuario_profesiones__profesion_id=profesion_id)
+
+    if max_price:
+        qs = qs.annotate(
+            min_price=Min('admin_id__servicios__precio'),
+        ).filter(min_price__lte=Decimal(max_price))
+
+    if is_urgent == 'true':
+        qs = qs.filter(admin_id__trabajos_asignados__esUrgente=True)
+
+    return qs.distinct()
+
+
+def _coords_para_pin(empresa: Empresa) -> tuple[float, float] | None:
+    if empresa.localizacion_id and empresa.localizacion:
+        return (
+            float(empresa.localizacion.latitud),
+            float(empresa.localizacion.longitud),
+        )
+    if empresa.latitud is not None and empresa.longitud is not None:
+        return (float(empresa.latitud), float(empresa.longitud))
+    return None
+
+
+def collect_bounds_map_candidates(
+    north,
+    south,
+    east,
+    west,
+    *,
+    max_scan: int,
+    profesion_id=None,
+    max_price=None,
+    is_urgent=None,
+) -> list[dict]:
+    """
+    Candidatos en bbox: usuario_localizacion principal y, si falta, empresa del admin en zona.
+    Evita que un negocio con coords correctas en `empresa` no aparezca por flags UL/localizacion desalineados.
+    """
+    por_usuario: dict[int, dict] = {}
+
+    for ul in bounds_usuarios_loc_qs(
+        north, south, east, west,
+        profesion_id=profesion_id,
+        max_price=max_price,
+        is_urgent=is_urgent,
+    )[:max_scan]:
+        por_usuario[ul.usuario_id] = {
+            'usuario_id': ul.usuario_id,
+            'lat': float(ul.localizacion.latitud),
+            'lng': float(ul.localizacion.longitud),
+            'min_price': getattr(ul, 'min_price', None),
+        }
+
+    if len(por_usuario) >= max_scan:
+        return list(por_usuario.values())[:max_scan]
+
+    restante = max_scan - len(por_usuario)
+    for empresa in _empresas_en_bounds_qs(
+        north, south, east, west,
+        profesion_id=profesion_id,
+        max_price=max_price,
+        is_urgent=is_urgent,
+    )[:restante]:
+        uid = empresa.admin_id_id
+        if uid in por_usuario:
+            continue
+        coords = _coords_para_pin(empresa)
+        if not coords:
+            continue
+        por_usuario[uid] = {
+            'usuario_id': uid,
+            'lat': coords[0],
+            'lng': coords[1],
+            'min_price': getattr(empresa, 'min_price', None),
+        }
+
+    return list(por_usuario.values())[:max_scan]
+
+
 def _national_scan_order(sort_by: str):
     """Orden SQL al escanear candidatos: plan primero, luego criterio del filtro."""
     plan_first = (
@@ -336,18 +447,17 @@ def resolve_map_users_from_bounds(
     has_filters = bool(profesion_id or max_price or is_urgent == 'true')
     max_scan = max_scan_for_bounds(north, south, east, west, has_filters)
 
-    loc_qs = bounds_usuarios_loc_qs(
+    candidatos = collect_bounds_map_candidates(
         north, south, east, west,
+        max_scan=max_scan,
         profesion_id=profesion_id,
         max_price=max_price,
         is_urgent=is_urgent,
-    )[:max_scan]
-
-    usuarios_list = list(loc_qs)
-    if not usuarios_list:
+    )
+    if not candidatos:
         return []
 
-    user_ids = list({ul.usuario_id for ul in usuarios_list})
+    user_ids = list({c['usuario_id'] for c in candidatos})
     usuarios_by_id = {u.id: u for u in usuarios_mapa_queryset(user_ids)}
     subs_map, efectivo_counts = batch_visibility_data(user_ids)
 
@@ -355,21 +465,19 @@ def resolve_map_users_from_bounds(
     center_lng = float((east + west) / 2)
 
     results = []
-    for ul in usuarios_list:
-        usuario = usuarios_by_id.get(ul.usuario_id)
+    for cand in candidatos:
+        usuario = usuarios_by_id.get(cand['usuario_id'])
         if not usuario or not es_visible_en_mapa(usuario, subs_map, efectivo_counts):
             continue
 
-        lat = float(ul.localizacion.latitud)
-        lng = float(ul.localizacion.longitud)
         avg_rating = float(usuario.avg_rating or 0)
-        min_price = getattr(ul, 'min_price', None)
+        min_price = cand.get('min_price')
         if min_price is None and usuario.min_precio_servicio is not None:
             min_price = float(usuario.min_precio_servicio)
 
         results.append({
             'usuario': usuario,
-            'distance_km': _distance_km(center_lat, center_lng, lat, lng),
+            'distance_km': _distance_km(center_lat, center_lng, cand['lat'], cand['lng']),
             'avg_rating': avg_rating,
             'min_price': float(min_price) if min_price is not None else None,
         })

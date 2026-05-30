@@ -244,6 +244,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     if not serializer.validated_data.get('latitude') or not serializer.validated_data.get('longitude'):
                         raise ValueError('Las coordenadas son requeridas para crear una empresa')
                 
+                es_empresa = serializer.validated_data['es_empresa']
+                rango_mapa = serializer.validated_data.get('rango_mapa_km')
+                if es_empresa and rango_mapa is None:
+                    rango_mapa = Decimal('10.00')
+
                 usuario = Usuario.objects.create_user(
                     correo=serializer.validated_data['email'],
                     password=serializer.validated_data['password'],
@@ -253,8 +258,9 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     trabajo_domicilio=serializer.validated_data['trabajo_domicilio'],
                     trabajo_local=serializer.validated_data['trabajo_local'],
                     telefono=serializer.validated_data.get('telefono', ''),
-                    is_owner_empresa=serializer.validated_data['es_empresa'],
+                    is_owner_empresa=es_empresa,
                     rounded_foto_url=serializer.validated_data.get('rounded_foto_url', ''),
+                    rango_mapa_km=rango_mapa if es_empresa else Decimal('10.00'),
                 )
                 
                 if serializer.validated_data.get('latitude') and serializer.validated_data.get('longitude'):
@@ -272,7 +278,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     
                     UsuarioLocalizacion.objects.create(
                         usuario=usuario,
-                        localizacion=localizacion
+                        localizacion=localizacion,
+                        es_principal=True,
                     )
                 
                 profesion_ids = serializer.validated_data.get('profesion_ids', [])
@@ -303,7 +310,9 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         admin_id=usuario,
                         descripcion='',
                         unipersonal=True,
-                        localizacion=localizacion_empresa.localizacion if localizacion_empresa else None
+                        localizacion=localizacion_empresa.localizacion if localizacion_empresa else None,
+                        vende_productos=serializer.validated_data.get('vende_productos', False),
+                        vende_servicios=serializer.validated_data.get('vende_servicios', True),
                     )
                 
                 refresh = RefreshToken.for_user(usuario)

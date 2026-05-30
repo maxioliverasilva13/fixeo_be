@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
@@ -422,7 +424,24 @@ class RegistroSerializer(serializers.Serializer):
         required=False,
         allow_empty=True
     )
-    
+    vende_productos = serializers.BooleanField(required=False, default=False)
+    vende_servicios = serializers.BooleanField(required=False, default=True)
+    rango_mapa_km = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+
+    def validate_rango_mapa_km(self, value):
+        if value is None or value == '':
+            return None
+        if value < Decimal('0.5'):
+            raise serializers.ValidationError('El rango mínimo es 0.5 km')
+        if value > Decimal('500'):
+            raise serializers.ValidationError('El rango máximo es 500 km')
+        return value
+
     def validate_email(self, value):
         if Usuario.objects.filter(correo=value).exists():
             raise serializers.ValidationError("Ya existe un usuario con este correo electrónico.")
@@ -433,7 +452,17 @@ class RegistroSerializer(serializers.Serializer):
             raise serializers.ValidationError({"longitude": "La longitud es requerida cuando se proporciona la latitud."})
         if attrs.get('longitude') and not attrs.get('latitude'):
             raise serializers.ValidationError({"latitude": "La latitud es requerida cuando se proporciona la longitud."})
-        
+
+        if attrs.get('es_empresa'):
+            vende_productos = attrs.get('vende_productos', False)
+            vende_servicios = attrs.get('vende_servicios', True)
+            if not vende_productos and not vende_servicios:
+                raise serializers.ValidationError(
+                    'La empresa debe vender productos y/o servicios.'
+                )
+            if attrs.get('rango_mapa_km') is None:
+                attrs['rango_mapa_km'] = Decimal('10.00')
+
         return attrs
 
 class FilterUsersMapaSerializer(serializers.Serializer):
