@@ -298,10 +298,11 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 fecha_inicio__date__lte=end_d,
                 fecha_fin__date__gte=start_d,
             )
-            .only('id', 'fecha_inicio', 'fecha_fin')
+            .only('id', 'fecha_inicio', 'fecha_fin', 'status')
         )
 
         day_counts = {d: 0 for d in range(1, last_day + 1)}
+        pendientes_counts = {d: 0 for d in range(1, last_day + 1)}
         for t in qs.iterator(chunk_size=200):
             fi = django_timezone.localtime(t.fecha_inicio).date()
             ff = django_timezone.localtime(t.fecha_fin).date()
@@ -309,9 +310,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             d_end = min(ff, end_d)
             if d_start > d_end:
                 continue
+            es_pendiente = t.status == 'pendiente'
             current = d_start
             while current <= d_end:
                 day_counts[current.day] += 1
+                if es_pendiente:
+                    pendientes_counts[current.day] += 1
                 current += timedelta_cls(days=1)
 
         max_c = max(day_counts.values()) if day_counts else 0
@@ -329,6 +333,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             dias.append({
                 'dia': dia,
                 'count': c,
+                'pendientes': pendientes_counts[dia],
                 'porcentaje': porcentaje,
                 'nivel': nivel,
             })
@@ -338,6 +343,31 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'month': month,
             'dias': dias,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='dias-pendientes')
+    def dias_pendientes(self, request):
+        """
+        Fechas (día de inicio local) con trabajos pendientes asignados al profesional.
+        Sirve al calendario para saltar al día sin revisar mes completo.
+        """
+        user = request.user
+        qs = (
+            Trabajo.objects.filter(
+                profesional=user,
+                status='pendiente',
+                fecha_inicio__isnull=False,
+            )
+            .only('id', 'fecha_inicio')
+        )
+        by_date: dict[str, int] = {}
+        for t in qs.iterator(chunk_size=200):
+            key = django_timezone.localtime(t.fecha_inicio).date().isoformat()
+            by_date[key] = by_date.get(key, 0) + 1
+        dias = [
+            {'fecha': fecha, 'count': count}
+            for fecha, count in sorted(by_date.items())
+        ]
+        return Response({'dias': dias}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='contador-pendientes')
     def contador_pendientes(self, request):

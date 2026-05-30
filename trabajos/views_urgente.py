@@ -30,6 +30,20 @@ from mensajeria.models import Recurso
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
+
+def _sort_por_fecha_reciente(items, fecha_key):
+    """Ordena dicts serializados: más recientes primero (created_at / fecha_inicio ISO)."""
+    def key_fn(item):
+        val = item
+        for part in fecha_key.split('.'):
+            val = (val or {}).get(part) if isinstance(val, dict) else None
+        if val is None:
+            return ''
+        return val.isoformat() if hasattr(val, 'isoformat') else str(val)
+
+    items.sort(key=key_fn, reverse=True)
+
+
 class TrabajoUrgenteViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
     
@@ -248,14 +262,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             localizacion_usuario.localizacion.longitud
         )
         
-        trabajos_cercanos = Trabajo.objects.filter(
-            id__in=trabajo_ids_cercanos
-        ).select_related(
-            'usuario',
-            'localizacion',
-            'profesion_urgente'
+        trabajos_cercanos = (
+            Trabajo.objects.filter(id__in=trabajo_ids_cercanos)
+            .select_related('usuario', 'localizacion', 'profesion_urgente')
+            .order_by('-created_at')
         )
-        
+
         resultado = []
         for trabajo in trabajos_cercanos:
             distancia = calcular_distancia_km(
@@ -268,9 +280,9 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
             trabajo_data['distancia_km'] = round(distancia, 2)
             resultado.append(trabajo_data)
-        
-        resultado.sort(key=lambda x: x['distancia_km'])
-        
+
+        _sort_por_fecha_reciente(resultado, 'created_at')
+
         return Response({
             'count': len(resultado),
             'trabajos': resultado
@@ -535,7 +547,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             'trabajo__usuario',
             'trabajo__localizacion',
             'trabajo__profesion_urgente'
-        ).order_by('-created_at')
+        ).order_by('-trabajo__created_at', '-created_at')
 
         if status_filter:
             ofertas = ofertas.filter(status=status_filter)
@@ -566,7 +578,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     "trabajo": trabajo_data
                 })
 
-        resultado.sort(key=lambda x: x['distancia_km'])
+        _sort_por_fecha_reciente(resultado, 'trabajo.created_at')
 
         return Response({
             'count': len(resultado),
