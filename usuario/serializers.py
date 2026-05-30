@@ -524,17 +524,25 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer
-        usuario_profesiones = obj.usuario_profesiones.all()
+        usuario_profesiones = list(obj.usuario_profesiones.all())
         return [ProfesionSerializer(up.profesion).data for up in usuario_profesiones]
-    
+
     def get_localizacion(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
-        
-        usuario_localizacion = obj.localizaciones.filter(localizacion__isPrimary=True).select_related('localizacion').first()
-        
+
+        primarias = getattr(obj, 'localizaciones_primarias', None)
+        if primarias:
+            usuario_localizacion = primarias[0]
+        else:
+            usuario_localizacion = (
+                obj.localizaciones.filter(localizacion__isPrimary=True)
+                .select_related('localizacion')
+                .first()
+            )
+
         if usuario_localizacion:
             return UsuarioLocalizacionSerializer(usuario_localizacion).data
-        
+
         return None
 
     def _get_empresa(self, obj):
@@ -551,11 +559,16 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         return empresa.vende_servicios if empresa else False
 
     def get_esta_abierta(self, obj):
-        import datetime
-        from django.utils import timezone
         empresa = self._get_empresa(obj)
         if not empresa:
             return None
+
+        horarios_cache = self.context.get('horarios_por_empresa')
+        if horarios_cache is not None:
+            return horarios_cache.get(empresa.id) or None
+
+        import datetime
+        from django.utils import timezone
 
         now = timezone.localtime()
         dia_semana = str(now.weekday() + 1)

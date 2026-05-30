@@ -45,66 +45,13 @@ def _precio_para_filtro(r: dict) -> float | None:
     return float(p) if p is not None else None
 
 
-def _batch_visibility_data(user_ids: list):
-    """
-    Devuelve (subs_map, efectivo_counts) para un conjunto de user_ids.
-
-    subs_map: {user_id: Subscripcion} — la suscripción activa más reciente por usuario.
-    efectivo_counts: {user_id: int} — cantidad de trabajos en efectivo en los últimos 30 días.
-    """
-    from suscripciones.models import Subscripcion
-    from trabajos.models import Trabajo
-    from django.utils import timezone
-    from datetime import timedelta
-    from django.db.models import Count
-
-    now = timezone.now()
-    subs_map = {}
-    for sub in (
-        Subscripcion.objects
-        .filter(user_id__in=user_ids, cancelada=False, expiracion__gt=now)
-        .select_related('plan_id')
-        .order_by('-created_at')
-    ):
-        uid = sub.user_id_id
-        if uid not in subs_map:
-            subs_map[uid] = sub
-
-    hace_30_dias = now - timedelta(days=30)
-    efectivo_counts = dict(
-        Trabajo.objects
-        .filter(
-            profesional__in=user_ids,
-            metodo_pago='efectivo',
-            created_at__gte=hace_30_dias,
-            is_deleted=False,
-        )
-        .exclude(status='cancelado')
-        .values('profesional')
-        .annotate(cnt=Count('id'))
-        .values_list('profesional', 'cnt')
-    )
-    return subs_map, efectivo_counts
-
-
-def _es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
-
-    empresa = usuario.empresas_administradas.first()
-    if not empresa:
-        return False
-
-    if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
-        return True
-
-    if empresa.acepta_efectivo:
-        sub = subs_map.get(usuario.id)
-        if sub:
-            usados = efectivo_counts.get(usuario.id, 0)
-            jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
-            if jobs_restantes > 0:
-                return True
-
-    return False 
+from usuario.mapa_helpers import (
+    batch_visibility_data as _batch_visibility_data,
+    es_visible_en_mapa as _es_visible_en_mapa,
+    resolve_map_users_from_bounds,
+    resolve_map_users_national,
+    serialize_usuarios_mapa,
+)
 
 SQL_QUERY = f"""
 SELECT *
@@ -580,94 +527,34 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def filter_users_mapa(self, request):
             serializer = FilterUsersMapaSerializer(data=request.query_params)
             serializer.is_valid(raise_exception=True)
-            limit = int(request.query_params.get('limit', 50))  
+            try:
+                limit = int(request.query_params.get('limit', 50))
+            except (TypeError, ValueError):
+                limit = 50
+            limit = max(1, min(limit, 100))
+
             north = Decimal(request.query_params['north'])
             south = Decimal(request.query_params['south'])
             east  = Decimal(request.query_params['east'])
             west  = Decimal(request.query_params['west'])
 
             profesion_id  = request.query_params.get('profesion_id')
-            sort_by       = request.query_params.get('sort_by', 'mejor_valorados')  
+            sort_by       = request.query_params.get('sort_by', 'mejor_valorados')
             max_price     = request.query_params.get('max_price')
-            is_urgent     = request.query_params.get('is_urgent') 
+            is_urgent     = request.query_params.get('is_urgent')
 
-            usuarios_loc = UsuarioLocalizacion.objects.filter(
-                localizacion__latitud__lte=north,
-                localizacion__latitud__gte=south,
-                localizacion__longitud__lte=east,
-                localizacion__longitud__gte=west,
-                localizacion__isPrimary=True,
-                usuario__is_owner_empresa=True,
-                usuario__is_active=True,
-            ).select_related('usuario', 'localizacion').prefetch_related(
-                'usuario__empresas_administradas'
-            ).distinct()
-
-            if profesion_id:
-                usuarios_loc = usuarios_loc.filter(
-                    usuario__usuario_profesiones__profesion_id=profesion_id
-                )
-
-            if max_price:
-                usuarios_loc = usuarios_loc.annotate(
-                    min_price=Min('usuario__servicios__precio')
-                ).filter(
-                    min_price__lte=Decimal(max_price)
-                )
-
-            if is_urgent == 'true':
-                usuarios_loc = usuarios_loc.filter(
-                    usuario__trabajos_asignados__esUrgente=True
-                ).distinct()
-
-            # Precargar suscripciones activas y conteo de trabajos en efectivo
-            usuarios_list = list(usuarios_loc)
-            user_ids = [ul.usuario.id for ul in usuarios_list]
-            subs_map, efectivo_counts = _batch_visibility_data(user_ids)
-
-            center_lat = float((north + south) / 2)
-            center_lng = float((east + west) / 2)
-            
-            results = []
-            for ul in usuarios_list:
-                usuario = ul.usuario
-
-                if not _es_visible_en_mapa(usuario, subs_map, efectivo_counts):
-                    continue
-
-                lat = float(ul.localizacion.latitud)
-                lng = float(ul.localizacion.longitud)
-
-                dlat = math.radians(lat - center_lat)
-                dlng = math.radians(lng - center_lng)
-                a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(lat)) * math.sin(dlng/2)**2
-                distance_km = 6371 * 2 * math.asin(math.sqrt(a))
-
-                avg_rating = usuario.calificaciones_recibidas.aggregate(
-                    avg=Avg('rating')
-                )['avg'] or 0
-
-                min_price = getattr(ul, 'min_price', None)
-
-                results.append({
-                    'usuario': usuario,
-                    'distance_km': distance_km,
-                    'avg_rating': avg_rating,
-                    'min_price': float(min_price) if min_price else None,
-                })
-
-            # Ordenar
-            if sort_by == 'mejor_valorados':
-                results.sort(key=lambda x: x['avg_rating'], reverse=True)
-            elif sort_by == 'mas_cercanos':
-                results.sort(key=lambda x: x['distance_km'])
-            elif sort_by == 'mejor_precio':
-                results.sort(key=lambda x: (x['min_price'] is None, x['min_price'] or 0))
-
-            return Response([
-                UsuarioInMapaSerializer(r['usuario']).data
-                for r in results[:limit] 
-            ])
+            usuarios = resolve_map_users_from_bounds(
+                north=north,
+                south=south,
+                east=east,
+                west=west,
+                limit=limit,
+                sort_by=sort_by,
+                profesion_id=profesion_id,
+                max_price=max_price,
+                is_urgent=is_urgent,
+            )
+            return Response(serialize_usuarios_mapa(usuarios))
     
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
@@ -792,51 +679,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         limit = max(1, min(limit, 100))
 
         sort_by = request.query_params.get('sort_by', 'mejor_valorados')
-
-        base_qs = (
-            Usuario.objects.filter(
-                is_owner_empresa=True,
-                is_active=True,
-            )
-            .annotate(avg_rating=Avg('calificaciones_recibidas__rating'))
-            .prefetch_related('empresas_administradas')
-        )
-
-        if sort_by == 'mejor_precio':
-            queryset = base_qs.annotate(
-                min_precio_servicio=Min('servicios__precio')
-            ).order_by(
-                F('min_precio_servicio').asc(nulls_last=True),
-                'id',
-            )
-        else:
-            queryset = base_qs.order_by(F('avg_rating').desc(nulls_last=True), 'id')
-
-        batch_size = min(200, max(limit + 40, limit * 5))
-        max_scan = 3000
-
-        visibles = []
-        offset = 0
-        scanned = 0
-
-        while len(visibles) < limit and scanned < max_scan:
-            batch = list(queryset[offset : offset + batch_size])
-            if not batch:
-                break
-            scanned += len(batch)
-
-            ids = [u.id for u in batch]
-            subs_map, efectivo_counts = _batch_visibility_data(ids)
-
-            for u in batch:
-                if _es_visible_en_mapa(u, subs_map, efectivo_counts):
-                    visibles.append(u)
-                    if len(visibles) >= limit:
-                        break
-
-            offset += batch_size
-
-        return Response(UsuarioInMapaSerializer(visibles[:limit], many=True).data)
+        usuarios = resolve_map_users_national(limit=limit, sort_by=sort_by)
+        return Response(serialize_usuarios_mapa(usuarios))
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-zona')
     def top_zona(self, request):
@@ -845,46 +689,22 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         south = Decimal(request.query_params['south'])
         east  = Decimal(request.query_params['east'])
         west  = Decimal(request.query_params['west'])
-        limit = int(request.query_params.get('limit', 50))
+        try:
+            limit = int(request.query_params.get('limit', 50))
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, 100))
         sort_by = request.query_params.get('sort_by', 'mejor_valorados')
 
-        usuarios_loc = UsuarioLocalizacion.objects.filter(
-            localizacion__latitud__lte=north,
-            localizacion__latitud__gte=south,
-            localizacion__longitud__lte=east,
-            localizacion__longitud__gte=west,
-            localizacion__isPrimary=True,
-            usuario__is_owner_empresa=True,
-            usuario__is_active=True,
-        ).select_related('usuario', 'localizacion').prefetch_related(
-            'usuario__empresas_administradas'
-        ).distinct()
-
-        usuarios_list = list(usuarios_loc)
-        user_ids = [ul.usuario.id for ul in usuarios_list]
-        subs_map, efectivo_counts = _batch_visibility_data(user_ids)
-
-        results = []
-        for ul in usuarios_list:
-            if not _es_visible_en_mapa(ul.usuario, subs_map, efectivo_counts):
-                continue
-            avg_rating = ul.usuario.calificaciones_recibidas.aggregate(avg=Avg('rating'))['avg'] or 0
-            min_price = ul.usuario.servicios.order_by('precio').values_list('precio', flat=True).first()
-            results.append({
-                'usuario': ul.usuario,
-                'avg_rating': avg_rating,
-                'min_price': float(min_price) if min_price else None,
-            })
-
-        if sort_by == 'mejor_valorados':
-            results.sort(key=lambda x: x['avg_rating'], reverse=True)
-        elif sort_by == 'mejor_precio':
-            results.sort(key=lambda x: (x['min_price'] is None, x['min_price'] or 0))
-
-        return Response([
-            UsuarioInMapaSerializer(r['usuario']).data
-            for r in results[:limit]
-        ])
+        usuarios = resolve_map_users_from_bounds(
+            north=north,
+            south=south,
+            east=east,
+            west=west,
+            limit=limit,
+            sort_by=sort_by,
+        )
+        return Response(serialize_usuarios_mapa(usuarios))
     
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='social-login')
     def social_login(self, request):

@@ -55,6 +55,12 @@ class Trabajo(BaseModel):
         db_table = 'trabajo'
         verbose_name = 'Trabajo'
         verbose_name_plural = 'Trabajos'
+        indexes = [
+            models.Index(
+                fields=['profesional', 'metodo_pago', 'created_at'],
+                name='idx_trabajo_prof_efectivo',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.status}"

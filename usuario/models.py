@@ -63,7 +63,11 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
                 fields=["apellido"],
                 name="usuario_apellido_trgm",
                 opclasses=["gin_trgm_ops"]
-            )
+            ),
+            models.Index(
+                fields=['is_owner_empresa', 'is_active'],
+                name='idx_usuario_mapa_empresa',
+            ),
         ]
         verbose_name = 'Usuario'
         verbose_name_plural = 'Usuarios'
