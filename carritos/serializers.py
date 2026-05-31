@@ -66,7 +66,8 @@ class OrdenSerializer(serializers.ModelSerializer):
     items = OrdenItemSerializer(many=True, read_only=True)
     usuario_nombre = serializers.SerializerMethodField()
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
-    empresa_admin_id = serializers.IntegerField(source='empresa.admin_id', read_only=True)
+    # FK en Empresa se llama admin_id → el id numérico es empresa.admin_id_id
+    empresa_admin_id = serializers.IntegerField(source='empresa.admin_id_id', read_only=True)
     localizacion_info = serializers.SerializerMethodField()
     pago_info = serializers.SerializerMethodField()
     mi_calificacion = serializers.SerializerMethodField()
