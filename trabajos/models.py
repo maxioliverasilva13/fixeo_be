@@ -72,6 +72,13 @@ class Calificacion(BaseModel):
     user_cal_recibe = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='calificaciones_recibidas')
     user_cal_sender = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='calificaciones_enviadas')
     trabajo = models.ForeignKey(Trabajo, on_delete=models.CASCADE, related_name='calificaciones', null=True, blank=True)
+    orden = models.ForeignKey(
+        'carritos.Orden',
+        on_delete=models.CASCADE,
+        related_name='calificaciones',
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = 'calificacion'

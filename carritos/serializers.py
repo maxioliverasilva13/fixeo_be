@@ -51,24 +51,54 @@ class OrdenItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'orden']
 
 
+class OrdenMensajeResumenSerializer(serializers.ModelSerializer):
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+
+    class Meta:
+        model = Orden
+        fields = [
+            'id', 'numero_orden', 'status', 'total', 'tipo_entrega',
+            'metodo_pago', 'empresa_nombre', 'created_at',
+        ]
+
+
 class OrdenSerializer(serializers.ModelSerializer):
     items = OrdenItemSerializer(many=True, read_only=True)
     usuario_nombre = serializers.SerializerMethodField()
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    empresa_admin_id = serializers.IntegerField(source='empresa.admin_id', read_only=True)
     localizacion_info = serializers.SerializerMethodField()
     pago_info = serializers.SerializerMethodField()
-    
+    mi_calificacion = serializers.SerializerMethodField()
+
     class Meta:
         model = Orden
         fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'empresa', 'empresa_nombre',
-                  'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega', 'localizacion_info',
-                  'total', 'comision_plataforma', 'pago_status', 'notas', 'fecha_entrega', 'items',
-                  'pago_info', 'created_at', 'updated_at']
+                  'empresa_admin_id', 'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega',
+                  'localizacion_info', 'total', 'comision_plataforma', 'pago_status', 'notas',
+                  'fecha_entrega', 'items', 'pago_info', 'mi_calificacion', 'created_at', 'updated_at']
         read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
                             'pago_status', 'localizacion_entrega', 'created_at', 'updated_at']
 
     def get_usuario_nombre(self, obj):
         return f"{obj.usuario.nombre} {obj.usuario.apellido}"
+
+    def get_mi_calificacion(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        from trabajos.models import Calificacion
+        c = Calificacion.objects.filter(
+            orden=obj,
+            user_cal_sender=request.user,
+        ).first()
+        if not c:
+            return None
+        return {
+            'id': c.id,
+            'rating': c.rating,
+            'comentario': c.comentario,
+        }
 
     def get_localizacion_info(self, obj):
         if obj.localizacion_entrega:

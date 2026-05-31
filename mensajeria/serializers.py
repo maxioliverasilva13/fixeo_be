@@ -20,13 +20,14 @@ class MensajesSerializer(serializers.ModelSerializer):
     recursos = RecursoSerializer(many=True, read_only=True)
     sender_nombre = serializers.SerializerMethodField()
     trabajo = serializers.SerializerMethodField()
+    orden = serializers.SerializerMethodField()
 
     class Meta:
         model = Mensajes
         fields = [
             'mensaje_id', 'texto', 'tipo', 'metadata',
             'sender', 'sender_nombre', 'chat', 'leido',
-            'recursos', 'created_at', 'updated_at', 'trabajo', 'calificado'
+            'recursos', 'created_at', 'updated_at', 'trabajo', 'orden', 'calificado'
         ]
         read_only_fields = ['mensaje_id', 'sender', 'created_at', 'updated_at']
 
@@ -38,6 +39,18 @@ class MensajesSerializer(serializers.ModelSerializer):
             return None
         from trabajos.serializers import TrabajoMensajeResumenSerializer
         return TrabajoMensajeResumenSerializer(obj.trabajo).data
+
+    def get_orden(self, obj):
+        orden_id = (obj.metadata or {}).get('orden_id')
+        if not orden_id:
+            return None
+        from carritos.models import Orden
+        from carritos.serializers import OrdenMensajeResumenSerializer
+        try:
+            orden = Orden.objects.select_related('empresa').get(pk=orden_id)
+        except Orden.DoesNotExist:
+            return None
+        return OrdenMensajeResumenSerializer(orden).data
 
 class MensajeCreateSerializer(serializers.Serializer):
     texto      = serializers.CharField(required=False, allow_blank=True, default='')

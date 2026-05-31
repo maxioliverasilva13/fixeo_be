@@ -712,15 +712,55 @@ class CalificacionViewSet(viewsets.ViewSet):
     def create(self, request):
         usuario = request.user
         trabajo_id = request.data.get('trabajo_id')
+        orden_id = request.data.get('orden_id')
         rating = request.data.get('rating')
         comentario = request.data.get('comentario', '')
         mensajeId = request.data.get('mensajeId', '')
 
-        if not trabajo_id or not rating:
+        if not rating or (not trabajo_id and not orden_id):
             return Response(
                 {'error': 'Faltan parámetros obligatorios'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if orden_id:
+            from carritos.models import Orden
+            try:
+                orden = Orden.objects.select_related('empresa__admin_id').get(id=orden_id)
+            except Orden.DoesNotExist:
+                return Response({'error': 'Orden no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+            if orden.usuario_id != usuario.id:
+                return Response(
+                    {'error': 'No puedes calificar esta orden'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            recibe = orden.empresa.admin_id
+            calificacion, created = Calificacion.objects.update_or_create(
+                orden=orden,
+                user_cal_sender=usuario,
+                defaults={
+                    'rating': rating,
+                    'comentario': comentario,
+                    'user_cal_recibe': recibe,
+                    'trabajo': None,
+                },
+            )
+            if created:
+                total_rating = recibe.rating * recibe.cant_calif
+                recibe.cant_calif += 1
+                recibe.rating = (total_rating + float(rating)) / recibe.cant_calif
+                recibe.save(update_fields=['rating', 'cant_calif'])
+
+            return Response({
+                'id': calificacion.id,
+                'orden_id': orden.id,
+                'rating': calificacion.rating,
+                'comentario': calificacion.comentario,
+                'user_cal_recibe': recibe.id,
+                'user_cal_sender': usuario.id,
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
         try:
             trabajo = Trabajo.objects.select_related('profesional').get(id=trabajo_id)
@@ -744,7 +784,8 @@ class CalificacionViewSet(viewsets.ViewSet):
             defaults={
                 'rating': rating,
                 'comentario': comentario,
-                'user_cal_recibe': profesional
+                'user_cal_recibe': profesional,
+                'orden': None,
             }
         )
 
@@ -753,7 +794,7 @@ class CalificacionViewSet(viewsets.ViewSet):
             if mensaje:
                 mensaje.calificado = True
                 mensaje.metadata = {
-                    **mensaje.metadata,
+                    **(mensaje.metadata or {}),
                     'puntaje': float(rating),
                     'comentario': comentario,
                 }
@@ -774,8 +815,7 @@ class CalificacionViewSet(viewsets.ViewSet):
                 async_to_sync(channel_layer.group_send)(
                     f'user_{usuario.id}', payload
                 )
-                        
-        # actualizar rating del profesional
+
         if created:
             total_rating = profesional.rating * profesional.cant_calif
             profesional.cant_calif += 1
