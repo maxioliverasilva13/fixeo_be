@@ -338,6 +338,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             status=status.HTTP_201_CREATED
         )
     
+    
     @action(detail=True, methods=['get'])
     def ofertas(self, request, pk=None):
         try:
@@ -590,3 +591,58 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             'count': trabajos.count(),
             'trabajos': TrabajoUrgenteDetailSerializer(trabajos, many=True).data
         })
+
+    @action(detail=True, methods=['post'], url_path='cancelar')
+    @transaction.atomic
+    def cancelar_trabajo(self, request, pk=None):
+        """
+        Cancela un trabajo urgente.
+        Solo el creador (cliente) puede cancelar.
+        Solo se puede cancelar si está en estado 'pendiente_urgente'.
+        """
+        try:
+            trabajo = Trabajo.objects.get(id=pk, esUrgente=True)
+        except Trabajo.DoesNotExist:
+            return Response({'error': 'Trabajo urgente no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        if trabajo.usuario != request.user:
+            return Response(
+                {'error': 'Solo el creador del trabajo puede cancelarlo'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if trabajo.status == 'cancelado':
+            return Response(
+                {'error': 'El trabajo ya está cancelado'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if trabajo.status != 'pendiente_urgente':
+            return Response(
+                {'error': f'No se puede cancelar un trabajo en estado "{trabajo.status}"'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        trabajo.status = 'cancelado'
+        trabajo.save(update_fields=['status'])
+
+        ofertas_pendientes = trabajo.ofertas.filter(status='pendiente')
+        for oferta in ofertas_pendientes:
+            oferta.status = 'rechazada'
+            oferta.save(update_fields=['status'])
+
+            notificar_usuario.delay(
+                usuario_id=oferta.profesional.id,
+                titulo="Trabajo cancelado",
+                mensaje="El cliente canceló el trabajo urgente",
+                data={
+                    'deep_link': f'/trabajos/urgente/{trabajo.id}',
+                    'entity_id': trabajo.id,
+                    'tipo': 'trabajo_urgente_cancelado'
+                }
+            )
+
+        return Response({
+            'message': 'Trabajo urgente cancelado exitosamente',
+            'trabajo': TrabajoUrgenteDetailSerializer(trabajo).data
+        }, status=status.HTTP_200_OK)
