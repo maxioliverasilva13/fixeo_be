@@ -145,7 +145,6 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             Q(sender=trabajo.profesional, receiver=trabajo.usuario)
         ).first()
         
-        chat = chat
         if not chat:
             chat = Chat.objects.create(
                 sender=trabajo.profesional,
@@ -154,17 +153,17 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             )
 
         mensaje = Mensajes.objects.create(
-            texto=chat.sender.defaultMessageReservation,
-            sender=chat.sender,
+            texto=trabajo.profesional.defaultMessageReservation,
+            sender=trabajo.profesional,
             chat=chat,
             trabajo=trabajo
         )
 
         channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', {
+        async_to_sync(channel_layer.group_send)(f'user_{trabajo.usuario.id}', {
             'type': 'chat_message',
             'message': mensaje.texto,
-            'user_id': chat.sender.id,
+            'user_id': trabajo.profesional.id,
             'leido': False,
             'chat_id': chat.id,
             'trabajo': TrabajoDetailSerializer(trabajo).data,
@@ -422,7 +421,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             ya_existe = Mensajes.objects.filter(
                 chat=chat,
                 tipo=Mensajes.TipoMensaje.CALIFICACION,
-                metadata__trabajo_id=trabajo.id
+                trabajo=trabajo,
             ).exists()
 
             logger.info(f"[FINALIZAR] ya_existe_cal={ya_existe}")
@@ -432,6 +431,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                     texto='',
                     sender=trabajo.profesional,
                     chat=chat,
+                    trabajo=trabajo,
                     tipo=Mensajes.TipoMensaje.CALIFICACION,
                     metadata={
                         'trabajo_id': trabajo.id,
@@ -789,6 +789,14 @@ class CalificacionViewSet(viewsets.ViewSet):
             }
         )
 
+        chat = (
+            Chat.objects.filter(trabajo=trabajo).first()
+            or Chat.objects.filter(
+                Q(sender=trabajo.usuario, receiver=trabajo.profesional)
+                | Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+            ).first()
+        )
+
         if mensajeId:
             mensaje = Mensajes.objects.filter(mensaje_id=mensajeId).first()
             if mensaje:
@@ -816,6 +824,42 @@ class CalificacionViewSet(viewsets.ViewSet):
                     f'user_{usuario.id}', payload
                 )
 
+        if chat:
+            mensajes_calificacion_pendientes = Mensajes.objects.filter(
+                Q(chat=chat)
+                & Q(tipo=Mensajes.TipoMensaje.CALIFICACION)
+                & Q(calificado=False)
+                & (
+                    Q(trabajo=trabajo)
+                    | Q(metadata__trabajo_id=trabajo.id)
+                )
+            )
+            for mensaje_pendiente in mensajes_calificacion_pendientes:
+                mensaje_pendiente.calificado = True
+                mensaje_pendiente.metadata = {
+                    **(mensaje_pendiente.metadata or {}),
+                    'puntaje': float(rating),
+                    'comentario': comentario,
+                }
+                mensaje_pendiente.save()
+
+                channel_layer = get_channel_layer()
+                payload = {
+                    'type': 'calificacion_recibida',
+                    'mensaje_id': mensaje_pendiente.mensaje_id,
+                    'chat_id': chat.id,
+                    'puntaje': float(rating),
+                    'comentario': comentario,
+                    'trabajo_id': trabajo.id,
+                }
+                async_to_sync(channel_layer.group_send)(
+                    f'user_{profesional.id}', payload
+                )
+                async_to_sync(channel_layer.group_send)(
+                    f'user_{usuario.id}', payload
+                )
+                        
+        # actualizar rating del profesional
         if created:
             total_rating = profesional.rating * profesional.cant_calif
             profesional.cant_calif += 1
