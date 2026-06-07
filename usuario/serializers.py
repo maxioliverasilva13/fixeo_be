@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import Usuario
@@ -422,7 +424,24 @@ class RegistroSerializer(serializers.Serializer):
         required=False,
         allow_empty=True
     )
-    
+    vende_productos = serializers.BooleanField(required=False, default=False)
+    vende_servicios = serializers.BooleanField(required=False, default=True)
+    rango_mapa_km = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        required=False,
+        allow_null=True,
+    )
+
+    def validate_rango_mapa_km(self, value):
+        if value is None or value == '':
+            return None
+        if value < Decimal('0.5'):
+            raise serializers.ValidationError('El rango mínimo es 0.5 km')
+        if value > Decimal('500'):
+            raise serializers.ValidationError('El rango máximo es 500 km')
+        return value
+
     def validate_email(self, value):
         if Usuario.objects.filter(correo=value).exists():
             raise serializers.ValidationError("Ya existe un usuario con este correo electrónico.")
@@ -433,7 +452,17 @@ class RegistroSerializer(serializers.Serializer):
             raise serializers.ValidationError({"longitude": "La longitud es requerida cuando se proporciona la latitud."})
         if attrs.get('longitude') and not attrs.get('latitude'):
             raise serializers.ValidationError({"latitude": "La latitud es requerida cuando se proporciona la longitud."})
-        
+
+        if attrs.get('es_empresa'):
+            vende_productos = attrs.get('vende_productos', False)
+            vende_servicios = attrs.get('vende_servicios', True)
+            if not vende_productos and not vende_servicios:
+                raise serializers.ValidationError(
+                    'La empresa debe vender productos y/o servicios.'
+                )
+            if attrs.get('rango_mapa_km') is None:
+                attrs['rango_mapa_km'] = Decimal('10.00')
+
         return attrs
 
 class FilterUsersMapaSerializer(serializers.Serializer):
@@ -524,17 +553,25 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer
-        usuario_profesiones = obj.usuario_profesiones.all()
+        usuario_profesiones = list(obj.usuario_profesiones.all())
         return [ProfesionSerializer(up.profesion).data for up in usuario_profesiones]
-    
+
     def get_localizacion(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer
-        
-        usuario_localizacion = obj.localizaciones.filter(localizacion__isPrimary=True).select_related('localizacion').first()
-        
+
+        primarias = getattr(obj, 'localizaciones_primarias', None)
+        if primarias:
+            usuario_localizacion = primarias[0]
+        else:
+            usuario_localizacion = (
+                obj.localizaciones.filter(localizacion__isPrimary=True)
+                .select_related('localizacion')
+                .first()
+            )
+
         if usuario_localizacion:
             return UsuarioLocalizacionSerializer(usuario_localizacion).data
-        
+
         return None
 
     def _get_empresa(self, obj):
@@ -551,11 +588,16 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         return empresa.vende_servicios if empresa else False
 
     def get_esta_abierta(self, obj):
-        import datetime
-        from django.utils import timezone
         empresa = self._get_empresa(obj)
         if not empresa:
             return None
+
+        horarios_cache = self.context.get('horarios_por_empresa')
+        if horarios_cache is not None:
+            return horarios_cache.get(empresa.id) or None
+
+        import datetime
+        from django.utils import timezone
 
         now = timezone.localtime()
         dia_semana = str(now.weekday() + 1)

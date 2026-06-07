@@ -6,10 +6,22 @@ def validar_nombre_empresa_unico(nombre):
     return not Empresa.objects.filter(nombre__iexact=nombre).exists()
 
 
-def crear_empresa(nombre, ubicacion, latitud, longitud, admin_id, descripcion='', unipersonal=False, localizacion=None):
+def crear_empresa(
+    nombre,
+    ubicacion,
+    latitud,
+    longitud,
+    admin_id,
+    descripcion='',
+    unipersonal=False,
+    localizacion=None,
+    *,
+    vende_productos=False,
+    vende_servicios=True,
+):
     if not validar_nombre_empresa_unico(nombre):
         raise ValueError(f"Ya existe una empresa con el nombre '{nombre}'")
-    
+
     empresa = Empresa.objects.create(
         nombre=nombre,
         ubicacion=ubicacion,
@@ -18,7 +30,9 @@ def crear_empresa(nombre, ubicacion, latitud, longitud, admin_id, descripcion=''
         longitud=longitud,
         unipersonal=unipersonal,
         localizacion=localizacion,
-        admin_id=admin_id
+        admin_id=admin_id,
+        vende_productos=vende_productos,
+        vende_servicios=vende_servicios,
     )
     
     return empresa

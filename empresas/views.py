@@ -11,6 +11,7 @@ from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
 from .utils import validar_nombre_empresa_unico
+from .estadisticas import estadisticas_empresa
 from rest_framework.decorators import action
 from django.db.models import Q
 
@@ -363,6 +364,22 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 'country': loc_empresa.country
             }
         })
+
+    @action(detail=False, methods=['get'], url_path='estadisticas')
+    def estadisticas(self, request):
+        """Panel de estadísticas del negocio (solo owner de empresa)."""
+        empresa = Empresa.objects.filter(admin_id=request.user).first()
+        if not empresa:
+            return Response(
+                {'error': 'No tenés una empresa asociada'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not request.user.is_owner_empresa:
+            return Response(
+                {'error': 'Solo el propietario puede ver estadísticas'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(estadisticas_empresa(empresa, request))
 
 
 class CategoriaProductoViewSet(viewsets.ModelViewSet):

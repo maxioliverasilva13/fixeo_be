@@ -19,6 +19,9 @@ class Plan(BaseModel):
         db_table = 'plan'
         verbose_name = 'Plan'
         verbose_name_plural = 'Planes'
+        indexes = [
+            models.Index(fields=['precio', 'cantidad_jobs'], name='idx_plan_rank'),
+        ]
 
     def __str__(self):
         return f"Plan {self.nombre}"
@@ -65,6 +68,12 @@ class Subscripcion(BaseModel):
         db_table = 'subscripcion'
         verbose_name = 'Subscripción'
         verbose_name_plural = 'Subscripciones'
+        indexes = [
+            models.Index(
+                fields=['user_id', 'cancelada', 'expiracion'],
+                name='idx_sub_user_active',
+            ),
+        ]
 
     def __str__(self):
         return f"Subscripción {self.user_id} - {self.plan_id}"

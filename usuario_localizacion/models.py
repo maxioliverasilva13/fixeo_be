@@ -13,6 +13,10 @@ class UsuarioLocalizacion(BaseModel):
         verbose_name = 'Usuario Localización'
         verbose_name_plural = 'Usuario Localizaciones'
         unique_together = ['usuario', 'localizacion']
+        indexes = [
+            models.Index(fields=['es_principal', 'usuario'], name='idx_ul_principal_usuario'),
+            models.Index(fields=['localizacion'], name='idx_ul_localizacion'),
+        ]
     
     def __str__(self):
         principal = " (Principal)" if self.es_principal else ""

@@ -297,10 +297,11 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 fecha_inicio__date__lte=end_d,
                 fecha_fin__date__gte=start_d,
             )
-            .only('id', 'fecha_inicio', 'fecha_fin')
+            .only('id', 'fecha_inicio', 'fecha_fin', 'status')
         )
 
         day_counts = {d: 0 for d in range(1, last_day + 1)}
+        pendientes_counts = {d: 0 for d in range(1, last_day + 1)}
         for t in qs.iterator(chunk_size=200):
             fi = django_timezone.localtime(t.fecha_inicio).date()
             ff = django_timezone.localtime(t.fecha_fin).date()
@@ -308,9 +309,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             d_end = min(ff, end_d)
             if d_start > d_end:
                 continue
+            es_pendiente = t.status == 'pendiente'
             current = d_start
             while current <= d_end:
                 day_counts[current.day] += 1
+                if es_pendiente:
+                    pendientes_counts[current.day] += 1
                 current += timedelta_cls(days=1)
 
         max_c = max(day_counts.values()) if day_counts else 0
@@ -328,6 +332,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             dias.append({
                 'dia': dia,
                 'count': c,
+                'pendientes': pendientes_counts[dia],
                 'porcentaje': porcentaje,
                 'nivel': nivel,
             })
@@ -337,6 +342,31 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             'month': month,
             'dias': dias,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='dias-pendientes')
+    def dias_pendientes(self, request):
+        """
+        Fechas (día de inicio local) con trabajos pendientes asignados al profesional.
+        Sirve al calendario para saltar al día sin revisar mes completo.
+        """
+        user = request.user
+        qs = (
+            Trabajo.objects.filter(
+                profesional=user,
+                status='pendiente',
+                fecha_inicio__isnull=False,
+            )
+            .only('id', 'fecha_inicio')
+        )
+        by_date: dict[str, int] = {}
+        for t in qs.iterator(chunk_size=200):
+            key = django_timezone.localtime(t.fecha_inicio).date().isoformat()
+            by_date[key] = by_date.get(key, 0) + 1
+        dias = [
+            {'fecha': fecha, 'count': count}
+            for fecha, count in sorted(by_date.items())
+        ]
+        return Response({'dias': dias}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='contador-pendientes')
     def contador_pendientes(self, request):
@@ -682,15 +712,55 @@ class CalificacionViewSet(viewsets.ViewSet):
     def create(self, request):
         usuario = request.user
         trabajo_id = request.data.get('trabajo_id')
+        orden_id = request.data.get('orden_id')
         rating = request.data.get('rating')
         comentario = request.data.get('comentario', '')
         mensajeId = request.data.get('mensajeId', '')
 
-        if not trabajo_id or not rating:
+        if not rating or (not trabajo_id and not orden_id):
             return Response(
                 {'error': 'Faltan parámetros obligatorios'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if orden_id:
+            from carritos.models import Orden
+            try:
+                orden = Orden.objects.select_related('empresa__admin_id').get(id=orden_id)
+            except Orden.DoesNotExist:
+                return Response({'error': 'Orden no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+            if orden.usuario_id != usuario.id:
+                return Response(
+                    {'error': 'No puedes calificar esta orden'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            recibe = orden.empresa.admin_id
+            calificacion, created = Calificacion.objects.update_or_create(
+                orden=orden,
+                user_cal_sender=usuario,
+                defaults={
+                    'rating': rating,
+                    'comentario': comentario,
+                    'user_cal_recibe': recibe,
+                    'trabajo': None,
+                },
+            )
+            if created:
+                total_rating = recibe.rating * recibe.cant_calif
+                recibe.cant_calif += 1
+                recibe.rating = (total_rating + float(rating)) / recibe.cant_calif
+                recibe.save(update_fields=['rating', 'cant_calif'])
+
+            return Response({
+                'id': calificacion.id,
+                'orden_id': orden.id,
+                'rating': calificacion.rating,
+                'comentario': calificacion.comentario,
+                'user_cal_recibe': recibe.id,
+                'user_cal_sender': usuario.id,
+            }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
         try:
             trabajo = Trabajo.objects.select_related('profesional').get(id=trabajo_id)
@@ -714,7 +784,8 @@ class CalificacionViewSet(viewsets.ViewSet):
             defaults={
                 'rating': rating,
                 'comentario': comentario,
-                'user_cal_recibe': profesional
+                'user_cal_recibe': profesional,
+                'orden': None,
             }
         )
 

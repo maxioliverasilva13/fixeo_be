@@ -17,6 +17,7 @@ from .serializers import (
 from empresas.models import Empresa, Producto
 from notificaciones.models import Notificaciones
 from django.db.models import Q
+from .chat_helpers import enviar_mensaje_orden_chat
 
 logger = logging.getLogger(__name__)
 
@@ -290,44 +291,6 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 currency=empresa.currency or None, 
             )
 
-        chat = Chat.objects.filter(
-            Q(sender=request.user, receiver=empresa.admin_id) |
-            Q(sender=empresa.admin_id, receiver=request.user)
-        ).first()
-
-        if not chat:
-            chat = Chat.objects.create(
-                sender=empresa.admin_id,
-                receiver=request.user,
-            )
-
-        if empresa.admin_id.defaultMessageReservation:
-            mensaje = Mensajes.objects.create(
-                texto=empresa.admin_id.defaultMessageReservation,
-                sender=empresa.admin_id,
-                chat=chat
-            )
-
-            channel_layer = get_channel_layer()
-            room_name = f"usuario_channel_{request.user.id}"
-
-            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
-                'type': 'chat_message',
-                'message': mensaje.texto,
-                'user_id': empresa.admin_id.id,
-                'leido': False,
-                'chat_id': chat.id,
-                'chat': {
-                    'id': chat.id,
-                    'sender_id': empresa.admin_id.id,
-                    'sender_nombre': f"{empresa.admin_id.nombre} {empresa.admin_id.apellido}",
-                    'receiver_id': request.user.id,
-                    'receiver_nombre': f"{request.user.nombre} {request.user.apellido}",
-                    'trabajo_id': None,
-                    'ultimo_mensaje_at': mensaje.created_at.isoformat(),
-                }
-            })
-
             for item in items_carrito:
                 OrdenItem.objects.create(
                     orden=orden,
@@ -359,11 +322,23 @@ class CarritoViewSet(viewsets.ModelViewSet):
             carrito.activo = False
             carrito.save()
 
+            texto_chat = (
+                empresa.admin_id.defaultMessageReservation
+                or f'Tu pedido #{orden.numero_orden} en {empresa.nombre} fue registrado. Total: ${orden.total}'
+            )
+            enviar_mensaje_orden_chat(
+                orden,
+                texto=texto_chat,
+                sender=empresa.admin_id,
+                receiver=request.user,
+                tipo='orden_creada',
+            )
+
             Notificaciones.objects.create(
                 usuario=request.user,
                 titulo='Orden creada',
                 descripcion=f'Tu orden #{orden.numero_orden} de {empresa.nombre} ha sido creada exitosamente. Total: ${orden.total}',
-                deep_link=f'/ordenes/{orden.id}',
+                deep_link=f'/historial?ordenId={orden.id}',
                 entity_id=orden.id,
             )
 
@@ -372,11 +347,14 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     usuario=empresa.admin_id,
                     titulo='Nueva orden recibida',
                     descripcion=f'Nueva orden #{orden.numero_orden} de {request.user.nombre} {request.user.apellido}. Total: ${orden.total}',
-                    deep_link=f'/ordenes/{orden.id}',
+                    deep_link=f'/servicios',
                     entity_id=orden.id,
                 )
 
-        return Response(OrdenSerializer(orden).data, status=status.HTTP_201_CREATED)
+        return Response(
+            OrdenSerializer(orden, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
@@ -462,11 +440,22 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
             usuario=orden.usuario,
             titulo=f'Orden {orden.get_status_display()}',
             descripcion=f'Tu orden #{orden.numero_orden} de {orden.empresa.nombre} {mensaje_estado}.',
-            deep_link=f'/ordenes/{orden.id}',
-            entity_id=orden.id
+            deep_link=f'/historial?ordenId={orden.id}',
+            entity_id=orden.id,
         )
 
-        return Response(OrdenSerializer(orden).data)
+        texto_estado = (
+            f'Tu orden #{orden.numero_orden} de {orden.empresa.nombre} {mensaje_estado}.'
+        )
+        enviar_mensaje_orden_chat(
+            orden,
+            texto=texto_estado,
+            sender=request.user,
+            receiver=orden.usuario,
+            tipo='orden_estado',
+        )
+
+        return Response(OrdenSerializer(orden, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='mis-ordenes-empresa')
     def mis_ordenes_empresa(self, request):

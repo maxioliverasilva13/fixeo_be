@@ -51,33 +51,92 @@ class OrdenItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'orden']
 
 
+class OrdenMensajeResumenSerializer(serializers.ModelSerializer):
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+
+    class Meta:
+        model = Orden
+        fields = [
+            'id', 'numero_orden', 'status', 'total', 'tipo_entrega',
+            'metodo_pago', 'empresa_nombre', 'created_at',
+        ]
+
+
 class OrdenSerializer(serializers.ModelSerializer):
     items = OrdenItemSerializer(many=True, read_only=True)
     usuario_nombre = serializers.SerializerMethodField()
+    usuario_info = serializers.SerializerMethodField()
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    empresa_info = serializers.SerializerMethodField()
+    # FK en Empresa se llama admin_id → el id numérico es empresa.admin_id_id
+    empresa_admin_id = serializers.IntegerField(source='empresa.admin_id_id', read_only=True)
     localizacion_info = serializers.SerializerMethodField()
     pago_info = serializers.SerializerMethodField()
-    
+    mi_calificacion = serializers.SerializerMethodField()
+
     class Meta:
         model = Orden
-        fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'empresa', 'empresa_nombre',
-                  'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega', 'localizacion_info',
-                  'total', 'comision_plataforma', 'pago_status', 'notas', 'fecha_entrega', 'items',
-                  'pago_info', 'created_at', 'updated_at']
+        fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'usuario_info', 'empresa', 'empresa_nombre', 'empresa_info',
+                  'empresa_admin_id', 'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega',
+                  'localizacion_info', 'total', 'comision_plataforma', 'pago_status', 'notas',
+                  'fecha_entrega', 'items', 'pago_info', 'mi_calificacion', 'created_at', 'updated_at']
         read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
                             'pago_status', 'localizacion_entrega', 'created_at', 'updated_at']
 
     def get_usuario_nombre(self, obj):
         return f"{obj.usuario.nombre} {obj.usuario.apellido}"
 
+    def get_usuario_info(self, obj):
+        u = obj.usuario
+        return {
+            'id': u.id,
+            'nombre': u.nombre,
+            'apellido': u.apellido,
+            'foto_url': u.foto_url or '',
+            'rounded_foto_url': getattr(u, 'rounded_foto_url', None) or u.foto_url or '',
+        }
+
+    def get_empresa_info(self, obj):
+        e = obj.empresa
+        admin = e.admin_id
+        return {
+            'id': e.id,
+            'nombre': e.nombre,
+            'admin_id': admin.id,
+            'admin_nombre': admin.nombre,
+            'admin_apellido': admin.apellido,
+            'foto_url': admin.foto_url or '',
+            'rounded_foto_url': getattr(admin, 'rounded_foto_url', None) or admin.foto_url or '',
+        }
+
+    def get_mi_calificacion(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        from trabajos.models import Calificacion
+        c = Calificacion.objects.filter(
+            orden=obj,
+            user_cal_sender=request.user,
+        ).first()
+        if not c:
+            return None
+        return {
+            'id': c.id,
+            'rating': c.rating,
+            'comentario': c.comentario,
+        }
+
     def get_localizacion_info(self, obj):
         if obj.localizacion_entrega:
+            loc = obj.localizacion_entrega
             return {
-                'address': obj.localizacion_entrega.address,
-                'city': obj.localizacion_entrega.city,
-                'country': obj.localizacion_entrega.country,
-                'interior_door': obj.localizacion_entrega.interior_door,
-                'notas': obj.localizacion_entrega.notas,
+                'address': loc.address,
+                'city': loc.city,
+                'country': loc.country,
+                'interior_door': loc.interior_door,
+                'notas': loc.notas,
+                'latitud': str(loc.latitud),
+                'longitud': str(loc.longitud),
             }
         return None
 

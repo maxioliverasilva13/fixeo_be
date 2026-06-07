@@ -22,6 +22,10 @@ class Localizacion(BaseModel):
             models.Index(fields=['latitud'], name='idx_localizacion_latitud'),
             models.Index(fields=['longitud'], name='idx_localizacion_longitud'),
             models.Index(fields=['latitud', 'longitud'], name='idx_localizacion_geo'),
+            models.Index(
+                fields=['isPrimary', 'latitud', 'longitud'],
+                name='idx_loc_primary_geo',
+            ),
         ]
 
     def __str__(self):
