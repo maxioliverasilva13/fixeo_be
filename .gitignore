@@ -45,3 +45,5 @@ staticfiles/
 
 postgres_data/
 
+
+.codegraph/
