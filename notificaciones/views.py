@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from notificaciones.tasks import notificar_usuario as notificar_usuario_task
 from .models import DeviceToken, Notificaciones, Notas
-from .serializers import DeviceTokenCreateSerializer, DeviceTokenSerializer, NotificacionesSerializer, NotasSerializer
+from .serializers import DeviceTokenSerializer, NotificacionesSerializer, NotasSerializer
 
 class DeviceTokenViewSet(viewsets.ModelViewSet):
     queryset = DeviceToken.objects.all()
@@ -19,34 +19,27 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
         return queryset
     
     def create(self, request):
-        device_name = request.data.get('device_name')
+        device_name = request.data.get('device_name') or 'Fixeo App'
         device_token = request.data.get('device_token')
-        
+
         if not device_token:
             return Response(
                 {'error': 'device_token es requerido'},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        existing_token = DeviceToken.objects.filter(
+
+        # El mismo token FCM puede asociarse a varios usuarios (mismo dispositivo, distinta sesión).
+        token_obj, created = DeviceToken.objects.update_or_create(
+            usuario=request.user,
             device_token=device_token,
-            usuario=request.user
-        ).first()
-        
-        if existing_token:
-            existing_token.device_name = device_name or existing_token.device_name
-            existing_token.enabled = True
-            existing_token.save()
-            serializer = DeviceTokenSerializer(existing_token)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        
-        serializer = DeviceTokenCreateSerializer(data={
-            'device_name': device_name,
-            'device_token': device_token,
-        })
-        serializer.is_valid(raise_exception=True)
-        serializer.save(usuario=request.user)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+            defaults={
+                'device_name': device_name,
+                'enabled': True,
+            },
+        )
+        serializer = DeviceTokenSerializer(token_obj)
+        status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(serializer.data, status=status_code)
 
     @action(detail=False, methods=['post'], url_path='notificar-usuario')
     def notificar_usuario(self, request):

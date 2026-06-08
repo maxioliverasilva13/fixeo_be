@@ -42,7 +42,7 @@ services:
 
   celery:
     build: .
-    command: celery -A fixeo_project worker --beat --loglevel=info
+    command: python -m watchfiles "celery -A fixeo_project worker --beat --loglevel=info" trabajos fixeo_project notificaciones
     volumes:
       - .:/app
     env_file:

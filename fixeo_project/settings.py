@@ -235,6 +235,28 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Montevideo'
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_IMPORTS = (
+    'trabajos.tasks',
+    'notificaciones.tasks',
+    'fixeo_project.tasks',
+)
+
+TRABAJO_CALIFICACION_RECORDATORIO_MINUTOS = config(
+    'TRABAJO_CALIFICACION_RECORDATORIO_MINUTOS',
+    default=1,
+    cast=int,
+)
+CELERY_FINALIZAR_TRABAJOS_INTERVAL_SECONDS = config(
+    'CELERY_FINALIZAR_TRABAJOS_INTERVAL_SECONDS',
+    default=3600,
+    cast=float,
+)
+CELERY_BEAT_SCHEDULE = {
+    'finalizar-trabajos-vencidos': {
+        'task': 'trabajos.finalizar_trabajos_vencidos',
+        'schedule': CELERY_FINALIZAR_TRABAJOS_INTERVAL_SECONDS,
+    },
+}
 
 FIREBASE_CREDENTIALS = config('FIREBASE_CREDENTIALS', default=None)
 
