@@ -52,6 +52,9 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
 
+        if self.action == 'list':
+            queryset = queryset.exclude(status='pendiente_urgente')
+
         return queryset.order_by('-created_at')
         
     def get_serializer_class(self):

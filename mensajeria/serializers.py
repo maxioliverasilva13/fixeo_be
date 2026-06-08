@@ -41,16 +41,17 @@ class MensajesSerializer(serializers.ModelSerializer):
         return TrabajoMensajeResumenSerializer(obj.trabajo).data
 
     def get_orden(self, obj):
-        orden_id = (obj.metadata or {}).get('orden_id')
+        metadata = obj.metadata or {}
+        orden_id = metadata.get('orden_id')
         if not orden_id:
             return None
         from carritos.models import Orden
-        from carritos.serializers import OrdenMensajeResumenSerializer
+        from carritos.chat_helpers import _orden_data_for_mensaje
         try:
             orden = Orden.objects.select_related('empresa').get(pk=orden_id)
         except Orden.DoesNotExist:
             return None
-        return OrdenMensajeResumenSerializer(orden).data
+        return _orden_data_for_mensaje(orden, metadata)
 
 class MensajeCreateSerializer(serializers.Serializer):
     texto      = serializers.CharField(required=False, allow_blank=True, default='')

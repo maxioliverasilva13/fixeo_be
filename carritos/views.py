@@ -16,6 +16,7 @@ from .serializers import (
 )
 from empresas.models import Empresa, Producto
 from notificaciones.models import Notificaciones
+from notificaciones.tasks import notificar_usuario
 from django.db.models import Q
 from .chat_helpers import enviar_mensaje_orden_chat
 
@@ -342,14 +343,43 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 entity_id=orden.id,
             )
 
-            if empresa.admin_id != request.user:
-                Notificaciones.objects.create(
-                    usuario=empresa.admin_id,
-                    titulo='Nueva orden recibida',
-                    descripcion=f'Nueva orden #{orden.numero_orden} de {request.user.nombre} {request.user.apellido}. Total: ${orden.total}',
-                    deep_link=f'/servicios',
-                    entity_id=orden.id,
+            if empresa.admin_id_id != request.user.id:
+                cliente_nombre = (
+                    f"{request.user.nombre} {request.user.apellido}".strip()
+                    or request.user.correo
                 )
+                cantidad_items = sum(item.cantidad for item in items_carrito)
+                metodo_display = 'efectivo' if metodo_pago == 'efectivo' else 'MercadoPago'
+                total_str = f"${total}"
+                productos_txt = (
+                    f"{cantidad_items} producto"
+                    if cantidad_items == 1
+                    else f"{cantidad_items} productos"
+                )
+                push_titulo = f"Nueva orden · {total_str}"
+                push_mensaje = (
+                    f"{cliente_nombre} realizó un pedido por {total_str} "
+                    f"({productos_txt}, pago en {metodo_display})."
+                )
+                push_data = {
+                    'deep_link': f'/servicios?tab=ordenes&ordenId={orden.id}',
+                    'entity_id': orden.id,
+                    'orden_id': orden.id,
+                    'tipo': 'nueva_orden',
+                    'total': str(total),
+                    'metodo_pago': metodo_pago,
+                    'numero_orden': orden.numero_orden,
+                }
+
+                def enviar_push_vendedor():
+                    notificar_usuario.delay(
+                        usuario_id=empresa.admin_id_id,
+                        titulo=push_titulo,
+                        mensaje=push_mensaje,
+                        data=push_data,
+                    )
+
+                transaction.on_commit(enviar_push_vendedor)
 
         return Response(
             OrdenSerializer(orden, context={'request': request}).data,

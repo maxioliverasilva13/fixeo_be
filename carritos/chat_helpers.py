@@ -16,8 +16,25 @@ def _get_or_create_chat(usuario, admin):
     return chat
 
 
+def _orden_metadata_snapshot(orden, tipo):
+    return {
+        'orden_id': orden.id,
+        'tipo': tipo,
+        'numero_orden': orden.numero_orden,
+        'status': orden.status,
+    }
+
+
+def _orden_data_for_mensaje(orden, metadata=None):
+    data = OrdenMensajeResumenSerializer(orden).data
+    meta = metadata or {}
+    if meta.get('status'):
+        data['status'] = meta['status']
+    return data
+
+
 def _ws_payload(chat, mensaje, orden, sender_user):
-    orden_data = OrdenMensajeResumenSerializer(orden).data
+    orden_data = _orden_data_for_mensaje(orden, mensaje.metadata)
     if chat.sender_id == sender_user.id:
         receiver_user = chat.receiver
     else:
@@ -48,11 +65,7 @@ def enviar_mensaje_orden_chat(orden, *, texto, sender, receiver, tipo='orden'):
         texto=texto,
         sender=sender,
         chat=chat,
-        metadata={
-            'orden_id': orden.id,
-            'tipo': tipo,
-            'numero_orden': orden.numero_orden,
-        },
+        metadata=_orden_metadata_snapshot(orden, tipo),
     )
     channel_layer = get_channel_layer()
     room_name = f'usuario_channel_{receiver.id}'

@@ -541,12 +541,13 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     esta_abierta = serializers.SerializerMethodField()
     vende_productos = serializers.SerializerMethodField()
     vende_servicios = serializers.SerializerMethodField()
+    plan_rank = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio', 
                   'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta',
-                  'vende_productos', 'vende_servicios']
+                  'vende_productos', 'vende_servicios', 'plan_rank', 'rating', 'cant_calif']
         read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 
                             'trabajo_domicilio', 'trabajo_local', 
                             'rango_mapa_km', 'esta_abierta']
@@ -586,6 +587,11 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     def get_vende_servicios(self, obj):
         empresa = self._get_empresa(obj)
         return empresa.vende_servicios if empresa else False
+
+    def get_plan_rank(self, obj):
+        from usuario.mapa_helpers import plan_rank_tuple_from_usuario
+        precio, jobs = plan_rank_tuple_from_usuario(obj)
+        return int(precio * 1000 + (jobs or 0))
 
     def get_esta_abierta(self, obj):
         empresa = self._get_empresa(obj)
