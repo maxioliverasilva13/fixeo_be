@@ -33,7 +33,7 @@ class UsuarioSortSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
-                  'is_active','empresa', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
+                  'is_active', 'is_staff', 'empresa', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
                   'is_configured', 'auto_aprobacion_trabajos', 'localizacion_principal']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -76,7 +76,7 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 'foto_map_url',
                   'trabajo_domicilio','esta_abierta','trabajo_local', 'is_owner_empresa',
-                  'is_active', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
+                  'is_active', 'is_staff', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana',
                   'subscripcion_activa', 'rating','cant_calif',
