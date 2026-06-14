@@ -20,7 +20,7 @@ from usuario.serializers import (
 from localizacion.models import Localizacion
 from empresas.models import Empresa
 from empresas.utils import crear_empresa, validar_nombre_empresa_unico
-
+from suscripciones.models import Subscripcion
 # Columna real en BD para admin_id (p. ej. admin_id_id); el SQL evita suposiciones.
 _EMPRESA_ADMIN_FK_COL = Empresa._meta.get_field("admin_id").column
 from profesion.utils import obtener_profesion_por_id
@@ -388,18 +388,14 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         if not q:
             return Response({'error': 'Parámetro q requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
+        from suscripciones.models import Subscripcion
+        from django.utils import timezone
+
         filtro = Q(nombre__icontains=q) | Q(apellido__icontains=q) | Q(correo__icontains=q)
         if q.isdigit():
             filtro |= Q(id=int(q))
 
-        usuarios = (
-            Usuario.objects
-            .filter(filtro)
-            .select_related('rol')
-            [:20]
-        )
-
-        from suscripcion.models import Subscripcion  # ajustá el import path
+        usuarios = Usuario.objects.filter(filtro).select_related('rol')[:20]
 
         resultado = []
         for u in usuarios:
@@ -416,7 +412,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 'apellido': u.apellido,
                 'correo': u.correo,
                 'rol': u.rol.nombre if u.rol else ('owner' if u.is_owner_empresa else 'usuario'),
-                'fecha_registro': u.created_at,   # ← corregido
+                'fecha_registro': u.created_at,
                 'suscripcion': {
                     'activa': True,
                     'plan': sub.plan_id.nombre if sub and sub.plan_id else None,
@@ -427,12 +423,14 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         return Response(resultado)
 
+
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='admin/stats')
     def admin_usuario_stats(self, request, pk=None):
         if not (request.user.is_staff or request.user.is_superuser):
             return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
 
-        from suscripcion.models import Subscripcion  # ajustá el import path
+        from suscripciones.models import Subscripcion
+        from django.utils import timezone
 
         u = get_object_or_404(Usuario.objects.select_related('rol'), pk=pk)
         sub = (
@@ -449,7 +447,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             'apellido': u.apellido,
             'correo': u.correo,
             'rol': u.rol.nombre if u.rol else ('owner' if u.is_owner_empresa else 'usuario'),
-            'fecha_registro': u.created_at,   # ← corregido
+            'fecha_registro': u.created_at,
             'suscripcion': {
                 'activa': True,
                 'plan': sub.plan_id.nombre if sub and sub.plan_id else None,
@@ -458,10 +456,15 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             } if sub else None,
         })
 
+
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated], url_path='admin/extender-suscripcion')
     def admin_extender_suscripcion(self, request):
         if not (request.user.is_staff or request.user.is_superuser):
             return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
+
+        from suscripciones.models import Subscripcion
+        from django.utils import timezone
+        from datetime import timedelta
 
         usuario_id = request.data.get('usuario_id')
         dias       = int(request.data.get('dias', 30))
@@ -471,52 +474,53 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             return Response({'error': 'usuario_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
         u = get_object_or_404(Usuario, pk=usuario_id)
-        sub = u.suscripciones.filter(status='active').order_by('-fecha_inicio').first()
+        sub = (
+            Subscripcion.objects
+            .filter(user_id=u, cancelada=False, expiracion__gt=timezone.now())
+            .order_by('-created_at')
+            .first()
+        )
 
         if not sub:
             return Response({'error': 'El usuario no tiene suscripción activa'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Extender fecha
-        base = sub.fecha_fin if sub.fecha_fin and sub.fecha_fin > timezone.now().date() else timezone.now().date()
-        sub.fecha_fin = base + timedelta(days=dias)
+        base = sub.expiracion if sub.expiracion > timezone.now() else timezone.now()
+        sub.expiracion = base + timedelta(days=dias)
 
-        # Sumar jobs
         if jobs_extra > 0:
             sub.jobs_restantes = (sub.jobs_restantes or 0) + jobs_extra
 
-        sub.save(update_fields=['fecha_fin', 'jobs_restantes'])
+        sub.save(update_fields=['expiracion', 'jobs_restantes'])
 
         return Response({
             'message': f'Suscripción extendida {dias} días' + (f' y {jobs_extra} jobs agregados' if jobs_extra else ''),
-            'nueva_fecha_fin': sub.fecha_fin,
+            'nueva_expiracion': sub.expiracion,
             'jobs_restantes': sub.jobs_restantes,
         })
+        @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated])
+        def update_me(self, request):
+            usuario = request.user
 
+            serializer = UpdateUsuarioSerializer(
+                usuario, 
+                data=request.data, 
+                partial=request.method == 'PATCH'
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
 
-    @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated])
-    def update_me(self, request):
-        usuario = request.user
+            empresa = usuario.empresas_administradas.first()
+            if empresa and 'currency' in request.data:
+                empresa.currency = request.data.get('currency')
+                empresa.save(update_fields=['currency'])
 
-        serializer = UpdateUsuarioSerializer(
-            usuario, 
-            data=request.data, 
-            partial=request.method == 'PATCH'
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+            user_data = UsuarioSerializer(usuario).data
 
-        empresa = usuario.empresas_administradas.first()
-        if empresa and 'currency' in request.data:
-            empresa.currency = request.data.get('currency')
-            empresa.save(update_fields=['currency'])
-
-        user_data = UsuarioSerializer(usuario).data
-
-        return Response({
-            'message': 'Información actualizada exitosamente',
-            'user': user_data
-        })
-    
+            return Response({
+                'message': 'Información actualizada exitosamente',
+                'user': user_data
+            })
+        
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
     def change_password(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
