@@ -1,12 +1,10 @@
-"""
-URL configuration for fixeo_project project.
-"""
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenRefreshView
 from suscripciones.urls import planes_urlpatterns, suscripciones_urlpatterns
+from fixeo_project.admin_views import AdminEstadisticasView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -30,6 +28,7 @@ urlpatterns = [
     path('api/planes/', include(planes_urlpatterns)),
     path('api/suscripciones/', include(suscripciones_urlpatterns)),
     path('api/survey/', include('survey.urls')),
+    path('api/admin/estadisticas/', AdminEstadisticasView.as_view(), name='admin-estadisticas'),
 ]
 
 
