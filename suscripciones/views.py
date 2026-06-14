@@ -346,3 +346,46 @@ class AppStoreWebhookView(APIView):
                 {'received': False, 'error': str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+class AdminExtenderSubscripcionView(APIView):
+    """
+    POST /suscripciones/admin/extender/
+    Extiende la suscripción activa de un usuario (solo admins).
+    Body: { usuario_id, dias, jobs_extra }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def post(self, request):
+        usuario_id = request.data.get('usuario_id')
+        dias       = int(request.data.get('dias', 30))
+        jobs_extra = int(request.data.get('jobs_extra', 0))
+
+        if not usuario_id:
+            return Response({'error': 'usuario_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sub = (
+            Subscripcion.objects
+            .filter(user_id=usuario_id, cancelada=False, expiracion__gt=timezone.now())
+            .order_by('-created_at')
+            .first()
+        )
+
+        if not sub:
+            return Response(
+                {'error': 'El usuario no tiene suscripción activa'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from datetime import timedelta
+        sub.expiracion = sub.expiracion + timedelta(days=dias)
+
+        if jobs_extra > 0:
+            sub.jobs_restantes = (sub.jobs_restantes or 0) + jobs_extra
+
+        sub.save(update_fields=['expiracion', 'jobs_restantes'])
+
+        return Response({
+            'message': f'Suscripción extendida {dias} días' + (f' y {jobs_extra} jobs agregados' if jobs_extra else ''),
+            'nueva_expiracion': sub.expiracion,
+            'jobs_restantes': sub.jobs_restantes,
+        })

@@ -378,7 +378,121 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def me(self, request):
         serializer = self.get_serializer(request.user)
         return Response(serializer.data)
-    
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='admin/buscar')
+    def admin_buscar_usuarios(self, request):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
+
+        q = request.query_params.get('q', '').strip()
+        if not q:
+            return Response({'error': 'Parámetro q requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        filtro = Q(nombre__icontains=q) | Q(apellido__icontains=q) | Q(correo__icontains=q)
+        if q.isdigit():
+            filtro |= Q(id=int(q))
+
+        usuarios = (
+            Usuario.objects
+            .filter(filtro)
+            .select_related('rol')
+            [:20]
+        )
+
+        from suscripcion.models import Subscripcion  # ajustá el import path
+
+        resultado = []
+        for u in usuarios:
+            sub = (
+                Subscripcion.objects
+                .filter(user_id=u, cancelada=False, expiracion__gt=timezone.now())
+                .select_related('plan_id')
+                .order_by('-created_at')
+                .first()
+            )
+            resultado.append({
+                'id': u.id,
+                'nombre': u.nombre,
+                'apellido': u.apellido,
+                'correo': u.correo,
+                'rol': u.rol.nombre if u.rol else ('owner' if u.is_owner_empresa else 'usuario'),
+                'fecha_registro': u.created_at,   # ← corregido
+                'suscripcion': {
+                    'activa': True,
+                    'plan': sub.plan_id.nombre if sub and sub.plan_id else None,
+                    'fecha_vencimiento': sub.expiracion,
+                    'jobs_restantes': sub.jobs_restantes,
+                } if sub else None,
+            })
+
+        return Response(resultado)
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='admin/stats')
+    def admin_usuario_stats(self, request, pk=None):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
+
+        from suscripcion.models import Subscripcion  # ajustá el import path
+
+        u = get_object_or_404(Usuario.objects.select_related('rol'), pk=pk)
+        sub = (
+            Subscripcion.objects
+            .filter(user_id=u, cancelada=False, expiracion__gt=timezone.now())
+            .select_related('plan_id')
+            .order_by('-created_at')
+            .first()
+        )
+
+        return Response({
+            'id': u.id,
+            'nombre': u.nombre,
+            'apellido': u.apellido,
+            'correo': u.correo,
+            'rol': u.rol.nombre if u.rol else ('owner' if u.is_owner_empresa else 'usuario'),
+            'fecha_registro': u.created_at,   # ← corregido
+            'suscripcion': {
+                'activa': True,
+                'plan': sub.plan_id.nombre if sub and sub.plan_id else None,
+                'fecha_vencimiento': sub.expiracion,
+                'jobs_restantes': sub.jobs_restantes,
+            } if sub else None,
+        })
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated], url_path='admin/extender-suscripcion')
+    def admin_extender_suscripcion(self, request):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
+
+        usuario_id = request.data.get('usuario_id')
+        dias       = int(request.data.get('dias', 30))
+        jobs_extra = int(request.data.get('jobs_extra', 0))
+
+        if not usuario_id:
+            return Response({'error': 'usuario_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        u = get_object_or_404(Usuario, pk=usuario_id)
+        sub = u.suscripciones.filter(status='active').order_by('-fecha_inicio').first()
+
+        if not sub:
+            return Response({'error': 'El usuario no tiene suscripción activa'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Extender fecha
+        base = sub.fecha_fin if sub.fecha_fin and sub.fecha_fin > timezone.now().date() else timezone.now().date()
+        sub.fecha_fin = base + timedelta(days=dias)
+
+        # Sumar jobs
+        if jobs_extra > 0:
+            sub.jobs_restantes = (sub.jobs_restantes or 0) + jobs_extra
+
+        sub.save(update_fields=['fecha_fin', 'jobs_restantes'])
+
+        return Response({
+            'message': f'Suscripción extendida {dias} días' + (f' y {jobs_extra} jobs agregados' if jobs_extra else ''),
+            'nueva_fecha_fin': sub.fecha_fin,
+            'jobs_restantes': sub.jobs_restantes,
+        })
+
+
     @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated])
     def update_me(self, request):
         usuario = request.user
