@@ -33,8 +33,8 @@ fi
 echo "🌱 Ejecutando seeds..."
 docker compose exec -T web python manage.py seed_roles
 docker compose exec -T web python manage.py seed_profesiones
-docker compose exec -T web python manage.py seed_roles
 docker compose exec -T web python manage.py seed_plans
+docker compose exec -T web python manage.py seed_admin
 
 echo "✅ Proyecto iniciado correctamente!"
 echo ""

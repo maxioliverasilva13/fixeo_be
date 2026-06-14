@@ -4,7 +4,9 @@ echo "🌱 Ejecutando seeds..."
 
 echo "📝 Creando roles..."
 docker-compose exec web python manage.py seed_roles
+docker-compose exec web python manage.py seed_profesiones
 docker-compose exec web python manage.py seed_plans
+docker-compose exec web python manage.py seed_admin
 
 echo "✅ Todos los seeds completados!"
 
