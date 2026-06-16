@@ -19,7 +19,7 @@ from usuario_profesion.models import UsuarioProfesion
 from .models import Calificacion, OfertaTrabajo, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
 from rest_framework.decorators import action
-from django.db.models import Avg
+from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone as django_timezone
 from django.db.models import Q
@@ -891,18 +891,16 @@ class CalificacionViewSet(viewsets.ViewSet):
         """
         Devuelve promedio, cantidad y últimas calificaciones con nombre de usuario y servicios.
         """
-        calificaciones = Calificacion.objects.filter(
+        usuario = get_object_or_404(Usuario, id=usuario_id)
+
+        ultimas = Calificacion.objects.filter(
             user_cal_recibe_id=usuario_id
         ).select_related(
-            'user_cal_sender', 
+            'user_cal_sender',
             'trabajo'
         ).prefetch_related(
             'trabajo__trabajo_servicios__servicio'
-        ).order_by('-created_at')
-
-        count = calificaciones.count()
-        promedio = calificaciones.aggregate(promedio=Avg('rating'))['promedio'] or 0
-        ultimas = calificaciones[:3]
+        ).order_by('-created_at')[:3]
 
         ultimas_data = []
         for c in ultimas:
@@ -928,7 +926,7 @@ class CalificacionViewSet(viewsets.ViewSet):
 
         return Response({
             'usuario_id': usuario_id,
-            'promedio': round(promedio, 2),
-            'cantidad': count,
+            'promedio': round(float(usuario.rating), 2),
+            'cantidad': usuario.cant_calif,
             'ultimas': ultimas_data
         })

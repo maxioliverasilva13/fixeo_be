@@ -12,7 +12,7 @@ import math
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Avg, Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery
+from django.db.models import Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery
 from django.utils import timezone
 
 from empresas.models import Empresa, Horarios
@@ -207,7 +207,7 @@ def usuarios_mapa_queryset(user_ids: list[int]):
         return Usuario.objects.none()
     return annotate_map_plan_rank(
         Usuario.objects.filter(id__in=user_ids).annotate(
-            avg_rating=Avg('calificaciones_recibidas__rating'),
+            avg_rating=F('rating'),
             min_precio_servicio=Min('servicios__precio'),
         )
     ).prefetch_related(*MAP_USUARIO_PREFETCH)
@@ -489,7 +489,7 @@ def resolve_map_users_from_bounds(
 def resolve_map_users_national(*, limit: int, sort_by: str) -> list[Usuario]:
     base_qs = annotate_map_plan_rank(
         Usuario.objects.filter(is_owner_empresa=True, is_active=True).annotate(
-            avg_rating=Avg('calificaciones_recibidas__rating'),
+            avg_rating=F('rating'),
         )
     )
 

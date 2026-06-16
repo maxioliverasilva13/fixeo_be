@@ -13,7 +13,7 @@ from django.utils import timezone
 from usuario.models import Usuario
 from suscripciones.models import Subscripcion, Plan
 from empresas.models import Empresa
-from trabajos.models import Trabajo, Calificacion
+from trabajos.models import Trabajo
 from carritos.models import Orden, OrdenItem
 from pagos.models import Pago
 from survey.models import SurveyResponse
@@ -280,9 +280,13 @@ def estadisticas_trabajos(start, end):
         created_at__lt=end,
     ).aggregate(total=Sum('precio_final'))['total'] or Decimal('0')
 
-    # Calificaciones promedio
-    avg_rating = Calificacion.objects.aggregate(promedio=Avg('rating'))['promedio'] or 0
-    total_calificaciones = Calificacion.objects.count()
+    # Calificaciones promedio (desde campos denormalizados)
+    stats = Usuario.objects.aggregate(
+        total_calif=Sum('cant_calif'),
+        suma_ponderada=Sum(F('rating') * F('cant_calif'))
+    )
+    total_calificaciones = stats['total_calif'] or 0
+    avg_rating = (stats['suma_ponderada'] / total_calificaciones) if total_calificaciones > 0 else 0
 
     # Trabajos por método de pago
     por_metodo_pago = list(

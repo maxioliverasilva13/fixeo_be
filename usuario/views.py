@@ -27,7 +27,6 @@ from profesion.utils import obtener_profesion_por_id
 from decimal import Decimal 
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F
-from django.db.models import Avg
 from decimal import Decimal
 import math
 import firebase_admin
@@ -92,7 +91,7 @@ FROM (
                 COALESCE(MAX(similarity(p.nombre, %s)), 0)
             )
         END AS rank,
-        COALESCE(AVG(c.rating), 0) AS rating,
+        u.rating,
         EXISTS(
             SELECT 1 FROM trabajo t
             WHERE t.profesional_id = u.id AND t."esUrgente" = true
@@ -120,7 +119,6 @@ FROM (
     LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
     LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
     LEFT JOIN profesion p ON p.id = up.profesion_id
-    LEFT JOIN calificacion c ON c.user_cal_recibe_id = u.id
     WHERE
         u.id != %s
         AND u.is_active = true
