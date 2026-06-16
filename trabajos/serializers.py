@@ -83,6 +83,7 @@ class TrabajoMensajeResumenSerializer(serializers.ModelSerializer):
             'descripcion',
             'status',
             'esUrgente',
+            'es_domicilio_profesional',
             'precio_final',
             'fecha_inicio',
             'fecha_fin',
@@ -118,7 +119,7 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
         model = Trabajo
         fields = [
             'id', 'usuario', 'profesional',
-            'descripcion', 'esUrgente', 'status',
+            'descripcion', 'esUrgente', 'es_domicilio_profesional', 'status',
             'fecha_inicio', 'fecha_fin', 'precio_final',
             'servicios', 'calificaciones',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
@@ -157,7 +158,8 @@ class TrabajoListSerializer(serializers.ModelSerializer):
             'fecha_inicio',
             'created_at',
             'localizacion_detalle',
-            'esUrgente'
+            'esUrgente',
+            'es_domicilio_profesional',
         ]
     
     def get_cantidad_servicios(self, obj):
@@ -248,7 +250,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Trabajo
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
-                  'precio_final', 'esUrgente', 'localizacion_detalle', 
+                  'precio_final', 'esUrgente', 'es_domicilio_profesional', 'localizacion_detalle', 
                   'profesion_detalle', 'ofertas', 'fecha_inicio', 'currency',
                   'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones', 'recursos']
         
