@@ -350,6 +350,12 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 {'error': 'Credenciales inválidas'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+
+        if user.is_deleted or not user.is_active:
+            return Response(
+                {'error': 'Esta cuenta fue eliminada'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
         
         refresh = RefreshToken.for_user(user)
         user_data = UsuarioSerializer(user).data
@@ -374,6 +380,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def me(self, request):
+        if request.user.is_deleted or not request.user.is_active:
+            return Response(
+                {'error': 'Esta cuenta fue eliminada'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         serializer = self.get_serializer(request.user)
         return Response(serializer.data)
 
@@ -495,30 +506,63 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             'nueva_expiracion': sub.expiracion,
             'jobs_restantes': sub.jobs_restantes,
         })
-        @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated])
-        def update_me(self, request):
-            usuario = request.user
 
-            serializer = UpdateUsuarioSerializer(
-                usuario, 
-                data=request.data, 
-                partial=request.method == 'PATCH'
+    @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated], url_path='update_me')
+    def update_me(self, request):
+        usuario = request.user
+
+        serializer = UpdateUsuarioSerializer(
+            usuario,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        empresa = usuario.empresas_administradas.first()
+        if empresa and 'currency' in request.data:
+            empresa.currency = request.data.get('currency')
+            empresa.save(update_fields=['currency'])
+
+        user_data = UsuarioSerializer(usuario).data
+
+        return Response({
+            'message': 'Información actualizada exitosamente',
+            'user': user_data
+        })
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated], url_path='delete_me')
+    def delete_me(self, request):
+        from django.utils import timezone
+        from notificaciones.models import DeviceToken
+
+        usuario = request.user
+
+        if usuario.is_deleted or not usuario.is_active:
+            return Response(
+                {'error': 'La cuenta ya fue eliminada'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
 
-            empresa = usuario.empresas_administradas.first()
-            if empresa and 'currency' in request.data:
-                empresa.currency = request.data.get('currency')
-                empresa.save(update_fields=['currency'])
+        refresh_token = request.data.get('refresh_token')
+        if refresh_token:
+            try:
+                RefreshToken(refresh_token).blacklist()
+            except Exception:
+                pass
 
-            user_data = UsuarioSerializer(usuario).data
+        usuario.is_deleted = True
+        usuario.is_active = False
+        usuario.deleted_at = timezone.now()
+        usuario.save(update_fields=['is_deleted', 'is_active', 'deleted_at'])
 
-            return Response({
-                'message': 'Información actualizada exitosamente',
-                'user': user_data
-            })
-        
+        DeviceToken.objects.filter(usuario=usuario).delete()
+
+        return Response(
+            {'message': 'Cuenta eliminada exitosamente'},
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
     def change_password(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
@@ -852,6 +896,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         usuario = Usuario.objects.filter(correo=email).first()
 
         if usuario:
+            if usuario.is_deleted or not usuario.is_active:
+                return Response(
+                    {'error': 'Esta cuenta fue eliminada'},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             refresh = RefreshToken.for_user(usuario)
             return Response({
                 'user': UsuarioSerializer(usuario).data,

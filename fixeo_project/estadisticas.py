@@ -18,7 +18,9 @@ from carritos.models import Orden, OrdenItem
 from pagos.models import Pago
 from survey.models import SurveyResponse
 from mensajeria.models import Chat, Mensajes
+import logging
 
+logger = logging.getLogger(__name__)
 
 def _decimal_str(value) -> str:
     if value is None:
@@ -103,17 +105,19 @@ def estadisticas_usuarios(start, end):
 
 
 def estadisticas_suscripciones(start, end):
-    """Estadísticas de suscripciones."""
+    """Estadísticas de suscripciones (solo planes de pago, precio > 0)."""
     ahora = timezone.now()
+    subs_qs = Subscripcion.objects.filter(plan_id__precio__gt=0)
 
-    total_subs = Subscripcion.objects.count()
-    subs_activas = Subscripcion.objects.filter(cancelada=False, expiracion__gt=ahora).count()
-    subs_canceladas = Subscripcion.objects.filter(cancelada=True).count()
-    subs_expiradas = Subscripcion.objects.filter(cancelada=False, expiracion__lte=ahora).count()
+    total_subs = subs_qs.count()
+    subs_activas = subs_qs.filter(cancelada=False, expiracion__gt=ahora).count()
+    subs_canceladas = subs_qs.filter(cancelada=True).count()
+    subs_expiradas = subs_qs.filter(cancelada=False, expiracion__lte=ahora).count()
 
+    logger.info(f'subs_qs: {subs_qs.count()}')
     # Por plan
     subs_por_plan = list(
-        Subscripcion.objects.values('plan_id__nombre', 'plan_id__precio')
+        subs_qs.values('plan_id__nombre', 'plan_id__precio')
         .annotate(
             cantidad=Count('id'),
             activas=Count('id', filter=Q(cancelada=False, expiracion__gt=ahora)),
@@ -123,35 +127,35 @@ def estadisticas_suscripciones(start, end):
 
     # Por status
     subs_por_status = list(
-        Subscripcion.objects.values('status')
+        subs_qs.values('status')
         .annotate(cantidad=Count('id'))
         .order_by('-cantidad')
     )
 
     # Por fuente (manual, google_play, app_store)
     subs_por_fuente = list(
-        Subscripcion.objects.values('source')
+        subs_qs.values('source')
         .annotate(cantidad=Count('id'))
         .order_by('-cantidad')
     )
 
     # Nuevas en período
-    nuevas_periodo = Subscripcion.objects.filter(created_at__gte=start, created_at__lt=end).count()
+    nuevas_periodo = subs_qs.filter(created_at__gte=start, created_at__lt=end).count()
 
     # Renovaciones/cancelaciones en período
-    canceladas_periodo = Subscripcion.objects.filter(
+    canceladas_periodo = subs_qs.filter(
         cancelada=True, updated_at__gte=start, updated_at__lt=end
     ).count()
 
     # Jobs restantes promedio
-    jobs_promedio = Subscripcion.objects.filter(
+    jobs_promedio = subs_qs.filter(
         cancelada=False, expiracion__gt=ahora
     ).aggregate(promedio=Avg('jobs_restantes'))['promedio'] or 0
 
     # Subs por mes (últimos 12 meses)
     hace_12_meses = ahora - timedelta(days=365)
     subs_por_mes = list(
-        Subscripcion.objects.filter(created_at__gte=hace_12_meses)
+        subs_qs.filter(created_at__gte=hace_12_meses)
         .annotate(mes=TruncMonth('created_at'))
         .values('mes')
         .annotate(cantidad=Count('id'))
@@ -510,8 +514,8 @@ def estadisticas_resumen(start, end):
             'nuevos_en_periodo': Usuario.objects.filter(created_at__gte=start, created_at__lt=end).count(),
         },
         'suscripciones': {
-            'activas': Subscripcion.objects.filter(cancelada=False, expiracion__gt=ahora).count(),
-            'nuevas_en_periodo': Subscripcion.objects.filter(created_at__gte=start, created_at__lt=end).count(),
+            'activas': estadisticas_suscripciones(start, end)['activas'],
+            'nuevas_en_periodo': estadisticas_suscripciones(start, end)['nuevas_en_periodo'],
         },
         'empresas': {
             'total': Empresa.objects.count(),

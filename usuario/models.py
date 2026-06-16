@@ -36,6 +36,8 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     is_owner_empresa = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(default=False, db_index=True, verbose_name='Eliminado')
+    deleted_at = models.DateTimeField(null=True, blank=True, verbose_name='Eliminado en')
     rango_mapa_km = models.DecimalField(max_digits=5, decimal_places=2, default=10.00, help_text='Radio de búsqueda en kilómetros')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
