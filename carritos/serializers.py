@@ -5,14 +5,18 @@ from .models import Carrito, CarritoItem, Orden, OrdenItem
 class CarritoItemSerializer(serializers.ModelSerializer):
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_precio = serializers.DecimalField(source='producto.precio', max_digits=10, decimal_places=2, read_only=True)
+    producto_divisa = serializers.CharField(source='producto.divisa', read_only=True)
     producto_agotado = serializers.BooleanField(source='producto.agotado', read_only=True)
     producto_foto = serializers.CharField(source='producto.foto', read_only=True)
+    producto_acepta_domicilio = serializers.BooleanField(source='producto.acepta_domicilio', read_only=True)
+    producto_acepta_retiro = serializers.BooleanField(source='producto.acepta_retiro', read_only=True)
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     
     class Meta:
         model = CarritoItem
-        fields = ['id', 'carrito', 'producto', 'producto_nombre', 'producto_precio', 
-                  'producto_agotado', 'producto_foto', 'cantidad', 'precio_unitario', 'subtotal', 'created_at']
+        fields = ['id', 'carrito', 'producto', 'producto_nombre', 'producto_precio', 'producto_divisa',
+                  'producto_agotado', 'producto_foto', 'producto_acepta_domicilio', 'producto_acepta_retiro',
+                  'cantidad', 'precio_unitario', 'subtotal', 'created_at']
         read_only_fields = ['id', 'carrito', 'precio_unitario', 'created_at']
 
     def validate_producto(self, value):
@@ -26,12 +30,31 @@ class CarritoSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     cantidad_items = serializers.IntegerField(read_only=True)
     empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    totales_por_divisa = serializers.SerializerMethodField()
+    tiene_multiples_divisas = serializers.SerializerMethodField()
     
     class Meta:
         model = Carrito
         fields = ['id', 'usuario', 'empresa', 'empresa_nombre', 'activo', 'items', 
-                  'total', 'cantidad_items', 'created_at', 'updated_at']
+                  'total', 'totales_por_divisa', 'tiene_multiples_divisas',
+                  'cantidad_items', 'created_at', 'updated_at']
         read_only_fields = ['id', 'usuario', 'activo', 'created_at', 'updated_at']
+
+    def get_totales_por_divisa(self, obj):
+        from collections import defaultdict
+        from decimal import Decimal
+        totals = defaultdict(lambda: Decimal('0'))
+        for item in obj.items.select_related('producto').all():
+            divisa = getattr(item.producto, 'divisa', None) or 'USD'
+            totals[divisa] += item.subtotal
+        return {k: str(v) for k, v in totals.items()}
+
+    def get_tiene_multiples_divisas(self, obj):
+        divisas = {
+            getattr(item.producto, 'divisa', None) or 'USD'
+            for item in obj.items.select_related('producto').all()
+        }
+        return len(divisas) > 1
 
 
 class CarritoItemCreateSerializer(serializers.Serializer):
@@ -73,13 +96,14 @@ class OrdenSerializer(serializers.ModelSerializer):
     localizacion_info = serializers.SerializerMethodField()
     pago_info = serializers.SerializerMethodField()
     mi_calificacion = serializers.SerializerMethodField()
+    mi_calificacion_cliente = serializers.SerializerMethodField()
 
     class Meta:
         model = Orden
         fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'usuario_info', 'empresa', 'empresa_nombre', 'empresa_info',
                   'empresa_admin_id', 'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega',
                   'localizacion_info', 'total', 'comision_plataforma', 'pago_status', 'notas',
-                  'fecha_entrega', 'items', 'pago_info', 'mi_calificacion', 'created_at', 'updated_at']
+                  'fecha_entrega', 'items', 'pago_info', 'mi_calificacion', 'mi_calificacion_cliente', 'created_at', 'updated_at']
         read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
                             'pago_status', 'localizacion_entrega', 'created_at', 'updated_at']
 
@@ -113,10 +137,31 @@ class OrdenSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        from trabajos.models import Calificacion
+        from trabajos.models import Calificacion, CalificacionDireccion
         c = Calificacion.objects.filter(
             orden=obj,
             user_cal_sender=request.user,
+            direccion=CalificacionDireccion.CLIENTE_A_PROFESIONAL,
+        ).first()
+        if not c:
+            return None
+        return {
+            'id': c.id,
+            'rating': c.rating,
+            'comentario': c.comentario,
+        }
+
+    def get_mi_calificacion_cliente(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if request.user.id != obj.empresa.admin_id_id:
+            return None
+        from trabajos.models import Calificacion, CalificacionDireccion
+        c = Calificacion.objects.filter(
+            orden=obj,
+            user_cal_sender=request.user,
+            direccion=CalificacionDireccion.PROFESIONAL_A_CLIENTE,
         ).first()
         if not c:
             return None

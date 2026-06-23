@@ -5,6 +5,7 @@ import uuid
 from django.utils import timezone
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
+from fixeo_project.models import BaseModel
 
 class UsuarioManager(BaseUserManager):
     def create_user(self, correo, password=None, **extra_fields):
@@ -45,6 +46,8 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     rol = models.ForeignKey(Rol, on_delete=models.SET_NULL, null=True, blank=True, related_name='usuarios')
     rating = models.FloatField(default=0)
     cant_calif = models.IntegerField(default=0)
+    rating_cliente = models.FloatField(default=0)
+    cant_calif_cliente = models.IntegerField(default=0)
 
     auto_aprobacion_trabajos = models.BooleanField(default=False)
 
@@ -76,6 +79,32 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.nombre} {self.apellido} ({self.correo})"
+
+
+class ZonaNoTrabajo(BaseModel):
+    usuario = models.ForeignKey(
+        Usuario,
+        on_delete=models.CASCADE,
+        related_name='zonas_no_trabajo',
+    )
+    nombre = models.CharField(max_length=100, blank=True, default='')
+    latitud = models.DecimalField(max_digits=10, decimal_places=7)
+    longitud = models.DecimalField(max_digits=10, decimal_places=7)
+    radio_km = models.DecimalField(max_digits=5, decimal_places=2)
+    activa = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'zona_no_trabajo'
+        verbose_name = 'Zona de no trabajo'
+        verbose_name_plural = 'Zonas de no trabajo'
+        indexes = [
+            models.Index(fields=['usuario', 'activa'], name='idx_zona_no_trabajo_user'),
+        ]
+
+    def __str__(self):
+        label = self.nombre or f'Zona {self.id}'
+        return f'{label} ({self.usuario_id})'
+
     
 class PasswordResetToken(models.Model):
     usuario   = models.ForeignKey('usuario.Usuario', on_delete=models.CASCADE, related_name='reset_tokens')

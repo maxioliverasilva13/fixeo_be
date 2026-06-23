@@ -519,11 +519,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        empresa = usuario.empresas_administradas.first()
-        if empresa and 'currency' in request.data:
-            empresa.currency = request.data.get('currency')
-            empresa.save(update_fields=['currency'])
-
         user_data = UsuarioSerializer(usuario).data
 
         return Response({

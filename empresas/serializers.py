@@ -2,6 +2,8 @@ from rest_framework import serializers
 from servicios.serializers import ServicioSerializer
 from .models import Empresa, CategoriaProducto, Producto
 from localizacion.serializers import LocalizacionSerializer
+from .currency_validation import validar_divisa_empresa
+from .delivery_utils import aplicar_limites_modalidad, modalidad_desde_usuario
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
@@ -9,6 +11,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     trabajo_local = serializers.BooleanField(source='admin_id.trabajo_local', read_only=True)
     efectivo_disponible = serializers.SerializerMethodField()
     metodos_pago_disponibles = serializers.SerializerMethodField()
+    moneda_local = serializers.CharField(read_only=True)
 
     class Meta:
         model = Empresa
@@ -20,6 +23,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'latitud',
             'longitud',
             'pais',
+            'moneda_local',
             'unipersonal',
             'vende_productos',
             'vende_servicios',
@@ -36,6 +40,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'updated_at',
             'currency'
         ]
+        read_only_fields = ['currency', 'moneda_local']
 
     def _get_efectivo_jobs_restantes(self, obj):
         """Devuelve (subscripcion, jobs_restantes_efectivo) o (None, 0). Cachea por empresa."""
@@ -109,6 +114,29 @@ class ProductoSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Producto
-        fields = ['id', 'nombre', 'descripcion', 'precio', 'codigo', 'agotado', 'foto', 
-                  'empresa', 'categoria', 'categoria_nombre', 'created_at', 'updated_at']
+        fields = ['id', 'nombre', 'descripcion', 'precio', 'divisa', 'codigo', 'agotado', 'foto', 
+                  'empresa', 'categoria', 'categoria_nombre', 'acepta_domicilio', 'acepta_retiro',
+                  'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        divisa = attrs.get('divisa')
+        if empresa and divisa is not None:
+            validar_divisa_empresa(empresa, divisa)
+
+        if empresa:
+            admin = empresa.admin_id
+            default_domicilio, default_retiro = modalidad_desde_usuario(admin)
+            acepta_domicilio = attrs.get(
+                'acepta_domicilio',
+                default_domicilio if self.instance is None else self.instance.acepta_domicilio,
+            )
+            acepta_retiro = attrs.get(
+                'acepta_retiro',
+                default_retiro if self.instance is None else self.instance.acepta_retiro,
+            )
+            acepta_domicilio, acepta_retiro = aplicar_limites_modalidad(admin, acepta_domicilio, acepta_retiro)
+            attrs['acepta_domicilio'] = acepta_domicilio
+            attrs['acepta_retiro'] = acepta_retiro
+        return attrs

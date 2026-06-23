@@ -16,7 +16,7 @@ from usuario.utils import foto_usuario_api
 from servicios.models import Servicio
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
-from .models import Calificacion, OfertaTrabajo, Trabajo, TrabajoServicio
+from .models import Calificacion, CalificacionDireccion, OfertaTrabajo, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
 from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
@@ -92,7 +92,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         Retorna todas las calificaciones recibidas por un usuario específico.
         """
         calificaciones = Calificacion.objects.filter(
-            user_cal_recibe_id=usuario_id
+            user_cal_recibe_id=usuario_id,
+            direccion=CalificacionDireccion.CLIENTE_A_PROFESIONAL,
         ).order_by('-created_at')
 
         data = [{
@@ -586,7 +587,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         currency = None
         empresa_profesional = profesional.empresas_administradas.first()
         if empresa_profesional:
-            currency = empresa_profesional.currency
+            currency = empresa_profesional.moneda_local
 
         servicios = Servicio.objects.filter(id__in=servicios_ids)
         if not servicios.exists():
@@ -601,14 +602,6 @@ class TrabajoViewSet(viewsets.ModelViewSet):
 
         if hay_conflicto(profesional.id, inicio, fin):
             return Response({'error': 'El horario se solapa con otro trabajo'}, status=status.HTTP_409_CONFLICT)
-
-        disponibilidad_ocupada = Disponibilidad.objects.create(
-            usuario=profesional,
-            fecha_inicio=inicio,
-            fecha_fin=fin,
-            tipo=Tipo.OCUPADO,
-            origen='trabajo'
-        )
 
         localizacion = None
 
@@ -626,6 +619,34 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 localizacion = userLocation.filter(es_principal=True).first().localizacion
             else:
                 localizacion = userLocation.first().localizacion if userLocation.first() else None
+
+        if (
+            not es_domicilio_profesional
+            and localizacion
+            and localizacion.latitud is not None
+            and localizacion.longitud is not None
+        ):
+            from usuario.zonas_utils import (
+                mensaje_zona_no_atendida,
+                ubicacion_bloqueada_por_zonas_profesional,
+            )
+            if ubicacion_bloqueada_por_zonas_profesional(
+                profesional,
+                localizacion.latitud,
+                localizacion.longitud,
+            ):
+                return Response(
+                    {'error': mensaje_zona_no_atendida()},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        disponibilidad_ocupada = Disponibilidad.objects.create(
+            usuario=profesional,
+            fecha_inicio=inicio,
+            fecha_fin=fin,
+            tipo=Tipo.OCUPADO,
+            origen='trabajo'
+        )
 
         newStatus = 'aceptado' if profesional.auto_aprobacion_trabajos else 'pendiente'
         precio_final = sum([s.precio for s in servicios])
@@ -719,6 +740,20 @@ class CalificacionViewSet(viewsets.ViewSet):
 
     permission_classes = [IsAuthenticated]
 
+    def _actualizar_rating_recibido(self, recibe, rating, direccion, created):
+        if not created:
+            return
+        if direccion == CalificacionDireccion.CLIENTE_A_PROFESIONAL:
+            total_rating = recibe.rating * recibe.cant_calif
+            recibe.cant_calif += 1
+            recibe.rating = (total_rating + float(rating)) / recibe.cant_calif
+            recibe.save(update_fields=['rating', 'cant_calif'])
+        elif direccion == CalificacionDireccion.PROFESIONAL_A_CLIENTE:
+            total_rating = recibe.rating_cliente * recibe.cant_calif_cliente
+            recibe.cant_calif_cliente += 1
+            recibe.rating_cliente = (total_rating + float(rating)) / recibe.cant_calif_cliente
+            recibe.save(update_fields=['rating_cliente', 'cant_calif_cliente'])
+
     @transaction.atomic
     def create(self, request):
         usuario = request.user
@@ -737,17 +772,27 @@ class CalificacionViewSet(viewsets.ViewSet):
         if orden_id:
             from carritos.models import Orden
             try:
-                orden = Orden.objects.select_related('empresa__admin_id').get(id=orden_id)
+                orden = Orden.objects.select_related('empresa__admin_id', 'usuario').get(id=orden_id)
             except Orden.DoesNotExist:
                 return Response({'error': 'Orden no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-            if orden.usuario_id != usuario.id:
+            if orden.usuario_id == usuario.id:
+                direccion = CalificacionDireccion.CLIENTE_A_PROFESIONAL
+                recibe = orden.empresa.admin_id
+            elif orden.empresa.admin_id_id == usuario.id:
+                if orden.status != 'finalizada':
+                    return Response(
+                        {'error': 'Solo puedes calificar al cliente cuando la orden está finalizada'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                direccion = CalificacionDireccion.PROFESIONAL_A_CLIENTE
+                recibe = orden.usuario
+            else:
                 return Response(
                     {'error': 'No puedes calificar esta orden'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-            recibe = orden.empresa.admin_id
             calificacion, created = Calificacion.objects.update_or_create(
                 orden=orden,
                 user_cal_sender=usuario,
@@ -756,13 +801,10 @@ class CalificacionViewSet(viewsets.ViewSet):
                     'comentario': comentario,
                     'user_cal_recibe': recibe,
                     'trabajo': None,
+                    'direccion': direccion,
                 },
             )
-            if created:
-                total_rating = recibe.rating * recibe.cant_calif
-                recibe.cant_calif += 1
-                recibe.rating = (total_rating + float(rating)) / recibe.cant_calif
-                recibe.save(update_fields=['rating', 'cant_calif'])
+            self._actualizar_rating_recibido(recibe, rating, direccion, created)
 
             return Response({
                 'id': calificacion.id,
@@ -771,17 +813,29 @@ class CalificacionViewSet(viewsets.ViewSet):
                 'comentario': calificacion.comentario,
                 'user_cal_recibe': recibe.id,
                 'user_cal_sender': usuario.id,
+                'direccion': direccion,
             }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
         try:
-            trabajo = Trabajo.objects.select_related('profesional').get(id=trabajo_id)
+            trabajo = Trabajo.objects.select_related('profesional', 'usuario').get(id=trabajo_id)
         except Trabajo.DoesNotExist:
             return Response(
                 {'error': 'Trabajo no encontrado'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        if trabajo.usuario != usuario:
+        if trabajo.usuario_id == usuario.id:
+            direccion = CalificacionDireccion.CLIENTE_A_PROFESIONAL
+            recibe = trabajo.profesional
+        elif trabajo.profesional_id == usuario.id:
+            if trabajo.status != 'finalizado':
+                return Response(
+                    {'error': 'Solo puedes calificar al cliente cuando el trabajo está finalizado'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            direccion = CalificacionDireccion.PROFESIONAL_A_CLIENTE
+            recibe = trabajo.usuario
+        else:
             return Response(
                 {'error': 'No puedes calificar este trabajo'},
                 status=status.HTTP_403_FORBIDDEN
@@ -795,95 +849,93 @@ class CalificacionViewSet(viewsets.ViewSet):
             defaults={
                 'rating': rating,
                 'comentario': comentario,
-                'user_cal_recibe': profesional,
+                'user_cal_recibe': recibe,
                 'orden': None,
+                'direccion': direccion,
             }
         )
 
-        chat = (
-            Chat.objects.filter(trabajo=trabajo).first()
-            or Chat.objects.filter(
-                Q(sender=trabajo.usuario, receiver=trabajo.profesional)
-                | Q(sender=trabajo.profesional, receiver=trabajo.usuario)
-            ).first()
-        )
-
-        if mensajeId:
-            mensaje = Mensajes.objects.filter(mensaje_id=mensajeId).first()
-            if mensaje:
-                mensaje.calificado = True
-                mensaje.metadata = {
-                    **(mensaje.metadata or {}),
-                    'puntaje': float(rating),
-                    'comentario': comentario,
-                }
-                mensaje.save()
-
-                channel_layer = get_channel_layer()
-                payload = {
-                    'type': 'calificacion_recibida',
-                    'mensaje_id': mensaje.mensaje_id,
-                    'chat_id': mensaje.chat_id,
-                    'puntaje': float(rating),
-                    'comentario': comentario,
-                    'trabajo_id': trabajo.id,
-                }
-                async_to_sync(channel_layer.group_send)(
-                    f'user_{profesional.id}', payload
-                )
-                async_to_sync(channel_layer.group_send)(
-                    f'user_{usuario.id}', payload
-                )
-
-        if chat:
-            mensajes_calificacion_pendientes = Mensajes.objects.filter(
-                Q(chat=chat)
-                & Q(tipo=Mensajes.TipoMensaje.CALIFICACION)
-                & Q(calificado=False)
-                & (
-                    Q(trabajo=trabajo)
-                    | Q(metadata__trabajo_id=trabajo.id)
-                )
+        if direccion == CalificacionDireccion.CLIENTE_A_PROFESIONAL:
+            chat = (
+                Chat.objects.filter(trabajo=trabajo).first()
+                or Chat.objects.filter(
+                    Q(sender=trabajo.usuario, receiver=trabajo.profesional)
+                    | Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+                ).first()
             )
-            for mensaje_pendiente in mensajes_calificacion_pendientes:
-                mensaje_pendiente.calificado = True
-                mensaje_pendiente.metadata = {
-                    **(mensaje_pendiente.metadata or {}),
-                    'puntaje': float(rating),
-                    'comentario': comentario,
-                }
-                mensaje_pendiente.save()
 
-                channel_layer = get_channel_layer()
-                payload = {
-                    'type': 'calificacion_recibida',
-                    'mensaje_id': mensaje_pendiente.mensaje_id,
-                    'chat_id': chat.id,
-                    'puntaje': float(rating),
-                    'comentario': comentario,
-                    'trabajo_id': trabajo.id,
-                }
-                async_to_sync(channel_layer.group_send)(
-                    f'user_{profesional.id}', payload
+            if mensajeId:
+                mensaje = Mensajes.objects.filter(mensaje_id=mensajeId).first()
+                if mensaje:
+                    mensaje.calificado = True
+                    mensaje.metadata = {
+                        **(mensaje.metadata or {}),
+                        'puntaje': float(rating),
+                        'comentario': comentario,
+                    }
+                    mensaje.save()
+
+                    channel_layer = get_channel_layer()
+                    payload = {
+                        'type': 'calificacion_recibida',
+                        'mensaje_id': mensaje.mensaje_id,
+                        'chat_id': mensaje.chat_id,
+                        'puntaje': float(rating),
+                        'comentario': comentario,
+                        'trabajo_id': trabajo.id,
+                    }
+                    async_to_sync(channel_layer.group_send)(
+                        f'user_{profesional.id}', payload
+                    )
+                    async_to_sync(channel_layer.group_send)(
+                        f'user_{usuario.id}', payload
+                    )
+
+            if chat:
+                mensajes_calificacion_pendientes = Mensajes.objects.filter(
+                    Q(chat=chat)
+                    & Q(tipo=Mensajes.TipoMensaje.CALIFICACION)
+                    & Q(calificado=False)
+                    & (
+                        Q(trabajo=trabajo)
+                        | Q(metadata__trabajo_id=trabajo.id)
+                    )
                 )
-                async_to_sync(channel_layer.group_send)(
-                    f'user_{usuario.id}', payload
-                )
-                        
-        # actualizar rating del profesional
-        if created:
-            total_rating = profesional.rating * profesional.cant_calif
-            profesional.cant_calif += 1
-            profesional.rating = (total_rating + float(rating)) / profesional.cant_calif
-            profesional.save(update_fields=['rating', 'cant_calif'])
+                for mensaje_pendiente in mensajes_calificacion_pendientes:
+                    mensaje_pendiente.calificado = True
+                    mensaje_pendiente.metadata = {
+                        **(mensaje_pendiente.metadata or {}),
+                        'puntaje': float(rating),
+                        'comentario': comentario,
+                    }
+                    mensaje_pendiente.save()
+
+                    channel_layer = get_channel_layer()
+                    payload = {
+                        'type': 'calificacion_recibida',
+                        'mensaje_id': mensaje_pendiente.mensaje_id,
+                        'chat_id': chat.id,
+                        'puntaje': float(rating),
+                        'comentario': comentario,
+                        'trabajo_id': trabajo.id,
+                    }
+                    async_to_sync(channel_layer.group_send)(
+                        f'user_{profesional.id}', payload
+                    )
+                    async_to_sync(channel_layer.group_send)(
+                        f'user_{usuario.id}', payload
+                    )
+
+        self._actualizar_rating_recibido(recibe, rating, direccion, created)
 
         return Response({
             'id': calificacion.id,
             'trabajo_id': trabajo.id,
             'rating': calificacion.rating,
             'comentario': calificacion.comentario,
-            'user_cal_recibe': profesional.id,
-            'user_cal_sender': usuario.id
+            'user_cal_recibe': recibe.id,
+            'user_cal_sender': usuario.id,
+            'direccion': direccion,
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
     
     @action(detail=False, methods=['GET'], url_path='resumen/(?P<usuario_id>[^/.]+)')
@@ -894,7 +946,8 @@ class CalificacionViewSet(viewsets.ViewSet):
         usuario = get_object_or_404(Usuario, id=usuario_id)
 
         ultimas = Calificacion.objects.filter(
-            user_cal_recibe_id=usuario_id
+            user_cal_recibe_id=usuario_id,
+            direccion=CalificacionDireccion.CLIENTE_A_PROFESIONAL,
         ).select_related(
             'user_cal_sender',
             'trabajo'
@@ -929,4 +982,95 @@ class CalificacionViewSet(viewsets.ViewSet):
             'promedio': round(float(usuario.rating), 2),
             'cantidad': usuario.cant_calif,
             'ultimas': ultimas_data
+        })
+
+    def _requiere_profesional(self, request):
+        if not request.user.is_owner_empresa:
+            return Response(
+                {'error': 'Solo los profesionales pueden ver calificaciones de clientes'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _serializar_calificacion(self, c):
+        servicios_nombres = []
+        if c.trabajo:
+            servicios_nombres = [
+                ts.servicio.nombre for ts in c.trabajo.trabajo_servicios.all()
+            ]
+        elif c.orden:
+            servicios_nombres = [
+                item.producto.nombre for item in c.orden.items.select_related('producto').all()
+            ]
+
+        return {
+            'id': c.id,
+            'rating': c.rating,
+            'comentario': c.comentario,
+            'created_at': c.created_at,
+            'user_cal_sender': c.user_cal_sender.id,
+            'user_cal_sender_nombre': c.user_cal_sender.nombre,
+            'user_cal_sender_apellido': c.user_cal_sender.apellido,
+            'user_cal_sender_foto': foto_usuario_api(
+                c.user_cal_sender.foto_url or c.user_cal_sender.rounded_foto_url
+            ),
+            'trabajo_id': c.trabajo.id if c.trabajo else None,
+            'orden_id': c.orden.id if c.orden else None,
+            'servicios': servicios_nombres,
+        }
+
+    def listado_cliente(self, request, usuario_id=None):
+        denied = self._requiere_profesional(request)
+        if denied:
+            return denied
+
+        cliente = get_object_or_404(Usuario, id=usuario_id)
+        if cliente.is_owner_empresa:
+            return Response(
+                {'error': 'Este usuario no es un cliente'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        calificaciones = Calificacion.objects.filter(
+            user_cal_recibe_id=usuario_id,
+            direccion=CalificacionDireccion.PROFESIONAL_A_CLIENTE,
+        ).select_related(
+            'user_cal_sender', 'trabajo', 'orden',
+        ).prefetch_related(
+            'trabajo__trabajo_servicios__servicio',
+            'orden__items__producto',
+        ).order_by('-created_at')
+
+        return Response(
+            [self._serializar_calificacion(c) for c in calificaciones],
+            status=status.HTTP_200_OK,
+        )
+
+    def resumen_cliente(self, request, usuario_id=None):
+        denied = self._requiere_profesional(request)
+        if denied:
+            return denied
+
+        cliente = get_object_or_404(Usuario, id=usuario_id)
+        if cliente.is_owner_empresa:
+            return Response(
+                {'error': 'Este usuario no es un cliente'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ultimas = Calificacion.objects.filter(
+            user_cal_recibe_id=usuario_id,
+            direccion=CalificacionDireccion.PROFESIONAL_A_CLIENTE,
+        ).select_related(
+            'user_cal_sender', 'trabajo', 'orden',
+        ).prefetch_related(
+            'trabajo__trabajo_servicios__servicio',
+            'orden__items__producto',
+        ).order_by('-created_at')[:3]
+
+        return Response({
+            'usuario_id': usuario_id,
+            'promedio': round(float(cliente.rating_cliente), 2),
+            'cantidad': cliente.cant_calif_cliente,
+            'ultimas': [self._serializar_calificacion(c) for c in ultimas],
         })

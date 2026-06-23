@@ -71,6 +71,8 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     advertencias_mapa = serializers.SerializerMethodField()
     esta_abierta = serializers.SerializerMethodField()
     horarios_semana = serializers.SerializerMethodField()
+    rating_cliente = serializers.SerializerMethodField()
+    cant_calif_cliente = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
@@ -79,9 +81,35 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
                   'is_active', 'is_staff', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana',
-                  'subscripcion_activa', 'rating','cant_calif',
+                  'subscripcion_activa', 'rating','cant_calif', 'rating_cliente', 'cant_calif_cliente',
                   'es_visible_en_mapa', 'advertencias_mapa']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def _puede_ver_rating_cliente(self):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return request.user.is_owner_empresa
+
+    def get_rating_cliente(self, obj):
+        request = self.context.get('request')
+        if (
+            obj.is_owner_empresa
+            or not self._puede_ver_rating_cliente()
+            or (request and request.user.id == obj.id)
+        ):
+            return None
+        return obj.rating_cliente
+
+    def get_cant_calif_cliente(self, obj):
+        request = self.context.get('request')
+        if (
+            obj.is_owner_empresa
+            or not self._puede_ver_rating_cliente()
+            or (request and request.user.id == obj.id)
+        ):
+            return None
+        return obj.cant_calif_cliente
 
     def get_subscripcion_activa(self, obj):
         if not obj.is_owner_empresa:

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Trabajo, Calificacion, TrabajoServicio, OfertaTrabajo
+from .models import Trabajo, Calificacion, CalificacionDireccion, TrabajoServicio, OfertaTrabajo
 from usuario.serializers import UsuarioSerializer, UsuarioSortSerializer, UsuarioBasicInformationSerializer
 from servicios.serializers import ServicioSerializer 
 from profesion.serializers import ProfesionSerializer 
@@ -98,6 +98,8 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
     servicios = TrabajoServicioDetailSerializer(source='trabajo_servicios', many=True, read_only=True)
     localizacion_detalle = LocalizacionSerializer(source='localizacion', read_only=True)
     calificaciones = CalificacionDetailSerializer(many=True, read_only=True)
+    mi_calificacion = serializers.SerializerMethodField()
+    mi_calificacion_cliente = serializers.SerializerMethodField()
     disponibilidad_fecha_inicio = serializers.DateTimeField(source='disponibilidad.fecha_inicio', read_only=True)
     disponibilidad_fecha_fin = serializers.DateTimeField(source='disponibilidad.fecha_fin', read_only=True)
     chat_id = serializers.SerializerMethodField()
@@ -115,13 +117,41 @@ class TrabajoDetailSerializer(serializers.ModelSerializer):
     def get_fotos(self, obj): 
         return [r.url for r in obj.recursos.all()]
 
+    def _serialize_mi_calificacion(self, calificacion):
+        if not calificacion:
+            return None
+        return {
+            'id': calificacion.id,
+            'rating': calificacion.rating,
+            'comentario': calificacion.comentario,
+        }
+
+    def get_mi_calificacion(self, obj):
+        calificacion = obj.calificaciones.filter(
+            user_cal_sender_id=obj.usuario_id,
+            direccion=CalificacionDireccion.CLIENTE_A_PROFESIONAL,
+        ).first()
+        return self._serialize_mi_calificacion(calificacion)
+
+    def get_mi_calificacion_cliente(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if request.user.id != obj.profesional_id:
+            return None
+        calificacion = obj.calificaciones.filter(
+            user_cal_sender_id=obj.profesional_id,
+            direccion=CalificacionDireccion.PROFESIONAL_A_CLIENTE,
+        ).first()
+        return self._serialize_mi_calificacion(calificacion)
+
     class Meta:
         model = Trabajo
         fields = [
             'id', 'usuario', 'profesional',
             'descripcion', 'esUrgente', 'es_domicilio_profesional', 'status',
             'fecha_inicio', 'fecha_fin', 'precio_final',
-            'servicios', 'calificaciones',
+            'servicios', 'calificaciones', 'mi_calificacion', 'mi_calificacion_cliente',
             'disponibilidad_fecha_inicio', 'disponibilidad_fecha_fin',
             'created_at', 'updated_at', 'localizacion_detalle',
             'chat_id', 'fotos', 'currency'
@@ -216,15 +246,21 @@ class OfertaTrabajoSerializer(serializers.ModelSerializer):
     class Meta:
         model = OfertaTrabajo
         fields = ['id', 'trabajo', 'profesional', 'profesional_detalle', 
-                  'precio_ofertado', 'tiempo_estimado', 'mensaje', 'status', 
+                  'precio_ofertado', 'currency', 'tiempo_estimado', 'mensaje', 'status', 
                   'created_at', 'updated_at', 'fecha_inicio']
         read_only_fields = ['id', 'trabajo', 'profesional', 'status', 'created_at', 'updated_at']
 
 
 class OfertaTrabajoCreateSerializer(serializers.ModelSerializer):
+    currency = serializers.ChoiceField(
+        choices=CURRENCY_CHOICES,
+        required=False,
+        allow_null=True,
+    )
+
     class Meta:
         model = OfertaTrabajo
-        fields = ['precio_ofertado', 'tiempo_estimado', 'mensaje', 'fecha_inicio']
+        fields = ['precio_ofertado', 'tiempo_estimado', 'mensaje', 'fecha_inicio', 'currency']
     
     def validate_precio_ofertado(self, value):
         if value <= 0:

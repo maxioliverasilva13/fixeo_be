@@ -3,7 +3,7 @@ from usuario.models import Usuario
 from fixeo_project.models import BaseModel
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
-from enums.enums import CURRENCY_CHOICES
+from enums.enums import CURRENCY_CHOICES, moneda_local_desde_pais
 from django.utils import timezone
 
 class Empresa(BaseModel):
@@ -86,6 +86,15 @@ class Empresa(BaseModel):
     def __str__(self):
         return self.nombre
 
+    @property
+    def moneda_local(self) -> str:
+        return moneda_local_desde_pais(self.pais)
+
+    def sync_currency_from_pais(self, save: bool = True) -> None:
+        self.currency = self.moneda_local
+        if save:
+            self.save(update_fields=['currency', 'updated_at'])
+
 
 class Horarios(BaseModel):
     dia_semana = models.CharField(max_length=20)
@@ -125,8 +134,15 @@ class Producto(BaseModel):
     codigo = models.CharField(max_length=100, blank=True, default='')
     agotado = models.BooleanField(default=False)
     foto = models.URLField(max_length=500, blank=True, default='')
+    divisa = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default='USD',
+    )
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='productos')
     categoria = models.ForeignKey(CategoriaProducto, on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
+    acepta_domicilio = models.BooleanField(default=True)
+    acepta_retiro = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'producto'

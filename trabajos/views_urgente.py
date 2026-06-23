@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
-from django.db.models import Q, F, FloatField
+from django.db.models import Q, F, FloatField, Count
 from django.db.models.functions import ACos, Cos, Sin, Radians
 from django.db.models.expressions import Value
 from django.utils import timezone
@@ -29,6 +29,14 @@ from .serializers import (
 from mensajeria.models import Recurso
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from empresas.models import Empresa
+
+
+def _moneda_profesional(usuario) -> str:
+    empresa = Empresa.objects.filter(admin_id=usuario).first()
+    if empresa:
+        return empresa.moneda_local
+    return 'USD'
 
 
 def _sort_por_fecha_reciente(items, fecha_key):
@@ -105,8 +113,13 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         with connection.cursor() as cursor:
             cursor.execute(query, params)
             profesionales_cercanos = [row[0] for row in cursor.fetchall()]
-        
-        return profesionales_cercanos
+
+        from usuario.zonas_utils import filtrar_profesionales_fuera_zonas_exclusion
+        return filtrar_profesionales_fuera_zonas_exclusion(
+            profesionales_cercanos,
+            lat_trabajo,
+            lng_trabajo,
+        )
     
     @transaction.atomic
     def create(self, request):
@@ -221,6 +234,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         usuario = request.user
         usuario_profesiones = UsuarioProfesion.objects.filter(usuario=usuario).values_list('profesion_id', flat=True)
         status_filter = request.query_params.get("status")
+        filter_param = request.query_params.get("filter", "not_applied")
+        sort_param = request.query_params.get("sort", "recent")
 
         if not usuario_profesiones:
             return Response({
@@ -242,13 +257,20 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             fecha_inicio__gte=timezone.now(),
         ).exclude(
             usuario=usuario
-        ).exclude(
-            ofertas__profesional=usuario
         ).select_related(
             'usuario',
             'localizacion',
             'profesion_urgente'
         )
+
+        if filter_param == "no_offers":
+            trabajos_urgentes_qs = trabajos_urgentes_qs.annotate(
+                num_ofertas=Count("ofertas", distinct=True)
+            ).filter(num_ofertas=0).exclude(ofertas__profesional=usuario)
+        elif filter_param == "not_applied":
+            trabajos_urgentes_qs = trabajos_urgentes_qs.exclude(
+                ofertas__profesional=usuario
+            )
         
         if status_filter:
             trabajos_urgentes_qs = trabajos_urgentes_qs.filter(status=status_filter)
@@ -262,11 +284,18 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             localizacion_usuario.localizacion.longitud
         )
         
-        trabajos_cercanos = (
-            Trabajo.objects.filter(id__in=trabajo_ids_cercanos)
-            .select_related('usuario', 'localizacion', 'profesion_urgente')
-            .order_by('-created_at')
-        )
+        trabajos_cercanos = Trabajo.objects.filter(
+            id__in=trabajo_ids_cercanos
+        ).select_related('usuario', 'localizacion', 'profesion_urgente')
+
+        if sort_param == "soonest":
+            trabajos_cercanos = trabajos_cercanos.order_by('fecha_inicio', '-created_at')
+        elif sort_param == "fewest_offers":
+            trabajos_cercanos = trabajos_cercanos.annotate(
+                num_ofertas=Count('ofertas', distinct=True)
+            ).order_by('num_ofertas', '-created_at')
+        else:
+            trabajos_cercanos = trabajos_cercanos.order_by('-created_at')
 
         resultado = []
         for trabajo in trabajos_cercanos:
@@ -280,8 +309,6 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
             trabajo_data['distancia_km'] = round(distancia, 2)
             resultado.append(trabajo_data)
-
-        _sort_por_fecha_reciente(resultado, 'created_at')
 
         return Response({
             'count': len(resultado),
@@ -315,6 +342,18 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 {'error': 'No puedes ofertar en tu propio trabajo'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if trabajo.localizacion_id and trabajo.localizacion:
+            from usuario.zonas_utils import obtener_zonas_activas, punto_en_zona_exclusion
+            if punto_en_zona_exclusion(
+                trabajo.localizacion.latitud,
+                trabajo.localizacion.longitud,
+                obtener_zonas_activas(request.user),
+            ):
+                return Response(
+                    {'error': 'Este trabajo está en una zona donde indicaste que no trabajás.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         
         if OfertaTrabajo.objects.filter(trabajo=trabajo, profesional=request.user).exists():
             return Response(
@@ -324,11 +363,14 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         serializer = OfertaTrabajoCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        currency = serializer.validated_data.get('currency') or _moneda_profesional(request.user)
         
         oferta = OfertaTrabajo.objects.create(
             trabajo=trabajo,
             profesional=request.user,
             precio_ofertado=serializer.validated_data['precio_ofertado'],
+            currency=currency,
             tiempo_estimado=serializer.validated_data['tiempo_estimado'],
             mensaje=serializer.validated_data.get('mensaje', ''),
             fecha_inicio=serializer.validated_data.get('fecha_inicio')
@@ -414,11 +456,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         trabajo.status = 'aceptado'
         trabajo.profesional = oferta.profesional
         trabajo.precio_final = oferta.precio_ofertado
+        trabajo.currency = oferta.currency or _moneda_profesional(oferta.profesional)
         trabajo.fecha_inicio = fecha_inicio
         trabajo.fecha_fin = fecha_fin
         trabajo.disponibilidad = disponibilidad_ocupada
         trabajo.save(update_fields=[
-            'status', 'profesional', 'precio_final',
+            'status', 'profesional', 'precio_final', 'currency',
             'fecha_inicio', 'fecha_fin', 'disponibilidad'
         ])
 

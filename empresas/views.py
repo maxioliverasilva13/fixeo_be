@@ -110,7 +110,8 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             codigo = _pais_desde_nombre(empresa.localizacion.country)
             if codigo and empresa.pais != codigo:
                 empresa.pais = codigo
-                empresa.save(update_fields=['pais', 'updated_at'])
+                empresa.sync_currency_from_pais(save=False)
+                empresa.save(update_fields=['pais', 'currency', 'updated_at'])
 
     @action(detail=True, methods=['patch'], url_path='metodos-pago')
     def actualizar_metodos_pago(self, request, pk=None):
@@ -178,8 +179,9 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             empresa.acepta_tarjeta = False
 
         empresa.pais = pais
+        empresa.sync_currency_from_pais(save=False)
         empresa.save(update_fields=[
-            'pais', 'mp_access_token', 'mp_refresh_token', 'mp_user_id',
+            'pais', 'currency', 'mp_access_token', 'mp_refresh_token', 'mp_user_id',
             'mp_email', 'is_mercadopago_vinculado', 'acepta_tarjeta', 'updated_at'
         ])
         return Response(EmpresaSerializer(empresa).data)

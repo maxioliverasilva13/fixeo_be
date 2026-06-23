@@ -15,6 +15,7 @@ from .serializers import (
     OrdenSerializer, OrdenCreateSerializer
 )
 from empresas.models import Empresa, Producto
+from empresas.delivery_utils import productos_comparten_modalidad, validar_tipo_entrega_productos
 from notificaciones.models import Notificaciones
 from notificaciones.tasks import notificar_usuario
 from django.db.models import Q
@@ -76,6 +77,18 @@ class CarritoViewSet(viewsets.ModelViewSet):
         if producto.agotado:
             return Response(
                 {'error': 'Este producto está agotado'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        existing_productos = list(
+            Producto.objects.filter(carritoitem__carrito=carrito, carritoitem__is_deleted=False)
+            .exclude(id=producto_id)
+            .distinct()
+        )
+        compatible, _, _ = productos_comparten_modalidad(existing_productos + [producto])
+        if existing_productos and not compatible:
+            return Response(
+                {'error': 'Este producto no se puede combinar con los del carrito (modalidad de entrega incompatible)'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -205,6 +218,15 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 )
 
         tipo_entrega = serializer.validated_data['tipo_entrega']
+
+        items_carrito = list(carrito.items.select_related('producto').all())
+        entrega_error = validar_tipo_entrega_productos(
+            [item.producto for item in items_carrito],
+            tipo_entrega,
+        )
+        if entrega_error:
+            return Response({'error': entrega_error}, status=status.HTTP_400_BAD_REQUEST)
+
         if tipo_entrega == 'retiro':
             localizacion_entrega = carrito.empresa.localizacion
             if not localizacion_entrega:
@@ -235,9 +257,18 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        total = carrito.total
+        divisas_en_carrito = {
+            getattr(item.producto, 'divisa', None) or 'USD'
+            for item in items_carrito
+        }
+        if len(divisas_en_carrito) > 1:
+            return Response(
+                {'error': 'No podés finalizar la compra con productos en distintas monedas. Ajustá tu carrito.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        orden_currency = next(iter(divisas_en_carrito), empresa.moneda_local)
 
-        # ── MercadoPago: cobrar ANTES de crear la orden ──────────────
+        total = carrito.total
         mp_response = None
         if metodo_pago == 'mercadopago':
             from pagos.services import ejecutar_pago_mp, calcular_comision
@@ -289,7 +320,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 notas=serializer.validated_data.get('notas', ''),
                 comision_plataforma=comision_plataforma,
                 pago_status=pago_status,
-                currency=empresa.currency or None, 
+                currency=orden_currency,
             )
 
             for item in items_carrito:

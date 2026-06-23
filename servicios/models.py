@@ -13,6 +13,8 @@ class Servicio(BaseModel):
     tiempo = models.IntegerField(help_text='Tiempo estimado en minutos')
     notas = models.TextField(blank=True, default='')
     foto = models.URLField(max_length=500, blank=True, default='')
+    acepta_domicilio = models.BooleanField(default=True)
+    acepta_retiro = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'usuario_servicios'

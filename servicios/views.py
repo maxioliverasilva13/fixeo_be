@@ -1,9 +1,31 @@
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Servicio
 from .serializers import ServicioSerializer, ServicioCreateSerializer
+
+
+def _filter_servicios_queryset(queryset, request):
+    search = request.query_params.get('search', '').strip()
+    profesion_id = request.query_params.get('profesion_id')
+
+    if profesion_id:
+        queryset = queryset.filter(profesion_id=profesion_id)
+
+    if search:
+        palabras = search.split()
+        q_filter = Q()
+        for palabra in palabras:
+            if palabra:
+                q_filter &= (
+                    Q(nombre__icontains=palabra) |
+                    Q(notas__icontains=palabra)
+                )
+        queryset = queryset.filter(q_filter)
+
+    return queryset
 
 
 class ServicioViewSet(viewsets.ModelViewSet):
@@ -24,8 +46,9 @@ class ServicioViewSet(viewsets.ModelViewSet):
             Servicio.objects
             .filter(usuario_id=pk)
             .select_related('profesion')
-            .order_by('profesion__nombre')
+            .order_by('profesion__nombre', 'nombre')
         )
+        servicios = _filter_servicios_queryset(servicios, request)
 
         serializer = ServicioSerializer(servicios, many=True)
         return Response(serializer.data)
@@ -125,16 +148,13 @@ class ServicioViewSet(viewsets.ModelViewSet):
         """
         Obtiene todos los servicios del usuario logueado para una profesión específica
         """
-        servicios = Servicio.objects.filter(
-            usuario=request.user,
-            profesion_id=profesion_id
+        servicios = (
+            Servicio.objects
+            .filter(usuario=request.user, profesion_id=profesion_id)
+            .select_related('profesion')
+            .order_by('nombre')
         )
-
-        if not servicios.exists():
-            return Response(
-                {'error': 'No tienes servicios configurados para esta profesión'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        servicios = _filter_servicios_queryset(servicios, request)
 
         serializer = self.get_serializer(servicios, many=True)
         return Response(serializer.data)

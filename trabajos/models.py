@@ -66,9 +66,19 @@ class Trabajo(BaseModel):
         return f"{self.status}"
 
 
+class CalificacionDireccion(models.TextChoices):
+    CLIENTE_A_PROFESIONAL = 'cliente_a_profesional', 'Cliente a profesional'
+    PROFESIONAL_A_CLIENTE = 'profesional_a_cliente', 'Profesional a cliente'
+
+
 class Calificacion(BaseModel):
     rating = models.IntegerField(choices=[(i, i) for i in range(1, 6)])
     comentario = models.TextField(blank=True, null=True)
+    direccion = models.CharField(
+        max_length=32,
+        choices=CalificacionDireccion.choices,
+        default=CalificacionDireccion.CLIENTE_A_PROFESIONAL,
+    )
     user_cal_recibe = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='calificaciones_recibidas')
     user_cal_sender = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='calificaciones_enviadas')
     trabajo = models.ForeignKey(Trabajo, on_delete=models.CASCADE, related_name='calificaciones', null=True, blank=True)
@@ -113,6 +123,7 @@ class OfertaTrabajo(BaseModel):
     trabajo = models.ForeignKey(Trabajo, on_delete=models.CASCADE, related_name='ofertas')
     profesional = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='ofertas_realizadas')
     precio_ofertado = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, null=True, blank=True)
     tiempo_estimado = models.IntegerField(help_text='Tiempo estimado en minutos')
     fecha_inicio = models.DateTimeField(null=True, blank=True)
     mensaje = models.TextField(blank=True, null=True)

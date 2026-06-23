@@ -90,4 +90,7 @@ def filtrar_trabajos_por_distancia_sql(
 
     with connection.cursor() as cursor:
         cursor.execute(query, params)
-        return [row[0] for row in cursor.fetchall()]
+        ids = [row[0] for row in cursor.fetchall()]
+
+    from usuario.zonas_utils import filtrar_trabajos_fuera_zonas_exclusion
+    return filtrar_trabajos_fuera_zonas_exclusion(ids, usuario)
