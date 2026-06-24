@@ -127,9 +127,10 @@ class EmpresaSerializer(serializers.ModelSerializer):
                 'cantidad_jobs': subscripcion.plan_id.cantidad_jobs,
             },
             'expiracion': subscripcion.expiracion.isoformat() if subscripcion.expiracion else None,
-            'jobs_extra': subscripcion.jobs_extra,
+            'jobs_restantes': subscripcion.jobs_restantes,
             'cancelada': subscripcion.cancelada,
-            'fuente': subscripcion.fuente,
+            'source': subscripcion.source,
+            'status': subscripcion.status,
             'created_at': subscripcion.created_at.isoformat() if subscripcion.created_at else None,
         }
 
