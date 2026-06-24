@@ -912,24 +912,25 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             )
 
 
-class AdminUsuarioViewSet(viewsets.ViewSet):
+class AdminUsuarioViewSet(viewsets.ModelViewSet):
     """
     CRUD de usuarios para administradores (is_staff).
     Solo accesible para usuarios con is_staff=True.
     """
+    queryset = Usuario.objects.all().select_related('rol').prefetch_related('empresas_administradas')
+    serializer_class = AdminUsuarioSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
 
-    def list(self, request):
-        """Listar todos los usuarios con filtros opcionales."""
+    def get_queryset(self):
         queryset = Usuario.objects.all().select_related('rol').prefetch_related('empresas_administradas')
         
         # Filtros opcionales
-        is_active = request.query_params.get('is_active')
-        is_staff = request.query_params.get('is_staff')
-        is_owner_empresa = request.query_params.get('is_owner_empresa')
-        is_deleted = request.query_params.get('is_deleted')
-        rol_id = request.query_params.get('rol_id')
-        search = request.query_params.get('search')
+        is_active = self.request.query_params.get('is_active')
+        is_staff = self.request.query_params.get('is_staff')
+        is_owner_empresa = self.request.query_params.get('is_owner_empresa')
+        is_deleted = self.request.query_params.get('is_deleted')
+        rol_id = self.request.query_params.get('rol_id')
+        search = self.request.query_params.get('search')
         
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
@@ -949,28 +950,16 @@ class AdminUsuarioViewSet(viewsets.ViewSet):
                 Q(id__iexact=search)
             )
         
-        serializer = AdminUsuarioSerializer(queryset, many=True)
-        return Response(serializer.data)
+        return queryset
 
-    def retrieve(self, request, pk=None):
-        """Obtener un usuario específico por ID."""
-        usuario = get_object_or_404(Usuario.objects.select_related('rol').prefetch_related('empresas_administradas'), pk=pk)
-        serializer = AdminUsuarioSerializer(usuario)
-        return Response(serializer.data)
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            return AdminUsuarioUpdateSerializer
+        return AdminUsuarioSerializer
 
-    def update(self, request, pk=None):
-        """Actualizar un usuario específico."""
-        usuario = get_object_or_404(Usuario, pk=pk)
-        serializer = AdminUsuarioUpdateSerializer(usuario, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        # Devolver el usuario completo con el serializer de admin
-        return Response(AdminUsuarioSerializer(usuario).data)
-
-    def destroy(self, request, pk=None):
+    def destroy(self, request, *args, **kwargs):
         """Eliminar (soft delete) un usuario específico."""
-        usuario = get_object_or_404(Usuario, pk=pk)
-        # Soft delete
+        usuario = self.get_object()
         usuario.is_deleted = True
         usuario.is_active = False
         from django.utils import timezone

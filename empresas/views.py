@@ -411,24 +411,25 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         return Response(estadisticas_empresa(empresa, request))
 
 
-class AdminEmpresaViewSet(viewsets.ViewSet):
+class AdminEmpresaViewSet(viewsets.ModelViewSet):
     """
     CRUD de empresas para administradores (is_staff).
     Solo accesible para usuarios con is_staff=True.
     """
+    queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
+    serializer_class = EmpresaSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
 
-    def list(self, request):
-        """Listar todas las empresas con filtros opcionales."""
+    def get_queryset(self):
         queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
         
         # Filtros opcionales
-        admin_id = request.query_params.get('admin_id')
-        pais = request.query_params.get('pais')
-        nombre = request.query_params.get('nombre')
-        vende_productos = request.query_params.get('vende_productos')
-        vende_servicios = request.query_params.get('vende_servicios')
-        is_mercadopago_vinculado = request.query_params.get('is_mercadopago_vinculado')
+        admin_id = self.request.query_params.get('admin_id')
+        pais = self.request.query_params.get('pais')
+        nombre = self.request.query_params.get('nombre')
+        vende_productos = self.request.query_params.get('vende_productos')
+        vende_servicios = self.request.query_params.get('vende_servicios')
+        is_mercadopago_vinculado = self.request.query_params.get('is_mercadopago_vinculado')
         
         if admin_id:
             queryset = queryset.filter(admin_id=admin_id)
@@ -443,28 +444,7 @@ class AdminEmpresaViewSet(viewsets.ViewSet):
         if is_mercadopago_vinculado is not None:
             queryset = queryset.filter(is_mercadopago_vinculado=is_mercadopago_vinculado.lower() == 'true')
         
-        serializer = EmpresaSerializer(queryset, many=True)
-        return Response(serializer.data)
-
-    def retrieve(self, request, pk=None):
-        """Obtener una empresa específica por ID."""
-        empresa = get_object_or_404(Empresa.objects.select_related('admin_id', 'localizacion'), pk=pk)
-        serializer = EmpresaSerializer(empresa)
-        return Response(serializer.data)
-
-    def update(self, request, pk=None):
-        """Actualizar una empresa específica."""
-        empresa = get_object_or_404(Empresa, pk=pk)
-        serializer = EmpresaSerializer(empresa, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
-
-    def destroy(self, request, pk=None):
-        """Eliminar una empresa específica."""
-        empresa = get_object_or_404(Empresa, pk=pk)
-        empresa.delete()
-        return Response({'message': 'Empresa eliminada correctamente'}, status=status.HTTP_200_OK)
+        return queryset
 
 
 class CategoriaProductoViewSet(viewsets.ModelViewSet):
