@@ -525,7 +525,7 @@ class UpdateUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             'foto_url', 
             'rounded_foto_url',
             'trabajo_domicilio', 
-            'trabajo_local',
+https://file+.vscode-resource.vscode-cdn.net/Users/pc/.vscode/extensions/moonshot-ai.kimi-code-0.5.10-darwin-x64/dist/kimi-banner-dark.svg            'trabajo_local',
             'rango_mapa_km',
             'auto_aprobacion_trabajos',
             'defaultMessageReservation',

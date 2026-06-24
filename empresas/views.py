@@ -383,6 +383,17 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             )
         return Response(estadisticas_empresa(empresa, request))
 
+    @action(detail=True, methods=['get'], url_path='estadisticas')
+    def estadisticas_por_empresa(self, request, pk=None):
+        """Panel de estadísticas de una empresa específica (solo admin/staff)."""
+        if not request.user.is_staff:
+            return Response(
+                {'error': 'Solo el staff puede ver estadísticas de otras empresas'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        empresa = self.get_object()
+        return Response(estadisticas_empresa(empresa, request))
+
 
 class CategoriaProductoViewSet(viewsets.ModelViewSet):
     queryset = CategoriaProducto.objects.all()
