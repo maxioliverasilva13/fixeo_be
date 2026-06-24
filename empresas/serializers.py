@@ -123,7 +123,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
                 'id': subscripcion.plan_id.id,
                 'nombre': subscripcion.plan_id.nombre,
                 'precio': str(subscripcion.plan_id.precio),
-                'duracion_dias': subscripcion.plan_id.duracion_dias,
+                'duracion_dias': subscripcion.plan_id.duracion.days if subscripcion.plan_id.duracion else 0,
                 'cantidad_jobs': subscripcion.plan_id.cantidad_jobs,
             },
             'expiracion': subscripcion.expiracion.isoformat() if subscripcion.expiracion else None,
