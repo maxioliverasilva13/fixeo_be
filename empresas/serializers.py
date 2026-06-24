@@ -13,6 +13,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     metodos_pago_disponibles = serializers.SerializerMethodField()
     moneda_local = serializers.CharField(read_only=True)
     subscripcion = serializers.SerializerMethodField()
+    admin_id = serializers.IntegerField(source='admin_id.id', read_only=True)
 
     class Meta:
         model = Empresa
@@ -38,6 +39,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'trabajo_domicilio',
             'trabajo_local',
             'subscripcion',
+            'admin_id',
             'created_at',
             'updated_at',
             'currency'
