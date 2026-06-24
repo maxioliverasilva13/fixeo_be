@@ -427,6 +427,7 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         admin_id = self.request.query_params.get('admin_id')
         pais = self.request.query_params.get('pais')
         nombre = self.request.query_params.get('nombre')
+        search = self.request.query_params.get('search')
         vende_productos = self.request.query_params.get('vende_productos')
         vende_servicios = self.request.query_params.get('vende_servicios')
         is_mercadopago_vinculado = self.request.query_params.get('is_mercadopago_vinculado')
@@ -437,6 +438,12 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(pais=pais.upper())
         if nombre:
             queryset = queryset.filter(nombre__icontains=nombre)
+        if search:
+            queryset = queryset.filter(
+                Q(nombre__icontains=search) | 
+                Q(descripcion__icontains=search) |
+                Q(ubicacion__icontains=search)
+            )
         if vende_productos is not None:
             queryset = queryset.filter(vende_productos=vende_productos.lower() == 'true')
         if vende_servicios is not None:
