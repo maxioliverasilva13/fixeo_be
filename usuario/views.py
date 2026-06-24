@@ -2,7 +2,7 @@ from localizacion.utils import calcular_distancia_km
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
@@ -15,7 +15,8 @@ from usuario.serializers import (
     ChangePasswordSerializer, LoginSerializer, RegistroSerializer,
     UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer,
     UpdateUsuarioSerializer, ValidateEmailExistSerializer, SocialLoginSerializer,
-    RequestPasswordResetSerializer, ConfirmPasswordResetSerializer
+    RequestPasswordResetSerializer, ConfirmPasswordResetSerializer,
+    AdminUsuarioSerializer, AdminUsuarioUpdateSerializer
 )
 from localizacion.models import Localizacion
 from empresas.models import Empresa
@@ -909,3 +910,70 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 {'error': 'Usuario no registrado', 'isNewUser': True},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+class AdminUsuarioViewSet(viewsets.ViewSet):
+    """
+    CRUD de usuarios para administradores (is_staff).
+    Solo accesible para usuarios con is_staff=True.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def list(self, request):
+        """Listar todos los usuarios con filtros opcionales."""
+        queryset = Usuario.objects.all().select_related('rol').prefetch_related('empresas_administradas')
+        
+        # Filtros opcionales
+        is_active = request.query_params.get('is_active')
+        is_staff = request.query_params.get('is_staff')
+        is_owner_empresa = request.query_params.get('is_owner_empresa')
+        is_deleted = request.query_params.get('is_deleted')
+        rol_id = request.query_params.get('rol_id')
+        search = request.query_params.get('search')
+        
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        if is_staff is not None:
+            queryset = queryset.filter(is_staff=is_staff.lower() == 'true')
+        if is_owner_empresa is not None:
+            queryset = queryset.filter(is_owner_empresa=is_owner_empresa.lower() == 'true')
+        if is_deleted is not None:
+            queryset = queryset.filter(is_deleted=is_deleted.lower() == 'true')
+        if rol_id:
+            queryset = queryset.filter(rol_id=rol_id)
+        if search:
+            queryset = queryset.filter(
+                Q(nombre__icontains=search) | 
+                Q(apellido__icontains=search) | 
+                Q(correo__icontains=search) |
+                Q(id__iexact=search)
+            )
+        
+        serializer = AdminUsuarioSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Obtener un usuario específico por ID."""
+        usuario = get_object_or_404(Usuario.objects.select_related('rol').prefetch_related('empresas_administradas'), pk=pk)
+        serializer = AdminUsuarioSerializer(usuario)
+        return Response(serializer.data)
+
+    def update(self, request, pk=None):
+        """Actualizar un usuario específico."""
+        usuario = get_object_or_404(Usuario, pk=pk)
+        serializer = AdminUsuarioUpdateSerializer(usuario, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        # Devolver el usuario completo con el serializer de admin
+        return Response(AdminUsuarioSerializer(usuario).data)
+
+    def destroy(self, request, pk=None):
+        """Eliminar (soft delete) un usuario específico."""
+        usuario = get_object_or_404(Usuario, pk=pk)
+        # Soft delete
+        usuario.is_deleted = True
+        usuario.is_active = False
+        from django.utils import timezone
+        usuario.deleted_at = timezone.now()
+        usuario.save(update_fields=['is_deleted', 'is_active', 'deleted_at'])
+        return Response({'message': 'Usuario eliminado correctamente'}, status=status.HTTP_200_OK)

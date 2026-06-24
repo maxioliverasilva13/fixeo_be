@@ -6,7 +6,7 @@ from django.shortcuts import redirect
 from localizacion.utils import calcular_distancia_km
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
@@ -88,6 +88,12 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
+        # Solo el admin de la empresa puede actualizarla
+        if instance.admin_id != request.user and not request.user.is_staff:
+            return Response(
+                {'error': 'No tenés permisos para modificar esta empresa'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         nombre = request.data.get('nombre')
         if nombre and nombre.lower() != instance.nombre.lower() and not validar_nombre_empresa_unico(nombre):
             return Response(
@@ -103,6 +109,16 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             except Exception:
                 pass
         return response
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Solo el admin de la empresa o staff puede eliminarla
+        if instance.admin_id != request.user and not request.user.is_staff:
+            return Response(
+                {'error': 'No tenés permisos para eliminar esta empresa'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().destroy(request, *args, **kwargs)
 
     def _autodetectar_pais(self, empresa):
         """Intenta detectar el país de la empresa desde su localizacion."""
@@ -393,6 +409,62 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             )
         empresa = self.get_object()
         return Response(estadisticas_empresa(empresa, request))
+
+
+class AdminEmpresaViewSet(viewsets.ViewSet):
+    """
+    CRUD de empresas para administradores (is_staff).
+    Solo accesible para usuarios con is_staff=True.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def list(self, request):
+        """Listar todas las empresas con filtros opcionales."""
+        queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
+        
+        # Filtros opcionales
+        admin_id = request.query_params.get('admin_id')
+        pais = request.query_params.get('pais')
+        nombre = request.query_params.get('nombre')
+        vende_productos = request.query_params.get('vende_productos')
+        vende_servicios = request.query_params.get('vende_servicios')
+        is_mercadopago_vinculado = request.query_params.get('is_mercadopago_vinculado')
+        
+        if admin_id:
+            queryset = queryset.filter(admin_id=admin_id)
+        if pais:
+            queryset = queryset.filter(pais=pais.upper())
+        if nombre:
+            queryset = queryset.filter(nombre__icontains=nombre)
+        if vende_productos is not None:
+            queryset = queryset.filter(vende_productos=vende_productos.lower() == 'true')
+        if vende_servicios is not None:
+            queryset = queryset.filter(vende_servicios=vende_servicios.lower() == 'true')
+        if is_mercadopago_vinculado is not None:
+            queryset = queryset.filter(is_mercadopago_vinculado=is_mercadopago_vinculado.lower() == 'true')
+        
+        serializer = EmpresaSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        """Obtener una empresa específica por ID."""
+        empresa = get_object_or_404(Empresa.objects.select_related('admin_id', 'localizacion'), pk=pk)
+        serializer = EmpresaSerializer(empresa)
+        return Response(serializer.data)
+
+    def update(self, request, pk=None):
+        """Actualizar una empresa específica."""
+        empresa = get_object_or_404(Empresa, pk=pk)
+        serializer = EmpresaSerializer(empresa, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def destroy(self, request, pk=None):
+        """Eliminar una empresa específica."""
+        empresa = get_object_or_404(Empresa, pk=pk)
+        empresa.delete()
+        return Response({'message': 'Empresa eliminada correctamente'}, status=status.HTTP_200_OK)
 
 
 class CategoriaProductoViewSet(viewsets.ModelViewSet):

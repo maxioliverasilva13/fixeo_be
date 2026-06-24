@@ -666,3 +666,65 @@ class RequestPasswordResetSerializer(serializers.Serializer):
 class ConfirmPasswordResetSerializer(serializers.Serializer):
     token        = serializers.UUIDField()
     new_password = serializers.CharField(min_length=8)
+
+class AdminUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
+    """Serializer para el panel de admin de usuarios."""
+    rol_detalle = RolSerializer(source='rol', read_only=True)
+    empresa = serializers.SerializerMethodField()
+    subscripcion_activa = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Usuario
+        fields = [
+            'id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url',
+            'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa',
+            'is_active', 'is_staff', 'is_deleted', 'deleted_at',
+            'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
+            'empresa', 'subscripcion_activa', 'rating', 'cant_calif',
+            'rating_cliente', 'cant_calif_cliente', 'auto_aprobacion_trabajos',
+            'defaultMessageReservation'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'deleted_at']
+
+    def get_empresa(self, obj):
+        if not obj.is_owner_empresa:
+            return None
+        from empresas.serializers import EmpresaSerializer
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return None
+        return EmpresaSerializer(empresa).data
+
+    def get_subscripcion_activa(self, obj):
+        if not obj.is_owner_empresa:
+            return None
+        from django.utils import timezone
+        from suscripciones.models import Subscripcion
+        from suscripciones.serializers import UsuarioSubscripcionActivaSerializer
+
+        subscripcion = (
+            Subscripcion.objects
+            .filter(
+                user_id=obj,
+                cancelada=False,
+                expiracion__gt=timezone.now(),
+            )
+            .select_related('plan_id')
+            .order_by('-created_at')
+            .first()
+        )
+        if not subscripcion:
+            return None
+        return UsuarioSubscripcionActivaSerializer(subscripcion).data
+
+
+class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
+    """Serializer para actualizar usuario desde el panel de admin."""
+    class Meta:
+        model = Usuario
+        fields = [
+            'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url',
+            'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa',
+            'is_active', 'is_staff', 'rango_mapa_km', 'rol',
+            'auto_aprobacion_trabajos', 'defaultMessageReservation'
+        ]
