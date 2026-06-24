@@ -12,6 +12,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     efectivo_disponible = serializers.SerializerMethodField()
     metodos_pago_disponibles = serializers.SerializerMethodField()
     moneda_local = serializers.CharField(read_only=True)
+    subscripcion = serializers.SerializerMethodField()
 
     class Meta:
         model = Empresa
@@ -36,6 +37,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'metodos_pago_disponibles',
             'trabajo_domicilio',
             'trabajo_local',
+            'subscripcion',
             'created_at',
             'updated_at',
             'currency'
@@ -99,6 +101,37 @@ class EmpresaSerializer(serializers.ModelSerializer):
             if jobs_restantes > 0:
                 metodos.append('efectivo')
         return metodos
+
+    def get_subscripcion(self, obj):
+        """Devuelve la suscripción activa del admin de la empresa, si existe."""
+        from suscripciones.models import Subscripcion
+        from django.utils import timezone
+
+        subscripcion = (
+            Subscripcion.objects
+            .filter(user_id=obj.admin_id, cancelada=False, expiracion__gt=timezone.now())
+            .select_related('plan_id')
+            .order_by('-created_at')
+            .first()
+        )
+        if not subscripcion:
+            return None
+
+        return {
+            'id': subscripcion.id,
+            'plan': {
+                'id': subscripcion.plan_id.id,
+                'nombre': subscripcion.plan_id.nombre,
+                'precio': str(subscripcion.plan_id.precio),
+                'duracion_dias': subscripcion.plan_id.duracion_dias,
+                'cantidad_jobs': subscripcion.plan_id.cantidad_jobs,
+            },
+            'expiracion': subscripcion.expiracion.isoformat() if subscripcion.expiracion else None,
+            'jobs_extra': subscripcion.jobs_extra,
+            'cancelada': subscripcion.cancelada,
+            'fuente': subscripcion.fuente,
+            'created_at': subscripcion.created_at.isoformat() if subscripcion.created_at else None,
+        }
 
 
 class CategoriaProductoSerializer(serializers.ModelSerializer):

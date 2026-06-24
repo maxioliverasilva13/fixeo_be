@@ -389,3 +389,65 @@ class AdminExtenderSubscripcionView(APIView):
             'nueva_expiracion': sub.expiracion,
             'jobs_restantes': sub.jobs_restantes,
         })
+
+
+class AdminAsignarSubscripcionView(APIView):
+    """
+    POST /suscripciones/admin/asignar/
+    Asigna un plan a un usuario y crea una suscripción (solo admins).
+    Body: { usuario_id, plan_id, dias, jobs_extra, fuente }
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def post(self, request):
+        usuario_id = request.data.get('usuario_id')
+        plan_id = request.data.get('plan_id')
+        dias = int(request.data.get('dias', 30))
+        jobs_extra = int(request.data.get('jobs_extra', 0))
+        fuente = request.data.get('fuente', 'manual')
+
+        if not usuario_id:
+            return Response({'error': 'usuario_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        if not plan_id:
+            return Response({'error': 'plan_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from usuario.models import Usuario
+        try:
+            usuario = Usuario.objects.get(pk=usuario_id)
+        except Usuario.DoesNotExist:
+            return Response({'error': 'Usuario no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            plan = Plan.objects.get(pk=plan_id, activo=True)
+        except Plan.DoesNotExist:
+            return Response({'error': 'Plan no encontrado o inactivo'}, status=status.HTTP_404_NOT_FOUND)
+
+        from datetime import timedelta
+        expiracion = timezone.now() + timedelta(days=dias)
+
+        # Cancelar suscripciones activas anteriores del usuario
+        Subscripcion.objects.filter(
+            user_id=usuario,
+            cancelada=False,
+            expiracion__gt=timezone.now()
+        ).update(cancelada=True)
+
+        # Crear nueva suscripción
+        subscripcion = Subscripcion.objects.create(
+            user_id=usuario,
+            plan_id=plan,
+            expiracion=expiracion,
+            jobs_restantes=plan.cantidad_jobs + jobs_extra,
+            source=fuente,
+            status=Subscripcion.SubscripcionStatus.ACTIVE,
+        )
+
+        # Si el usuario es owner de empresa, actualizar is_owner_empresa si es necesario
+        if hasattr(usuario, 'empresas_administradas') and usuario.empresas_administradas.exists():
+            usuario.is_owner_empresa = True
+            usuario.save(update_fields=['is_owner_empresa'])
+
+        return Response({
+            'message': f'Suscripción asignada correctamente',
+            'subscripcion': SubscripcionSerializer(subscripcion).data,
+        }, status=status.HTTP_201_CREATED)

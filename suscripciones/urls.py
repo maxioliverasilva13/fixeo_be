@@ -7,6 +7,7 @@ from .views import (
     CancelarSubscripcionView,
     AdminSubscripcionListView,
     AdminExtenderSubscripcionView,
+    AdminAsignarSubscripcionView,
     GooglePlaySubscribeView,
     GooglePlayCancelView,
     GooglePlayWebhookView,
@@ -26,6 +27,7 @@ suscripciones_urlpatterns = [
     path('<int:pk>/cancelar/', CancelarSubscripcionView.as_view(), name='subscripcion-cancelar'),
     path('admin/', AdminSubscripcionListView.as_view(), name='admin-subscripcion-list'),
     path('admin/extender/', AdminExtenderSubscripcionView.as_view(), name='admin-extender-subscripcion'),
+    path('admin/asignar/', AdminAsignarSubscripcionView.as_view(), name='admin-asignar-subscripcion'),
 
     path('google-play/subscribe/', GooglePlaySubscribeView.as_view(), name='google-play-subscribe'),
     path('google-play/cancel/', GooglePlayCancelView.as_view(), name='google-play-cancel'),
