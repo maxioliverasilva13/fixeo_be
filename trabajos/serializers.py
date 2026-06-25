@@ -280,6 +280,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
     profesion_detalle = ProfesionSerializer(source='profesion_urgente', read_only=True)
     ofertas = OfertaTrabajoSerializer(many=True, read_only=True)
     cantidad_ofertas = serializers.SerializerMethodField()
+    cantidad_ofertas_total = serializers.SerializerMethodField()
     mi_oferta = serializers.SerializerMethodField()
     calificaciones = CalificacionDetailSerializer(many=True, read_only=True)  
     recursos = serializers.SerializerMethodField()
@@ -289,7 +290,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'es_domicilio_profesional', 'localizacion_detalle', 
                   'profesion_detalle', 'ofertas', 'fecha_inicio', 'currency',
-                  'cantidad_ofertas', 'mi_oferta', 'created_at', 'updated_at', 'calificaciones', 'recursos']
+                  'cantidad_ofertas', 'cantidad_ofertas_total', 'mi_oferta', 'created_at', 'updated_at', 'calificaciones', 'recursos']
         
     def get_recursos(self, obj):
         return list(
@@ -302,13 +303,20 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         )
 
     def get_cantidad_ofertas(self, obj):
-        return obj.ofertas.count()
+        return obj.ofertas.filter(status='pendiente').count()
+
+    def get_cantidad_ofertas_total(self, obj):
+        return obj.ofertas.exclude(status='aceptada').count()
 
     def get_mi_oferta(self, obj):
         request = self.context.get('request')
         if not request or not getattr(request.user, 'is_authenticated', False):
             return None
-        oferta = obj.ofertas.filter(profesional_id=request.user.id).first()
+        oferta = None
+        for item in obj.ofertas.all():
+            if item.profesional_id == request.user.id:
+                oferta = item
+                break
         if not oferta:
             return None
         return {

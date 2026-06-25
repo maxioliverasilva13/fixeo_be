@@ -234,7 +234,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         usuario = request.user
         usuario_profesiones = UsuarioProfesion.objects.filter(usuario=usuario).values_list('profesion_id', flat=True)
         status_filter = request.query_params.get("status")
-        filter_param = request.query_params.get("filter", "not_applied")
+        filter_param = request.query_params.get("filter", "all")
         sort_param = request.query_params.get("sort", "recent")
 
         if not usuario_profesiones:
@@ -265,8 +265,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
 
         if filter_param == "no_offers":
             trabajos_urgentes_qs = trabajos_urgentes_qs.annotate(
-                num_ofertas=Count("ofertas", distinct=True)
-            ).filter(num_ofertas=0).exclude(ofertas__profesional=usuario)
+                num_ofertas_pendientes=Count(
+                    'ofertas',
+                    filter=Q(ofertas__status='pendiente'),
+                    distinct=True,
+                )
+            ).filter(num_ofertas_pendientes=0)
         elif filter_param == "not_applied":
             trabajos_urgentes_qs = trabajos_urgentes_qs.exclude(
                 ofertas__profesional=usuario,
@@ -293,7 +297,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             trabajos_cercanos = trabajos_cercanos.order_by('fecha_inicio', '-created_at')
         elif sort_param == "fewest_offers":
             trabajos_cercanos = trabajos_cercanos.annotate(
-                num_ofertas=Count('ofertas', distinct=True)
+                num_ofertas=Count('ofertas', filter=Q(ofertas__status='pendiente'), distinct=True)
             ).order_by('num_ofertas', '-created_at')
         else:
             trabajos_cercanos = trabajos_cercanos.order_by('-created_at')
@@ -428,9 +432,11 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        ofertas = trabajo.ofertas.filter(status='pendiente').select_related(
+        ofertas = trabajo.ofertas.filter(
+            status__in=['pendiente', 'rechazada']
+        ).select_related(
             'profesional'
-        ).order_by('-created_at')
+        ).order_by('status', '-created_at')
         return Response({
             'count': ofertas.count(),
             'ofertas': OfertaTrabajoSerializer(ofertas, many=True).data
@@ -686,12 +692,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         trabajos = Trabajo.objects.filter(
             usuario=request.user,
             esUrgente=True
-        ).select_related('profesional', 'localizacion', 'profesion_urgente').prefetch_related('ofertas')
+        ).select_related(
+            'profesional', 'localizacion', 'profesion_urgente'
+        ).prefetch_related('ofertas').order_by('-created_at')
         
         if status_filter:
             trabajos = trabajos.filter(status=status_filter)
-        
-        trabajos = trabajos.order_by('-created_at')
         
         return Response({
             'count': trabajos.count(),
