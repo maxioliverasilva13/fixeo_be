@@ -325,7 +325,13 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
 
     def retrieve(self, request, pk=None):
         try:
-            trabajo = Trabajo.objects.get(id=pk, esUrgente=True)
+            trabajo = Trabajo.objects.select_related(
+                'usuario', 'localizacion', 'profesion_urgente', 'profesional',
+            ).prefetch_related(
+                'ofertas__profesional',
+                'recursos',
+                'calificaciones',
+            ).get(id=pk, esUrgente=True)
         except Trabajo.DoesNotExist:
             return Response({'error': 'Trabajo urgente no encontrado'}, status=status.HTTP_404_NOT_FOUND)
         
