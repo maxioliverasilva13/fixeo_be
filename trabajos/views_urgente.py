@@ -213,7 +213,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             )
         
         return Response(
-            TrabajoUrgenteDetailSerializer(trabajo).data,
+            TrabajoUrgenteDetailSerializer(trabajo, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
 
@@ -269,7 +269,8 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             ).filter(num_ofertas=0).exclude(ofertas__profesional=usuario)
         elif filter_param == "not_applied":
             trabajos_urgentes_qs = trabajos_urgentes_qs.exclude(
-                ofertas__profesional=usuario
+                ofertas__profesional=usuario,
+                ofertas__status__in=['pendiente', 'aceptada'],
             )
         
         if status_filter:
@@ -286,7 +287,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         trabajos_cercanos = Trabajo.objects.filter(
             id__in=trabajo_ids_cercanos
-        ).select_related('usuario', 'localizacion', 'profesion_urgente')
+        ).select_related('usuario', 'localizacion', 'profesion_urgente').prefetch_related('ofertas')
 
         if sort_param == "soonest":
             trabajos_cercanos = trabajos_cercanos.order_by('fecha_inicio', '-created_at')
@@ -306,7 +307,10 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 float(trabajo.localizacion.longitud)
             )
             
-            trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
+            trabajo_data = TrabajoUrgenteDetailSerializer(
+                trabajo,
+                context={'request': request},
+            ).data
             trabajo_data['distancia_km'] = round(distancia, 2)
             resultado.append(trabajo_data)
 
@@ -321,7 +325,9 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         except Trabajo.DoesNotExist:
             return Response({'error': 'Trabajo urgente no encontrado'}, status=status.HTTP_404_NOT_FOUND)
         
-        return Response(TrabajoUrgenteDetailSerializer(trabajo).data)
+        return Response(
+            TrabajoUrgenteDetailSerializer(trabajo, context={'request': request}).data
+        )
     
     @action(detail=True, methods=['post'])
     @transaction.atomic
@@ -355,30 +361,46 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         
-        if OfertaTrabajo.objects.filter(trabajo=trabajo, profesional=request.user).exists():
-            return Response(
-                {'error': 'Ya has realizado una oferta para este trabajo'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
         serializer = OfertaTrabajoCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         currency = serializer.validated_data.get('currency') or _moneda_profesional(request.user)
-        
-        oferta = OfertaTrabajo.objects.create(
+
+        existing = OfertaTrabajo.objects.filter(
             trabajo=trabajo,
             profesional=request.user,
-            precio_ofertado=serializer.validated_data['precio_ofertado'],
-            currency=currency,
-            tiempo_estimado=serializer.validated_data['tiempo_estimado'],
-            mensaje=serializer.validated_data.get('mensaje', ''),
-            fecha_inicio=serializer.validated_data.get('fecha_inicio')
-        )
+        ).first()
+
+        if existing:
+            if existing.status != 'rechazada':
+                return Response(
+                    {'error': 'Ya has realizado una oferta para este trabajo'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            existing.precio_ofertado = serializer.validated_data['precio_ofertado']
+            existing.currency = currency
+            existing.tiempo_estimado = serializer.validated_data['tiempo_estimado']
+            existing.mensaje = serializer.validated_data.get('mensaje', '')
+            existing.fecha_inicio = serializer.validated_data.get('fecha_inicio')
+            existing.status = 'pendiente'
+            existing.save()
+            oferta = existing
+            is_reoffer = True
+        else:
+            oferta = OfertaTrabajo.objects.create(
+                trabajo=trabajo,
+                profesional=request.user,
+                precio_ofertado=serializer.validated_data['precio_ofertado'],
+                currency=currency,
+                tiempo_estimado=serializer.validated_data['tiempo_estimado'],
+                mensaje=serializer.validated_data.get('mensaje', ''),
+                fecha_inicio=serializer.validated_data.get('fecha_inicio')
+            )
+            is_reoffer = False
         
         notificar_usuario.delay(
             usuario_id=trabajo.usuario.id,
-            titulo="Nueva oferta recibida",
+            titulo="Nueva oferta recibida" if not is_reoffer else "Oferta actualizada",
             mensaje=f"{request.user.nombre} hizo una oferta de ${oferta.precio_ofertado}",
             data={
                 'deep_link': f'/trabajos/urgente/{trabajo.id}/ofertas',
@@ -389,7 +411,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         return Response(
             OfertaTrabajoSerializer(oferta).data,
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_200_OK if is_reoffer else status.HTTP_201_CREATED
         )
     
     
@@ -406,7 +428,7 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        ofertas = trabajo.ofertas.select_related(
+        ofertas = trabajo.ofertas.filter(status='pendiente').select_related(
             'profesional'
         ).order_by('-created_at')
         return Response({
@@ -554,9 +576,35 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             oferta = OfertaTrabajo.objects.get(id=oferta_id, trabajo=trabajo)
         except OfertaTrabajo.DoesNotExist:
             return Response({'error': 'Oferta no encontrada'}, status=status.HTTP_404_NOT_FOUND)
-        
+
+        if oferta.status != 'pendiente':
+            return Response(
+                {'error': 'Solo se pueden rechazar solicitudes pendientes'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        motivo = (request.data.get('motivo') or '').strip()
+        if len(motivo) < 5:
+            return Response(
+                {'error': 'Indicá un motivo de al menos 5 caracteres'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         oferta.status = 'rechazada'
-        oferta.save()
+        oferta.motivo_rechazo = motivo
+        oferta.save(update_fields=['status', 'motivo_rechazo', 'updated_at'])
+
+        notificar_usuario.delay(
+            usuario_id=oferta.profesional.id,
+            titulo="Tu solicitud no fue seleccionada",
+            mensaje=motivo[:120],
+            data={
+                'deep_link': f'/trabajos/urgente/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'oferta_rechazada',
+                'motivo_rechazo': motivo,
+            }
+        )
         
         return Response({
             'message': 'Oferta rechazada exitosamente',
@@ -609,7 +657,10 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     float(trabajo.localizacion.longitud)
                 )
 
-                trabajo_data = TrabajoUrgenteDetailSerializer(trabajo).data
+                trabajo_data = TrabajoUrgenteDetailSerializer(
+                    trabajo,
+                    context={'request': request},
+                ).data
 
                 resultado.append({
                     "oferta_id": oferta.id,
@@ -644,7 +695,11 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         
         return Response({
             'count': trabajos.count(),
-            'trabajos': TrabajoUrgenteDetailSerializer(trabajos, many=True).data
+            'trabajos': TrabajoUrgenteDetailSerializer(
+                trabajos,
+                many=True,
+                context={'request': request},
+            ).data
         })
 
     @action(detail=True, methods=['post'], url_path='cancelar')

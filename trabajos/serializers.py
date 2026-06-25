@@ -247,7 +247,7 @@ class OfertaTrabajoSerializer(serializers.ModelSerializer):
         model = OfertaTrabajo
         fields = ['id', 'trabajo', 'profesional', 'profesional_detalle', 
                   'precio_ofertado', 'currency', 'tiempo_estimado', 'mensaje', 'status', 
-                  'created_at', 'updated_at', 'fecha_inicio']
+                  'motivo_rechazo', 'created_at', 'updated_at', 'fecha_inicio']
         read_only_fields = ['id', 'trabajo', 'profesional', 'status', 'created_at', 'updated_at']
 
 
@@ -280,6 +280,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
     profesion_detalle = ProfesionSerializer(source='profesion_urgente', read_only=True)
     ofertas = OfertaTrabajoSerializer(many=True, read_only=True)
     cantidad_ofertas = serializers.SerializerMethodField()
+    mi_oferta = serializers.SerializerMethodField()
     calificaciones = CalificacionDetailSerializer(many=True, read_only=True)  
     recursos = serializers.SerializerMethodField()
 
@@ -288,7 +289,7 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'usuario', 'profesional', 'descripcion', 'status', 
                   'precio_final', 'esUrgente', 'es_domicilio_profesional', 'localizacion_detalle', 
                   'profesion_detalle', 'ofertas', 'fecha_inicio', 'currency',
-                  'cantidad_ofertas', 'created_at', 'updated_at', 'calificaciones', 'recursos']
+                  'cantidad_ofertas', 'mi_oferta', 'created_at', 'updated_at', 'calificaciones', 'recursos']
         
     def get_recursos(self, obj):
         return list(
@@ -302,3 +303,20 @@ class TrabajoUrgenteDetailSerializer(serializers.ModelSerializer):
 
     def get_cantidad_ofertas(self, obj):
         return obj.ofertas.count()
+
+    def get_mi_oferta(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request.user, 'is_authenticated', False):
+            return None
+        oferta = obj.ofertas.filter(profesional_id=request.user.id).first()
+        if not oferta:
+            return None
+        return {
+            'id': oferta.id,
+            'status': oferta.status,
+            'precio_ofertado': oferta.precio_ofertado,
+            'tiempo_estimado': oferta.tiempo_estimado,
+            'mensaje': oferta.mensaje,
+            'motivo_rechazo': oferta.motivo_rechazo,
+            'created_at': oferta.created_at,
+        }

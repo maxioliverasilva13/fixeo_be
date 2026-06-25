@@ -128,6 +128,7 @@ class OfertaTrabajo(BaseModel):
     fecha_inicio = models.DateTimeField(null=True, blank=True)
     mensaje = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendiente')
+    motivo_rechazo = models.TextField(blank=True, null=True)
     
     class Meta:
         db_table = 'oferta_trabajo'
