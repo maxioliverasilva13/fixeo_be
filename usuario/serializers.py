@@ -719,12 +719,36 @@ class AdminUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
 
 class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
-    """Serializer para actualizar usuario desde el panel de admin."""
+    correo = serializers.EmailField(required=False)
+
     class Meta:
         model = Usuario
         fields = [
-            'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url',
-            'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa',
-            'is_active', 'is_staff', 'rango_mapa_km', 'rol',
-            'auto_aprobacion_trabajos', 'defaultMessageReservation'
+            'nombre',
+            'apellido',
+            'correo',
+            'telefono',
+            'foto_url',
+            'rounded_foto_url',
+            'trabajo_domicilio',
+            'trabajo_local',
+            'is_owner_empresa',
+            'is_active',
+            'is_staff',
+            'rango_mapa_km',
+            'rol',
+            'auto_aprobacion_trabajos',
+            'defaultMessageReservation',
         ]
+
+    def validate_correo(self, value):
+        usuario_actual = self.instance
+        if Usuario.objects.filter(correo=value).exclude(pk=usuario_actual.pk).exists():
+            raise serializers.ValidationError('Este correo ya está en uso.')
+        return value
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance

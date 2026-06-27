@@ -913,25 +913,20 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
 
 class AdminUsuarioViewSet(viewsets.ModelViewSet):
-    """
-    CRUD de usuarios para administradores (is_staff).
-    Solo accesible para usuarios con is_staff=True.
-    """
     queryset = Usuario.objects.all().select_related('rol').prefetch_related('empresas_administradas')
     serializer_class = AdminUsuarioSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
 
     def get_queryset(self):
         queryset = Usuario.objects.all().select_related('rol').prefetch_related('empresas_administradas')
-        
-        # Filtros opcionales
+
         is_active = self.request.query_params.get('is_active')
         is_staff = self.request.query_params.get('is_staff')
         is_owner_empresa = self.request.query_params.get('is_owner_empresa')
         is_deleted = self.request.query_params.get('is_deleted')
         rol_id = self.request.query_params.get('rol_id')
         search = self.request.query_params.get('search')
-        
+
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
         if is_staff is not None:
@@ -944,12 +939,12 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(rol_id=rol_id)
         if search:
             queryset = queryset.filter(
-                Q(nombre__icontains=search) | 
-                Q(apellido__icontains=search) | 
+                Q(nombre__icontains=search) |
+                Q(apellido__icontains=search) |
                 Q(correo__icontains=search) |
                 Q(id__iexact=search)
             )
-        
+
         return queryset
 
     def get_serializer_class(self):
@@ -957,8 +952,23 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
             return AdminUsuarioUpdateSerializer
         return AdminUsuarioSerializer
 
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        usuario = serializer.save()
+        return Response({
+            'ok': True,
+            'message': 'Operación exitosa',
+            'data': AdminUsuarioSerializer(usuario).data,
+        })
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
-        """Eliminar (soft delete) un usuario específico."""
         usuario = self.get_object()
         usuario.is_deleted = True
         usuario.is_active = False
