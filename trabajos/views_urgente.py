@@ -232,10 +232,13 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
     
     def list(self, request):
         usuario = request.user
-        usuario_profesiones = UsuarioProfesion.objects.filter(usuario=usuario).values_list('profesion_id', flat=True)
+        usuario_profesiones = list(
+            UsuarioProfesion.objects.filter(usuario=usuario).values_list('profesion_id', flat=True)
+        )
         status_filter = request.query_params.get("status")
-        filter_param = request.query_params.get("filter", "all")
+        filter_param = request.query_params.get("filter", "no_offers")
         sort_param = request.query_params.get("sort", "recent")
+        profesion_id_param = request.query_params.get("profesion_id")
 
         if not usuario_profesiones:
             return Response({
@@ -263,6 +266,18 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
             'profesion_urgente'
         )
 
+        if profesion_id_param:
+            try:
+                profesion_id = int(profesion_id_param)
+                if profesion_id not in usuario_profesiones:
+                    return Response({
+                        'message': 'Profesión no válida',
+                        'trabajos': []
+                    })
+                trabajos_urgentes_qs = trabajos_urgentes_qs.filter(profesion_urgente_id=profesion_id)
+            except (TypeError, ValueError):
+                pass
+
         if filter_param == "no_offers":
             trabajos_urgentes_qs = trabajos_urgentes_qs.annotate(
                 num_ofertas_pendientes=Count(
@@ -274,7 +289,16 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         elif filter_param == "not_applied":
             trabajos_urgentes_qs = trabajos_urgentes_qs.exclude(
                 ofertas__profesional=usuario,
-                ofertas__status__in=['pendiente', 'aceptada'],
+            )
+        elif filter_param == "applied":
+            trabajos_urgentes_qs = trabajos_urgentes_qs.filter(
+                ofertas__profesional=usuario,
+                ofertas__status='pendiente',
+            )
+        elif filter_param == "rejected":
+            trabajos_urgentes_qs = trabajos_urgentes_qs.filter(
+                ofertas__profesional=usuario,
+                ofertas__status='rechazada',
             )
         
         if status_filter:

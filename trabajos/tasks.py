@@ -11,13 +11,19 @@ logger = logging.getLogger(__name__)
 
 
 def _recordatorio_calificacion_countdown_seconds() -> int:
-    minutos = getattr(settings, 'TRABAJO_CALIFICACION_RECORDATORIO_MINUTOS', 5)
+    minutos = getattr(settings, 'RECORDATORIO_CALIFICAR_PROFESIONAL_TRABAJO_MINUTES', 1)
     return max(0, int(minutos)) * 60
 
 
-def _auto_finalizar_grace_delta() -> timedelta:
-    minutos = getattr(settings, 'TRABAJO_CALIFICACION_RECORDATORIO_MINUTOS', 5)
-    return timedelta(minutes=max(0, int(minutos)))
+def ejecutar_post_finalizacion_trabajo(trabajo: Trabajo) -> dict:
+    """
+    Tras marcar un trabajo como finalizado: encola recordatorios de calificación
+    (cliente + profesional) con RECORDATORIO_CALIFICAR_PROFESIONAL_TRABAJO_MINUTES.
+    """
+    if not trabajo.usuario_id or not trabajo.profesional_id:
+        return {'recordatorios': None}
+
+    return {'recordatorios': programar_recordatorio_calificacion(trabajo.id)}
 
 
 def programar_recordatorio_calificacion(trabajo_id: int) -> dict:
@@ -35,6 +41,11 @@ def programar_recordatorio_calificacion(trabajo_id: int) -> dict:
         'client_task_id': client_result.id,
         'professional_task_id': pro_result.id,
     }
+
+
+def _auto_finalizar_grace_delta() -> timedelta:
+    minutos = getattr(settings, 'FINALIZACION_TRABAJO_DESPUES_DE_MINUTES', 1)
+    return timedelta(minutes=max(0, int(minutos)))
 
 
 @shared_task(name='trabajos.enviar_recordatorio_calificacion_trabajo')
@@ -56,6 +67,7 @@ def enviar_recordatorio_calificacion_trabajo(trabajo_id: int):
         trabajo_id=trabajo_id,
         user_cal_sender_id=trabajo.usuario_id,
         user_cal_recibe_id=trabajo.profesional_id,
+        direccion=CalificacionDireccion.CLIENTE_A_PROFESIONAL,
     ).exists()
     if ya_calificado:
         logger.info("Recordatorio calificación omitido: trabajo %s ya calificado", trabajo_id)
@@ -188,16 +200,16 @@ def finalizar_trabajos_vencidos():
 
     recordatorios_programados = 0
     for trabajo in trabajos:
-        if not trabajo.usuario_id or not trabajo.profesional_id:
-            continue
-        programar_recordatorio_calificacion(trabajo.id)
-        recordatorios_programados += 1
+        trabajo.status = 'finalizado'
+        ejecutar_post_finalizacion_trabajo(trabajo)
+        if trabajo.usuario_id and trabajo.profesional_id:
+            recordatorios_programados += 1
 
     logger.info(
-        "Trabajos auto-finalizados: %s | IDs: %s | Recordatorios en %s min: %s",
+        'Trabajos auto-finalizados: %s | IDs: %s | Recordatorios en %s min: %s',
         count,
         ids_finalizados,
-        getattr(settings, 'TRABAJO_CALIFICACION_RECORDATORIO_MINUTOS', 5),
+        getattr(settings, 'RECORDATORIO_CALIFICAR_PROFESIONAL_TRABAJO_MINUTES', 1),
         recordatorios_programados,
     )
 

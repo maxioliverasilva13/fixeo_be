@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from notificaciones.tasks import notificar_usuario as notificar_usuario_task
+from .device_token_service import activate_device_token_for_user
 from .models import DeviceToken, Notificaciones, Notas
 from .serializers import DeviceTokenSerializer, NotificacionesSerializer, NotasSerializer
 
@@ -28,14 +29,12 @@ class DeviceTokenViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # El mismo token FCM puede asociarse a varios usuarios (mismo dispositivo, distinta sesión).
-        token_obj, created = DeviceToken.objects.update_or_create(
+        # El mismo token FCM puede existir para varios usuarios (historial),
+        # pero solo el usuario logueado en el dispositivo lo tiene enabled=True.
+        token_obj, created = activate_device_token_for_user(
             usuario=request.user,
             device_token=device_token,
-            defaults={
-                'device_name': device_name,
-                'enabled': True,
-            },
+            device_name=device_name,
         )
         serializer = DeviceTokenSerializer(token_obj)
         status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK

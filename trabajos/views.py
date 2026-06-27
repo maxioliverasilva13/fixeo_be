@@ -468,24 +468,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 logger.exception("Error liberando pagos para trabajo %s", trabajo.id)
 
-        profesional_nombre = (
-            f"{trabajo.profesional.nombre} {trabajo.profesional.apellido}".strip()
-            or 'el profesional'
-        )
-
-        notificar_usuario.delay(
-            usuario_id=trabajo.usuario.id,
-            titulo="Trabajo finalizado",
-            mensaje=f"Tu trabajo con {profesional_nombre} ha finalizado.",
-            data={
-                'deep_link': f'/historial?trabajoId={trabajo.id}',
-                'entity_id': trabajo.id,
-                'tipo': 'trabajo_finalizado'
-            }
-        )
-
-        from trabajos.tasks import programar_recordatorio_calificacion
-        programar_recordatorio_calificacion(trabajo.id)
+        from trabajos.tasks import ejecutar_post_finalizacion_trabajo
+        ejecutar_post_finalizacion_trabajo(trabajo)
 
         trabajo_data = TrabajoDetailSerializer(trabajo).data
 
