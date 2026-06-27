@@ -48,6 +48,7 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     cant_calif = models.IntegerField(default=0)
     rating_cliente = models.FloatField(default=0)
     cant_calif_cliente = models.IntegerField(default=0)
+    token_ultima_actividad = models.DateTimeField(null=True, blank=True)
 
     auto_aprobacion_trabajos = models.BooleanField(default=False)
 

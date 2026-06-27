@@ -323,10 +323,41 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
 class UsuarioBasicInformationSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()
+    rating_cliente = serializers.SerializerMethodField()
+    cant_calif_cliente = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
-        fields = ['id', 'nombre','cant_calif', 'rating', 'apellido', 'foto_url', 'rounded_foto_url', 'telefono', 'localizacion']
+        fields = [
+            'id', 'nombre', 'cant_calif', 'rating', 'apellido', 'foto_url', 'rounded_foto_url',
+            'telefono', 'localizacion', 'rating_cliente', 'cant_calif_cliente', 'is_owner_empresa',
+        ]
+
+    def _puede_ver_rating_cliente(self):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return request.user.is_owner_empresa
+
+    def get_rating_cliente(self, obj):
+        request = self.context.get('request')
+        if (
+            obj.is_owner_empresa
+            or not self._puede_ver_rating_cliente()
+            or (request and request.user.id == obj.id)
+        ):
+            return None
+        return obj.rating_cliente
+
+    def get_cant_calif_cliente(self, obj):
+        request = self.context.get('request')
+        if (
+            obj.is_owner_empresa
+            or not self._puede_ver_rating_cliente()
+            or (request and request.user.id == obj.id)
+        ):
+            return None
+        return obj.cant_calif_cliente
 
     def get_localizacion(self, obj):
         from usuario_localizacion.serializers import UsuarioLocalizacionSerializer

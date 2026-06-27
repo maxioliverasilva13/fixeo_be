@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
+from usuario.authentication import touch_token_activity
 from usuario.models import Usuario, PasswordResetToken
 from usuario.utils import obtener_localizacion_usuario, foto_usuario_api
 from usuario_localizacion.models import UsuarioLocalizacion
@@ -314,6 +315,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         vende_servicios=serializer.validated_data.get('vende_servicios', True),
                     )
                 
+                touch_token_activity(usuario)
                 refresh = RefreshToken.for_user(usuario)
                 user_data = UsuarioSerializer(usuario).data
                 
@@ -358,6 +360,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
+        touch_token_activity(user)
         refresh = RefreshToken.for_user(user)
         user_data = UsuarioSerializer(user).data
         
@@ -897,6 +900,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     {'error': 'Esta cuenta fue eliminada'},
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
+            touch_token_activity(usuario)
             refresh = RefreshToken.for_user(usuario)
             return Response({
                 'user': UsuarioSerializer(usuario).data,

@@ -5,7 +5,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from notificaciones.tasks import notificar_usuario
-from trabajos.models import Calificacion, Trabajo
+from trabajos.models import Calificacion, CalificacionDireccion, Trabajo
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +20,25 @@ def _auto_finalizar_grace_delta() -> timedelta:
     return timedelta(minutes=max(0, int(minutos)))
 
 
-def programar_recordatorio_calificacion(trabajo_id: int) -> str | None:
-    """Encola el push de calificación con el delay configurado."""
-    result = enviar_recordatorio_calificacion_trabajo.apply_async(
+def programar_recordatorio_calificacion(trabajo_id: int) -> dict:
+    """Encola push de calificación para cliente y profesional con el delay configurado."""
+    countdown = _recordatorio_calificacion_countdown_seconds()
+    client_result = enviar_recordatorio_calificacion_trabajo.apply_async(
         args=[trabajo_id],
-        countdown=_recordatorio_calificacion_countdown_seconds(),
+        countdown=countdown,
     )
-    return result.id
+    pro_result = enviar_recordatorio_calificacion_profesional.apply_async(
+        args=[trabajo_id],
+        countdown=countdown,
+    )
+    return {
+        'client_task_id': client_result.id,
+        'professional_task_id': pro_result.id,
+    }
 
 
 @shared_task(name='trabajos.enviar_recordatorio_calificacion_trabajo')
 def enviar_recordatorio_calificacion_trabajo(trabajo_id: int):
-    logger.info
     trabajo = (
         Trabajo.objects
         .filter(id=trabajo_id, status='finalizado')
@@ -78,6 +85,68 @@ def enviar_recordatorio_calificacion_trabajo(trabajo_id: int):
         'success': True,
         'trabajo_id': trabajo_id,
         'usuario_id': trabajo.usuario_id,
+    }
+
+
+@shared_task(name='trabajos.enviar_recordatorio_calificacion_profesional')
+def enviar_recordatorio_calificacion_profesional(trabajo_id: int):
+    trabajo = (
+        Trabajo.objects
+        .filter(id=trabajo_id, status='finalizado')
+        .select_related('usuario', 'profesional')
+        .first()
+    )
+    if not trabajo:
+        logger.info(
+            "Recordatorio calificación pro omitido: trabajo %s no finalizado",
+            trabajo_id,
+        )
+        return {'skipped': True, 'reason': 'not_finalizado', 'trabajo_id': trabajo_id}
+
+    if not trabajo.usuario_id or not trabajo.profesional_id:
+        return {'skipped': True, 'reason': 'missing_users', 'trabajo_id': trabajo_id}
+
+    ya_calificado = Calificacion.objects.filter(
+        trabajo_id=trabajo_id,
+        user_cal_sender_id=trabajo.profesional_id,
+        user_cal_recibe_id=trabajo.usuario_id,
+        direccion=CalificacionDireccion.PROFESIONAL_A_CLIENTE,
+    ).exists()
+    if ya_calificado:
+        logger.info(
+            "Recordatorio calificación pro omitido: trabajo %s ya calificado por profesional",
+            trabajo_id,
+        )
+        return {'skipped': True, 'reason': 'already_rated', 'trabajo_id': trabajo_id}
+
+    cliente_nombre = (
+        f"{trabajo.usuario.nombre} {trabajo.usuario.apellido}".strip()
+        or 'el cliente'
+    )
+
+    notificar_usuario.delay(
+        usuario_id=trabajo.profesional_id,
+        titulo=f"Califica a {cliente_nombre}",
+        mensaje=f"Tu trabajo con {cliente_nombre} ha finalizado. ¡Califícalo ahora!",
+        data={
+            'deep_link': f'/historial?trabajoId={trabajo_id}&calificar=true',
+            'entity_id': trabajo_id,
+            'trabajo_id': str(trabajo_id),
+            'cliente_id': str(trabajo.usuario_id),
+            'cliente_nombre': cliente_nombre,
+            'tipo': 'calificacion_pendiente_profesional',
+        },
+    )
+
+    logger.info(
+        "Recordatorio calificación pro encolado para trabajo %s → profesional %s",
+        trabajo_id,
+        trabajo.profesional_id,
+    )
+    return {
+        'success': True,
+        'trabajo_id': trabajo_id,
+        'profesional_id': trabajo.profesional_id,
     }
 
 

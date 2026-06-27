@@ -121,7 +121,7 @@ AUTH_USER_MODEL = 'usuario.Usuario'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'usuario.authentication.SlidingJWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
@@ -138,9 +138,11 @@ REST_FRAMEWORK = {
 
 from datetime import timedelta
 
+JWT_INACTIVITY_DAYS = 30
+
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=JWT_INACTIVITY_DAYS),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=JWT_INACTIVITY_DAYS),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
