@@ -77,6 +77,29 @@ class Empresa(BaseModel):
         null=True,
         help_text='Subdominio para landing page pública (ej. peluqueria-juan).',
     )
+    landing_titulo = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text='Título principal de la landing (opcional, usa nombre si está vacío).',
+    )
+    landing_slogan = models.CharField(
+        max_length=300,
+        blank=True,
+        default='',
+        help_text='Slogan o frase corta para la landing.',
+    )
+    landing_descripcion = models.TextField(
+        blank=True,
+        default='',
+        help_text='Descripción extendida para la landing (opcional, usa descripcion si está vacía).',
+    )
+    landing_foto_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text='Imagen de portada o logo para la landing.',
+    )
     class Meta:
         db_table = 'empresa'
         verbose_name = 'Empresa'

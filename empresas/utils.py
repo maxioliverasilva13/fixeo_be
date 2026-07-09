@@ -68,3 +68,21 @@ def crear_empresa(
     )
     
     return empresa
+
+
+def empresa_tiene_landing_activa(empresa) -> bool:
+    from django.utils import timezone
+    from suscripciones.models import Subscripcion
+
+    sub = (
+        Subscripcion.objects
+        .filter(
+            user_id=empresa.admin_id,
+            cancelada=False,
+            expiracion__gt=timezone.now(),
+        )
+        .select_related('plan_id')
+        .order_by('-created_at')
+        .first()
+    )
+    return bool(sub and sub.plan_id.tiene_landing_page)

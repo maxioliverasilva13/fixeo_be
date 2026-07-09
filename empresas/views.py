@@ -6,11 +6,11 @@ from django.shortcuts import redirect
 from localizacion.utils import calcular_distancia_km
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser, BasePermission
 from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
-from .utils import validar_nombre_empresa_unico, generar_subdomain_unico
+from .utils import validar_nombre_empresa_unico, generar_subdomain_unico, empresa_tiene_landing_activa
 from .estadisticas import estadisticas_empresa
 from rest_framework.decorators import action
 from rest_framework.views import APIView
@@ -59,6 +59,20 @@ def _pais_desde_nombre(nombre_pais: str) -> str:
     if len(normalizado) == 2:
         return normalizado.upper()
     return Empresa.COUNTRY_NAME_TO_CODE.get(normalizado, '')
+
+
+class IsStaffOrEmpresaOwner(BasePermission):
+    """Staff: acceso completo. Owner (admin_id): solo su empresa en lectura/actualización."""
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.is_staff:
+            return True
+        if view.action in ('retrieve', 'update', 'partial_update'):
+            return obj.admin_id_id == request.user.id
+        return False
 
 
 class EmpresaViewSet(viewsets.ModelViewSet):
@@ -171,6 +185,37 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
         if update_fields:
             empresa.save(update_fields=update_fields)
+
+        return Response(EmpresaSerializer(empresa).data)
+
+    @action(detail=True, methods=['patch'], url_path='landing')
+    def actualizar_landing(self, request, pk=None):
+        """Actualiza la configuración pública de la landing page."""
+        empresa = self.get_object()
+
+        if empresa.admin_id_id != request.user.id and not request.user.is_staff:
+            return Response(
+                {'error': 'No tenés permisos para modificar esta empresa'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not empresa_tiene_landing_activa(empresa):
+            return Response(
+                {'error': 'Tu plan no incluye landing page activa'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        allowed = {
+            'landing_titulo', 'landing_slogan', 'landing_descripcion', 'landing_foto_url',
+        }
+        update_fields = []
+        for field in allowed:
+            if field in request.data:
+                setattr(empresa, field, request.data.get(field) or '')
+                update_fields.append(field)
+
+        if update_fields:
+            empresa.save(update_fields=[*update_fields, 'updated_at'])
 
         return Response(EmpresaSerializer(empresa).data)
 
@@ -446,11 +491,42 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 class AdminEmpresaViewSet(viewsets.ModelViewSet):
     """
     CRUD de empresas para administradores (is_staff).
-    Solo accesible para usuarios con is_staff=True.
+    El owner de la empresa (admin_id) puede consultar y actualizar vende_productos /
+    vende_servicios de su propia empresa vía PATCH/PUT.
     """
     queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
     serializer_class = EmpresaSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
+    OWNER_WRITABLE_FIELDS = frozenset({'vende_productos', 'vende_servicios'})
+
+    def get_permissions(self):
+        if self.action in ('retrieve', 'update', 'partial_update'):
+            return [IsAuthenticated(), IsStaffOrEmpresaOwner()]
+        return [IsAuthenticated(), IsAdminUser()]
+
+    def _guard_owner_patch_fields(self, request):
+        if request.user.is_staff:
+            return None
+        extra = set(request.data.keys()) - self.OWNER_WRITABLE_FIELDS
+        if extra:
+            allowed = ', '.join(sorted(self.OWNER_WRITABLE_FIELDS))
+            return Response(
+                {'error': f'Solo podés modificar: {allowed}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return None
+
+    def update(self, request, *args, **kwargs):
+        denied = self._guard_owner_patch_fields(request)
+        if denied:
+            return denied
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        denied = self._guard_owner_patch_fields(request)
+        if denied:
+            return denied
+        return super().partial_update(request, *args, **kwargs)
 
     def get_queryset(self):
         queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
@@ -587,23 +663,6 @@ class ProductoViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-def _empresa_tiene_landing_activa(empresa) -> bool:
-    from suscripciones.models import Subscripcion
-
-    sub = (
-        Subscripcion.objects
-        .filter(
-            user_id=empresa.admin_id,
-            cancelada=False,
-            expiracion__gt=timezone.now(),
-        )
-        .select_related('plan_id')
-        .order_by('-created_at')
-        .first()
-    )
-    return bool(sub and sub.plan_id.tiene_landing_page)
-
-
 class EmpresaPublicLandingView(APIView):
     """Datos públicos de la landing page de una empresa (por subdominio)."""
     permission_classes = [AllowAny]
@@ -618,7 +677,7 @@ class EmpresaPublicLandingView(APIView):
         if not empresa:
             return Response({'error': 'Empresa no encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-        if not _empresa_tiene_landing_activa(empresa):
+        if not empresa_tiene_landing_activa(empresa):
             return Response(
                 {'error': 'Esta empresa no tiene landing page activa'},
                 status=status.HTTP_404_NOT_FOUND,
@@ -653,6 +712,14 @@ class EmpresaPublicLandingView(APIView):
                 'nombre': empresa.nombre,
                 'descripcion': empresa.descripcion,
                 'subdomain': empresa.subdomain,
+                'landing_titulo': empresa.landing_titulo,
+                'landing_slogan': empresa.landing_slogan,
+                'landing_descripcion': empresa.landing_descripcion,
+                'landing_foto_url': empresa.landing_foto_url,
+                'ubicacion': empresa.ubicacion,
+                'latitud': float(empresa.latitud),
+                'longitud': float(empresa.longitud),
+                'compartir_ubicacion_mapa': empresa.compartir_ubicacion_mapa,
                 'vende_productos': empresa.vende_productos,
                 'vende_servicios': empresa.vende_servicios,
                 'acepta_efectivo': empresa.acepta_efectivo,

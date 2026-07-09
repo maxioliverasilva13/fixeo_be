@@ -156,12 +156,24 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
+# CORS — landing (subdominios), app móvil/web y desarrollo local
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?://([\w-]+\.)?localhost(:\d+)?$",
+    r"^https?://([\w-]+\.)?alavueltaapp\.com(:\d+)?$",
+    r"^https?://127\.0\.0\.1(:\d+)?$",
+    r"^https?://172\.20\.10\.\d+(:\d+)?$",
+    r"^https?://192\.168\.\d+\.\d+(:\d+)?$",
+    r"^https?://10\.\d+\.\d+\.\d+(:\d+)?$",
+]
+
 if DEBUG:
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:3000",
         "https://localhost:3000",
         "http://127.0.0.1:3000",
         "https://127.0.0.1:3000",
+        "http://localhost:5001",
+        "http://127.0.0.1:5001",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://172.20.10.4:3000",
@@ -170,9 +182,12 @@ if DEBUG:
         "http://172.20.10.3:3000",
         "http://172.20.10.3:8000",
         "https://172.20.10.3:8000",
+        "http://172.20.10.5:3000",
+        "http://172.20.10.5:5001",
+        "http://172.20.10.5:8000",
         "https://landingquestionalavuelta-production.up.railway.app",
         "http://172.20.10.2:8000",
-        "http://172.20.10.2:3000"
+        "http://172.20.10.2:3000",
     ]
 else:
     CORS_ALLOW_ALL_ORIGINS = True
