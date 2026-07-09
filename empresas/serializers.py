@@ -42,7 +42,9 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'admin_id',
             'created_at',
             'updated_at',
-            'currency'
+            'currency',
+            'compartir_ubicacion_mapa',
+            'subdomain',
         ]
         read_only_fields = ['currency', 'moneda_local']
 

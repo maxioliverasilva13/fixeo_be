@@ -48,6 +48,7 @@ def _precio_para_filtro(r: dict) -> float | None:
 
 from usuario.mapa_helpers import (
     batch_visibility_data as _batch_visibility_data,
+    es_elegible_en_busqueda as _es_elegible_en_busqueda,
     es_visible_en_mapa as _es_visible_en_mapa,
     resolve_map_users_from_bounds,
     resolve_map_users_national,
@@ -101,7 +102,8 @@ FROM (
         array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
         NULL::numeric AS precio_servicio,
         NULL::integer AS producto_id,
-        u.cant_calif
+        u.cant_calif,
+        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa
     FROM usuario u
     LEFT JOIN LATERAL (
         SELECT
@@ -110,7 +112,8 @@ FROM (
             e0.descripcion,
             e0.ubicacion,
             e0.latitud,
-            e0.longitud
+            e0.longitud,
+            e0.compartir_ubicacion_mapa
         FROM empresa e0
         WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
           AND NOT COALESCE(e0.is_deleted, false)
@@ -151,7 +154,7 @@ FROM (
             )
         )
     GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif,
-        e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud,
+        e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud, e.compartir_ubicacion_mapa,
         loc.latitud, loc.longitud
 
     UNION ALL
@@ -181,7 +184,8 @@ FROM (
         NULL::integer[] AS profesion_ids,
         NULL::numeric AS precio_servicio,
         pr.id AS producto_id,
-        0::integer AS cant_calif
+        0::integer AS cant_calif,
+        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa
     FROM producto pr
     JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
     JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
@@ -313,11 +317,14 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         localizacion=localizacion_empresa.localizacion if localizacion_empresa else None,
                         vende_productos=serializer.validated_data.get('vende_productos', False),
                         vende_servicios=serializer.validated_data.get('vende_servicios', True),
+                        compartir_ubicacion_mapa=serializer.validated_data.get(
+                            'compartir_ubicacion_mapa', True
+                        ),
                     )
                 
                 touch_token_activity(usuario)
                 refresh = RefreshToken.for_user(usuario)
-                user_data = UsuarioSerializer(usuario).data
+                user_data = UsuarioSerializer(usuario, context={'request': request}).data
                 
                 return Response({
                     'user': user_data,
@@ -776,7 +783,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         if usuario_ids:
             usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
             subs_map, efectivo_counts = _batch_visibility_data(usuario_ids)
-            visibles = {u.id for u in usuarios_qs if _es_visible_en_mapa(u, subs_map, efectivo_counts)}
+            visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
             results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
 
         if profesion_id:

@@ -14,6 +14,10 @@ class Plan(BaseModel):
     appstore_id = models.CharField(max_length=200, blank=True, null=True)
     caracteristicas = models.JSONField(default=list)
     activo = models.BooleanField(default=True)
+    tiene_landing_page = models.BooleanField(
+        default=False,
+        help_text='Si es True, las empresas con este plan pueden tener landing page pública.',
+    )
 
     class Meta:
         db_table = 'plan'

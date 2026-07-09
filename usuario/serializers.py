@@ -491,6 +491,12 @@ class RegistroSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    compartir_ubicacion_mapa = serializers.BooleanField(required=False, allow_null=True)
+
+    def validate_compartir_ubicacion_mapa(self, value):
+        if value is None:
+            return True
+        return bool(value)
 
     def validate_rango_mapa_km(self, value):
         if value is None or value == '':
@@ -521,6 +527,12 @@ class RegistroSerializer(serializers.Serializer):
                 )
             if attrs.get('rango_mapa_km') is None:
                 attrs['rango_mapa_km'] = Decimal('10.00')
+            if 'compartir_ubicacion_mapa' not in attrs:
+                raw = self.initial_data.get('compartir_ubicacion_mapa')
+                if raw is False or str(raw).lower() in ('false', '0', 'no'):
+                    attrs['compartir_ubicacion_mapa'] = False
+                else:
+                    attrs['compartir_ubicacion_mapa'] = True
 
         return attrs
 

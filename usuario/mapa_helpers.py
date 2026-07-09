@@ -145,10 +145,37 @@ def batch_visibility_data(user_ids: list):
     return subs_map, efectivo_counts
 
 
+def es_elegible_en_busqueda(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
+    """
+    Aparece en búsqueda general y trabajos urgentes aunque no comparta ubicación en el mapa.
+    Misma lógica de medios de pago que el mapa, sin filtrar por compartir_ubicacion_mapa.
+    """
+    emps = getattr(usuario, '_prefetched_objects_cache', {}).get('empresas_administradas')
+    empresa = emps[0] if emps else usuario.empresas_administradas.first()
+    if not empresa:
+        return False
+
+    if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
+        return True
+
+    if empresa.acepta_efectivo:
+        sub = subs_map.get(usuario.id)
+        if sub:
+            usados = efectivo_counts.get(usuario.id, 0)
+            jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
+            if jobs_restantes > 0:
+                return True
+
+    return False
+
+
 def es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
     emps = getattr(usuario, '_prefetched_objects_cache', {}).get('empresas_administradas')
     empresa = emps[0] if emps else usuario.empresas_administradas.first()
     if not empresa:
+        return False
+
+    if not empresa.compartir_ubicacion_mapa:
         return False
 
     if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
@@ -290,6 +317,7 @@ def bounds_usuarios_loc_qs(
             localizacion__longitud__gte=west,
             usuario__is_owner_empresa=True,
             usuario__is_active=True,
+            usuario__empresas_administradas__compartir_ubicacion_mapa=True,
         )
         .select_related('usuario', 'localizacion')
     )
@@ -333,6 +361,7 @@ def _empresas_en_bounds_qs(
             is_deleted=False,
             admin_id__is_owner_empresa=True,
             admin_id__is_active=True,
+            compartir_ubicacion_mapa=True,
         )
         .filter(_empresa_geo_q(north, south, east, west))
         .select_related('admin_id', 'localizacion')

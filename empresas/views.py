@@ -10,10 +10,14 @@ from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
-from .utils import validar_nombre_empresa_unico
+from .utils import validar_nombre_empresa_unico, generar_subdomain_unico
 from .estadisticas import estadisticas_empresa
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from django.db.models import Q
+from django.utils import timezone
+from servicios.models import Servicio
+from servicios.serializers import ServicioSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +93,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         # Solo el admin de la empresa puede actualizarla
-        if instance.admin_id != request.user and not request.user.is_staff:
+        if instance.admin_id_id != request.user.id and not request.user.is_staff:
             return Response(
                 {'error': 'No tenés permisos para modificar esta empresa'},
                 status=status.HTTP_403_FORBIDDEN
@@ -167,6 +171,34 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
         if update_fields:
             empresa.save(update_fields=update_fields)
+
+        return Response(EmpresaSerializer(empresa).data)
+
+    @action(detail=True, methods=['patch'], url_path='privacidad-mapa')
+    def actualizar_privacidad_mapa(self, request, pk=None):
+        """Actualiza si la empresa comparte ubicación en el mapa público."""
+        empresa = self.get_object()
+
+        if empresa.admin_id_id != request.user.id and not request.user.is_staff:
+            return Response(
+                {'error': 'No tenés permisos para modificar esta empresa'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if 'compartir_ubicacion_mapa' not in request.data:
+            return Response(
+                {'error': 'compartir_ubicacion_mapa es requerido'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw = request.data.get('compartir_ubicacion_mapa')
+        if isinstance(raw, str):
+            compartir = raw.lower() in ('true', '1', 'yes', 'si', 'sí')
+        else:
+            compartir = bool(raw)
+
+        empresa.compartir_ubicacion_mapa = compartir
+        empresa.save(update_fields=['compartir_ubicacion_mapa', 'updated_at'])
 
         return Response(EmpresaSerializer(empresa).data)
 
@@ -554,3 +586,90 @@ class ProductoViewSet(viewsets.ModelViewSet):
         
         instance.delete()
 
+
+def _empresa_tiene_landing_activa(empresa) -> bool:
+    from suscripciones.models import Subscripcion
+
+    sub = (
+        Subscripcion.objects
+        .filter(
+            user_id=empresa.admin_id,
+            cancelada=False,
+            expiracion__gt=timezone.now(),
+        )
+        .select_related('plan_id')
+        .order_by('-created_at')
+        .first()
+    )
+    return bool(sub and sub.plan_id.tiene_landing_page)
+
+
+class EmpresaPublicLandingView(APIView):
+    """Datos públicos de la landing page de una empresa (por subdominio)."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, subdomain):
+        empresa = (
+            Empresa.objects
+            .filter(subdomain=subdomain, is_deleted=False)
+            .select_related('admin_id', 'localizacion')
+            .first()
+        )
+        if not empresa:
+            return Response({'error': 'Empresa no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not _empresa_tiene_landing_activa(empresa):
+            return Response(
+                {'error': 'Esta empresa no tiene landing page activa'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        admin = empresa.admin_id
+        horarios = list(
+            empresa.horarios.filter(enabled=True).values(
+                'dia_semana', 'hora_inicio', 'hora_fin',
+            )
+        )
+        servicios = ServicioSerializer(
+            Servicio.objects.filter(usuario=admin).select_related('profesion'),
+            many=True,
+        ).data
+        productos = ProductoSerializer(
+            Producto.objects.filter(empresa=empresa, agotado=False).select_related('categoria'),
+            many=True,
+        ).data
+
+        from usuario_profesion.models import UsuarioProfesion
+        from profesion.serializers import ProfesionSerializer
+
+        profesiones = ProfesionSerializer(
+            [up.profesion for up in UsuarioProfesion.objects.filter(usuario=admin).select_related('profesion')],
+            many=True,
+        ).data
+
+        return Response({
+            'empresa': {
+                'id': empresa.id,
+                'nombre': empresa.nombre,
+                'descripcion': empresa.descripcion,
+                'subdomain': empresa.subdomain,
+                'vende_productos': empresa.vende_productos,
+                'vende_servicios': empresa.vende_servicios,
+                'acepta_efectivo': empresa.acepta_efectivo,
+                'acepta_tarjeta': empresa.acepta_tarjeta,
+                'is_mercadopago_vinculado': empresa.is_mercadopago_vinculado,
+                'pais': empresa.pais,
+                'currency': empresa.currency,
+                'foto_url': admin.foto_url,
+                'rounded_foto_url': admin.rounded_foto_url,
+                'rating': float(admin.rating or 0),
+                'cant_calif': admin.cant_calif,
+                'trabajo_domicilio': admin.trabajo_domicilio,
+                'trabajo_local': admin.trabajo_local,
+            },
+            'admin_id': admin.id,
+            'horarios': horarios,
+            'servicios': servicios,
+            'productos': productos,
+            'profesiones': profesiones,
+        })

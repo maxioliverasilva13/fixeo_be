@@ -21,6 +21,7 @@ PLANES_SEED = [
             'Acceso al mapa de profesionales',
             'Soporte básico',
         ],
+        'tiene_landing_page': False,
     },
     {
         'nombre': 'Básico',
@@ -37,6 +38,7 @@ PLANES_SEED = [
             'Acceso al mapa de profesionales',
             'Soporte estándar',
         ],
+        'tiene_landing_page': False,
     },
     {
         'nombre': 'Pro',
@@ -53,7 +55,9 @@ PLANES_SEED = [
             'Acceso prioritario al mapa de profesionales',
             'Soporte prioritario',
             'Estadísticas de uso',
+            'Landing page propia',
         ],
+        'tiene_landing_page': True,
     },
 ]
 

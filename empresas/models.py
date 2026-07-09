@@ -66,6 +66,17 @@ class Empresa(BaseModel):
         blank=True,
         default='UYU'
     )
+    compartir_ubicacion_mapa = models.BooleanField(
+        default=True,
+        help_text='Si es False, la empresa no aparece en el mapa pero sí en búsquedas y trabajos urgentes.',
+    )
+    subdomain = models.CharField(
+        max_length=100,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text='Subdominio para landing page pública (ej. peluqueria-juan).',
+    )
     class Meta:
         db_table = 'empresa'
         verbose_name = 'Empresa'
