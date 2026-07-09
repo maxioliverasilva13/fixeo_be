@@ -160,6 +160,7 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https?://([\w-]+\.)?localhost(:\d+)?$",
     r"^https?://([\w-]+\.)?alavueltaapp\.com(:\d+)?$",
+    r"^https?://([\w-]+\.)?alavueltaapp\.pro(:\d+)?$",
     r"^https?://127\.0\.0\.1(:\d+)?$",
     r"^https?://172\.20\.10\.\d+(:\d+)?$",
     r"^https?://192\.168\.\d+\.\d+(:\d+)?$",
