@@ -37,9 +37,17 @@ class TrabajoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        queryset = Trabajo.objects.filter(
-            Q(usuario=user) | Q(profesional=user)
-        )
+        rol = self.request.query_params.get('rol')
+        if rol == 'profesional':
+            # Agenda del profesional: solo trabajos donde es el destinatario,
+            # no los que él mismo solicitó como cliente a otro profesional.
+            queryset = Trabajo.objects.filter(profesional=user)
+        elif rol == 'cliente':
+            queryset = Trabajo.objects.filter(usuario=user)
+        else:
+            queryset = Trabajo.objects.filter(
+                Q(usuario=user) | Q(profesional=user)
+            )
 
         # Filtro por fecha
         fecha = self.request.query_params.get('date')
