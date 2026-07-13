@@ -1,6 +1,6 @@
 from disponibilidad.utils import calcular_duracion_servicios, hay_conflicto, rango_horario_empresa
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .models import Disponibilidad
 from .serializers import DisponibilidadSerializer
 from datetime import datetime, timedelta
@@ -27,7 +27,7 @@ class DisponibilidadViewSet(viewsets.ModelViewSet):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def dias_disponibles_mes(request):
     usuario_id = request.data['usuario_id']
     servicios_ids = request.data['servicios_ids']
@@ -109,7 +109,7 @@ def dias_disponibles_mes(request):
     })
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def horas_disponibles_dia(request):
     """
     Devuelve las horas posibles para un día específico,

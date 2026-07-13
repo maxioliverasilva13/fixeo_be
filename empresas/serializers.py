@@ -14,6 +14,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     moneda_local = serializers.CharField(read_only=True)
     subscripcion = serializers.SerializerMethodField()
     admin_id = serializers.IntegerField(source='admin_id.id', read_only=True)
+    tiene_landing_activa = serializers.SerializerMethodField()
 
     class Meta:
         model = Empresa
@@ -42,9 +43,16 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'admin_id',
             'created_at',
             'updated_at',
-            'currency'
+            'currency',
+            'compartir_ubicacion_mapa',
+            'subdomain',
+            'landing_titulo',
+            'landing_slogan',
+            'landing_descripcion',
+            'landing_foto_url',
+            'tiene_landing_activa',
         ]
-        read_only_fields = ['currency', 'moneda_local']
+        read_only_fields = ['currency', 'moneda_local', 'tiene_landing_activa']
 
     def _get_efectivo_jobs_restantes(self, obj):
         """Devuelve (subscripcion, jobs_restantes_efectivo) o (None, 0). Cachea por empresa."""
@@ -103,6 +111,10 @@ class EmpresaSerializer(serializers.ModelSerializer):
             if jobs_restantes > 0:
                 metodos.append('efectivo')
         return metodos
+
+    def get_tiene_landing_activa(self, obj):
+        from .utils import empresa_tiene_landing_activa
+        return empresa_tiene_landing_activa(obj)
 
     def get_subscripcion(self, obj):
         """Devuelve la suscripción activa del admin de la empresa, si existe."""

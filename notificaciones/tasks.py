@@ -1,12 +1,26 @@
+import logging
 from celery import shared_task
 from django.conf import settings
 from firebase_admin import messaging
 
 from fixeo_project.firebase_init import ensure_firebase_app
 
+logger = logging.getLogger(__name__)
+
 
 def get_firebase_app():
     return ensure_firebase_app()
+
+
+def _fcm_token_invalido(error: Exception) -> bool:
+    """True si Firebase indica que el token ya no sirve para push."""
+    msg = str(error).lower()
+    return (
+        'invalid-registration-token' in msg
+        or 'registration-token-not-registered' in msg
+        or 'requested entity was not found' in msg
+        or 'not found' in msg and 'entity' in msg
+    )
 
 
 @shared_task(name='notificaciones.notificar_usuario')
@@ -73,9 +87,15 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
         except Exception as e:
             tokens_fallidos += 1
             errores.append(str(e))
-            
-            if 'invalid-registration-token' in str(e).lower() or 'registration-token-not-registered' in str(e).lower():
-                DeviceToken.objects.filter(device_token=token).update(enabled=False)
+
+            if _fcm_token_invalido(e):
+                disabled = DeviceToken.objects.filter(device_token=token).update(enabled=False)
+                if disabled:
+                    logger.info(
+                        'Token FCM inválido desactivado (usuario=%s): %s',
+                        usuario_id,
+                        str(e),
+                    )
     
     return {
         'success': True,
