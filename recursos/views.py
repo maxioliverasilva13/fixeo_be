@@ -141,7 +141,7 @@ class RecursosViewSet(viewsets.ViewSet):
         try:
             file_content = file.read()
             content_type = file.content_type or "application/octet-stream"
-            is_image = content_type.startswith('image/')
+            is_image = content_type.startswith('image/') and content_type != 'image/svg+xml'
             
             # Generar paths únicos
             file_extension = os.path.splitext(file.name)[1]
