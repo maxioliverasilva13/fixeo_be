@@ -317,4 +317,8 @@ GOOGLE_PLAY_PACKAGE_NAME = config('GOOGLE_PLAY_PACKAGE_NAME', default='')
 
 APP_STORE_SHARED_SECRET = config('APP_STORE_SHARED_SECRET', default='')
 APP_STORE_ENVIRONMENT = config('APP_STORE_ENVIRONMENT', default='sandbox')
+APP_STORE_KEY_ID = config('APP_STORE_KEY_ID', default='')
+APP_STORE_ISSUER_ID = config('APP_STORE_ISSUER_ID', default='')
+APP_STORE_BUNDLE_ID = config('APP_STORE_BUNDLE_ID', default='com.alavueltaapp')
+APP_STORE_API_KEY = config('APP_STORE_API_KEY', default='')
 

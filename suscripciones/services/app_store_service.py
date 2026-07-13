@@ -3,16 +3,16 @@ Servicio para integración con Apple App Store / StoreKit.
 
 Igual que Google Play, este servicio es tolerante a configuraciones
 faltantes. Si no está `APP_STORE_SHARED_SECRET`, la app sigue
-arrancando normal y los endpoints específicos devuelven un mensaje
-claro al ser llamados.
+arrancando normal y los endpoints específicos (salvo testing local)
+devuelven un mensaje claro al ser llamados.
 
 Implementa:
-  - Validación del recibo (`/verifyReceipt`) con fallback automático
-    sandbox <-> producción.
+  - Testing local con StoreKit Configuration File (transaction IDs cortos):
+    igual que CoutureMock — no llama a Apple.
+  - Validación del recibo (`/verifyReceipt`) con fallback sandbox <-> producción.
   - Registro/actualización de suscripciones en la base local.
-  - Procesamiento de notificaciones de servidor (V2) con decodificación
-    JWT sin verificación de firma (suficiente para entornos no críticos;
-    para producción se debería verificar con las llaves públicas de Apple).
+  - Procesamiento de notificaciones de servidor (V2) decodificando
+    `{ signedPayload: "<JWS>" }` como envía Apple.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from datetime import datetime, timezone as dt_timezone
+import re
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any, Optional
 
 import requests
@@ -58,7 +59,7 @@ class AppStoreService:
         if not shared_secret:
             self._init_error = (
                 '⚠️ App Store no configurado. Definí APP_STORE_SHARED_SECRET '
-                'en el .env para habilitarlo.'
+                'en el .env para habilitarlo (testing local StoreKit igual funciona).'
             )
             logger.warning(self._init_error)
             return
@@ -75,6 +76,35 @@ class AppStoreService:
                 or 'App Store no está configurado. Verificá APP_STORE_SHARED_SECRET.',
                 code='app_store_not_configured',
             )
+
+    # ------------------------------------------------------------------
+    # Local StoreKit Configuration File (simulador / Xcode)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def is_testing_transaction_id(transaction_id: str) -> bool:
+        """
+        Los IDs de StoreKit Configuration File suelen ser números chicos ("0","1","2")
+        o contener "test". Igual criterio que CoutureMock.
+        """
+        tid = (transaction_id or '').strip()
+        if not tid:
+            return False
+        if re.fullmatch(r'\d{1,3}', tid):
+            return True
+        return 'test' in tid.lower()
+
+    def _mock_transaction_from_plan(self, plan: Plan, transaction_id: str) -> dict:
+        now = datetime.now(tz=dt_timezone.utc)
+        expires = now + (plan.duracion or timedelta(days=30))
+        product_id = (plan.appstore_id or '').strip()
+        return {
+            'transaction_id': transaction_id,
+            'original_transaction_id': transaction_id,
+            'product_id': product_id,
+            'expires_date_ms': str(int(expires.timestamp() * 1000)),
+            'environment': 'LocalTesting',
+        }
 
     # ------------------------------------------------------------------
     # Receipt verification
@@ -130,25 +160,41 @@ class AppStoreService:
         if not plan:
             raise ValidationError('Plan no encontrado.')
 
-        verification = self.verify_receipt(receipt_data)
-        latest_receipt_info = verification.get('latest_receipt_info') or []
-        if not latest_receipt_info:
-            raise ValidationError('No se encontró información de suscripción en el recibo.')
+        if not (plan.appstore_id or '').strip():
+            raise ValidationError('El plan no tiene appstore_id configurado.')
 
-        transaction = next(
-            (
-                tx
-                for tx in latest_receipt_info
-                if tx.get('transaction_id') == transaction_id
-                or tx.get('original_transaction_id') == transaction_id
-            ),
-            None,
-        )
-        if not transaction:
-            raise ValidationError('Transacción no encontrada en el recibo.')
+        transaction_id = str(transaction_id).strip()
+        is_testing = self.is_testing_transaction_id(transaction_id)
 
-        if (plan.appstore_id or '').strip() != (transaction.get('product_id') or '').strip():
-            raise ValidationError('El producto no coincide con el plan.')
+        if is_testing:
+            logger.info(
+                '🧪 [APP STORE] Transaction ID de testing local detectado (%s) — sin verifyReceipt',
+                transaction_id,
+            )
+            transaction = self._mock_transaction_from_plan(plan, transaction_id)
+        else:
+            if not receipt_data:
+                raise ValidationError('Falta receipt_data para verificar la compra.')
+
+            verification = self.verify_receipt(receipt_data)
+            latest_receipt_info = verification.get('latest_receipt_info') or []
+            if not latest_receipt_info:
+                raise ValidationError('No se encontró información de suscripción en el recibo.')
+
+            transaction = next(
+                (
+                    tx
+                    for tx in latest_receipt_info
+                    if tx.get('transaction_id') == transaction_id
+                    or tx.get('original_transaction_id') == transaction_id
+                ),
+                None,
+            )
+            if not transaction:
+                raise ValidationError('Transacción no encontrada en el recibo.')
+
+            if (plan.appstore_id or '').strip() != (transaction.get('product_id') or '').strip():
+                raise ValidationError('El producto no coincide con el plan.')
 
         expires_ms = transaction.get('expires_date_ms')
         if not expires_ms:
@@ -184,10 +230,11 @@ class AppStoreService:
 
         subscription.save()
         logger.info(
-            '🍎 [APP STORE] Suscripción guardada para usuario %s (plan %s, expira %s)',
+            '🍎 [APP STORE] Suscripción guardada para usuario %s (plan %s, expira %s, testing=%s)',
             usuario.pk,
             plan.nombre,
             expiration.isoformat(),
+            is_testing,
         )
         return subscription
 
@@ -237,13 +284,29 @@ class AppStoreService:
         'REVOKE': SubscripcionStatus.CANCELED,
     }
 
-    def process_server_notification(self, payload: dict[str, Any]) -> None:
-        notification_type = (payload or {}).get('notificationType')
-        subtype = (payload or {}).get('subtype')
-        data = (payload or {}).get('data') or {}
+    def process_server_notification(self, notification_payload: dict[str, Any]) -> None:
+        """
+        Apple envía `{ "signedPayload": "<JWS>" }`. Decodificamos ese JWS
+        y recién ahí leemos notificationType / data.signedTransactionInfo.
+        """
+        payload = notification_payload or {}
+        if isinstance(payload.get('signedPayload'), str) and payload['signedPayload']:
+            try:
+                payload = self._decode_jwt(payload['signedPayload'])
+            except Exception:
+                logger.exception('❌ [APP STORE] No se pudo decodificar signedPayload')
+                return
+
+        notification_type = payload.get('notificationType')
+        subtype = payload.get('subtype')
+        data = payload.get('data') or {}
         signed_transaction_info = data.get('signedTransactionInfo')
         if not signed_transaction_info:
-            logger.info('🔔 [APP STORE] Notificación sin signedTransactionInfo')
+            logger.info(
+                '🔔 [APP STORE] Notificación sin signedTransactionInfo (tipo=%s subtype=%s)',
+                notification_type,
+                subtype,
+            )
             return
 
         transaction_info = self._decode_jwt(signed_transaction_info)

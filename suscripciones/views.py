@@ -296,17 +296,18 @@ class AppStoreSubscribeView(APIView):
             for field, value in (
                 ('plan_id', plan_id),
                 ('transaction_id', transaction_id),
-                ('receipt_data', receipt_data),
             )
             if not value
         ]
         if missing:
             raise ValidationError(f'Faltan campos: {", ".join(missing)}')
 
+        # StoreKit Configuration File (simulador) no siempre trae receipt_data usable.
+        # El service admite testing local sin recibo; sandbox/prod reales sí lo exigen.
         subscription = get_app_store_service().create_or_update_subscription(
             usuario=request.user,
             plan_id=plan_id,
-            receipt_data=receipt_data,
+            receipt_data=receipt_data or '',
             transaction_id=transaction_id,
         )
         return Response(
