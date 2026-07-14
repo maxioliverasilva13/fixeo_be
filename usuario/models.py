@@ -51,6 +51,14 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     token_ultima_actividad = models.DateTimeField(null=True, blank=True)
 
     auto_aprobacion_trabajos = models.BooleanField(default=False)
+    recibir_notificaciones = models.BooleanField(
+        default=True,
+        help_text='Si es True, el usuario recibe push notifications.',
+    )
+    recibir_correos = models.BooleanField(
+        default=True,
+        help_text='Si es True, el usuario recibe emails de notificación.',
+    )
 
     objects = UsuarioManager()
 

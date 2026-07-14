@@ -283,8 +283,10 @@ CELERY_BEAT_SCHEDULE = {
 
 FIREBASE_CREDENTIALS = config('FIREBASE_CREDENTIALS', default=None)
 
-RESEND_API_KEY = config('RESEND_API_KEY')
+RESEND_API_KEY = config('RESEND_API_KEY', default='')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8081')
+EMAIL_FROM = config('EMAIL_FROM', default='onboarding@resend.dev')
+EMAIL_LOGO_URL = config('EMAIL_LOGO_URL', default='')
 
 import logging
 logger = logging.getLogger(__name__)
