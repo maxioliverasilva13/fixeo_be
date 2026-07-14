@@ -383,21 +383,51 @@ class TrabajoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='contador-pendientes')
     def contador_pendientes(self, request):
         """
-        Reservas activas (no finalizadas ni canceladas):
-        - como_cliente: las pediste vos
-        - como_profesional: te las asignaron a vos
-        - total: suma de ambos
-        Incluye pendiente, pendiente_urgente y aceptado.
+        Solo reservas en estado pendiente (ni aceptadas, finalizadas ni canceladas):
+        - como_cliente / como_profesional / total
         """
         user = request.user
-        activos = ~Q(status__in=['finalizado', 'cancelado'])
-        cc = Trabajo.objects.filter(usuario=user).filter(activos).count()
-        cp = Trabajo.objects.filter(profesional=user).filter(activos).count()
+        cc = Trabajo.objects.filter(usuario=user, status='pendiente').count()
+        cp = Trabajo.objects.filter(profesional=user, status='pendiente').count()
         return Response(
             {
                 'como_cliente': cc,
                 'como_profesional': cp,
                 'total': cc + cp,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['get'], url_path='contador-por-estado')
+    def contador_por_estado(self, request):
+        """
+        Conteo de reservas por estado, separado por rol.
+        pendiente incluye pendiente_urgente (misma etiqueta en UI).
+        """
+        from django.db.models import Count
+
+        user = request.user
+        estados = ['pendiente', 'pendiente_urgente', 'aceptado', 'finalizado', 'cancelado']
+
+        def _por_estado(qs):
+            raw = {
+                row['status']: row['c']
+                for row in qs.values('status').annotate(c=Count('id'))
+            }
+            pendiente = raw.get('pendiente', 0) + raw.get('pendiente_urgente', 0)
+            return {
+                'pendiente': pendiente,
+                'aceptado': raw.get('aceptado', 0),
+                'finalizado': raw.get('finalizado', 0),
+                'cancelado': raw.get('cancelado', 0),
+            }
+
+        como_cliente = _por_estado(Trabajo.objects.filter(usuario=user, status__in=estados))
+        como_profesional = _por_estado(Trabajo.objects.filter(profesional=user, status__in=estados))
+        return Response(
+            {
+                'como_cliente': como_cliente,
+                'como_profesional': como_profesional,
             },
             status=status.HTTP_200_OK,
         )

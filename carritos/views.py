@@ -581,3 +581,53 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=['get'], url_path='contador-por-estado')
+    def contador_por_estado(self, request):
+        """
+        Conteo de órdenes por estado, separado por rol.
+        `activas` = en_proceso + aceptada + entregada.
+        """
+        from django.db.models import Count
+
+        user = request.user
+        estados = ['en_proceso', 'aceptada', 'entregada', 'finalizada', 'cancelada']
+
+        def _por_estado(qs):
+            raw = {
+                row['status']: row['c']
+                for row in qs.values('status').annotate(c=Count('id'))
+            }
+            en_proceso = raw.get('en_proceso', 0)
+            aceptada = raw.get('aceptada', 0)
+            entregada = raw.get('entregada', 0)
+            return {
+                'en_proceso': en_proceso,
+                'aceptada': aceptada,
+                'entregada': entregada,
+                'finalizada': raw.get('finalizada', 0),
+                'cancelada': raw.get('cancelada', 0),
+                'activas': en_proceso + aceptada + entregada,
+            }
+
+        como_cliente = _por_estado(Orden.objects.filter(usuario=user, status__in=estados))
+        empresas = Empresa.objects.filter(admin_id=user)
+        como_empresa = (
+            _por_estado(Orden.objects.filter(empresa__in=empresas, status__in=estados))
+            if empresas.exists()
+            else {
+                'en_proceso': 0,
+                'aceptada': 0,
+                'entregada': 0,
+                'finalizada': 0,
+                'cancelada': 0,
+                'activas': 0,
+            }
+        )
+        return Response(
+            {
+                'como_cliente': como_cliente,
+                'como_empresa': como_empresa,
+            },
+            status=status.HTTP_200_OK,
+        )
