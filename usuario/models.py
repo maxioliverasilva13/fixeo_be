@@ -130,3 +130,43 @@ class PasswordResetToken(models.Model):
 
     def __str__(self):
         return f"Reset token for {self.usuario.correo}"
+
+
+class EmailVerificationChallenge(models.Model):
+    """
+    Verificación de correo pre-registro (código OTP).
+    No requiere Usuario existente: se valida antes de crear la cuenta.
+    """
+    email = models.EmailField(db_index=True)
+    code = models.CharField(max_length=6)
+    verification_token = models.UUIDField(null=True, blank=True, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    verified_at = models.DateTimeField(null=True, blank=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'email_verification_challenge'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['email', 'created_at'], name='idx_email_verif_email_created'),
+        ]
+
+    def is_code_valid(self) -> bool:
+        return (
+            self.used_at is None
+            and self.verified_at is None
+            and timezone.now() <= self.expires_at
+        )
+
+    def is_token_consumable(self) -> bool:
+        return (
+            self.verification_token is not None
+            and self.verified_at is not None
+            and self.used_at is None
+            and timezone.now() <= self.expires_at
+        )
+
+    def __str__(self):
+        return f"Email verify {self.email} ({'verified' if self.verified_at else 'pending'})"

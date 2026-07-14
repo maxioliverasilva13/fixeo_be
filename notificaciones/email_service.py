@@ -160,7 +160,14 @@ def build_notification_content(
     )
 
 
-def render_email_html(content: EmailContent) -> str:
+def render_email_html(
+    content: EmailContent,
+    *,
+    footer_text: str = (
+        'Recibiste este correo porque tenés activadas las notificaciones por email en ALaVuelta. '
+        'Podés cambiarlo desde Perfil → Notificaciones.'
+    ),
+) -> str:
     logo = _logo_url()
     cta = ''
     if content.cta_url:
@@ -213,8 +220,7 @@ def render_email_html(content: EmailContent) -> str:
           <tr>
             <td style="padding:18px 24px 24px;border-top:1px solid {BORDER};">
               <p style="margin:0;font-size:12px;color:{MUTED};line-height:1.5;text-align:center;">
-                Recibiste este correo porque tenés activadas las notificaciones por email en ALaVuelta.
-                Podés cambiarlo desde Perfil → Notificaciones.
+                {_escape(footer_text)}
               </p>
             </td>
           </tr>
@@ -225,6 +231,70 @@ def render_email_html(content: EmailContent) -> str:
 </body>
 </html>
 """
+
+
+def _resolve_recipient(to_email: str) -> tuple[str, Optional[str]]:
+    sandbox_to = (getattr(settings, 'EMAIL_SANDBOX_TO', None) or '').strip()
+    if sandbox_to and to_email.lower() != sandbox_to.lower():
+        return sandbox_to, to_email
+    return to_email, None
+
+
+def send_html_email(*, to_email: str, subject: str, html: str) -> dict[str, Any]:
+    api_key = getattr(settings, 'RESEND_API_KEY', None) or ''
+    if not api_key:
+        logger.warning('Email omitido: RESEND_API_KEY vacío')
+        return {'success': False, 'error': 'RESEND_API_KEY vacío'}
+    if not to_email:
+        return {'success': False, 'error': 'sin correo'}
+
+    destination, original_to = _resolve_recipient(to_email)
+    final_subject = subject
+    if original_to:
+        final_subject = f'[sandbox → {original_to}] {subject}'
+
+    try:
+        resend.api_key = api_key
+        result = resend.Emails.send({
+            'from': _from_address(),
+            'to': [destination],
+            'subject': final_subject,
+            'html': html,
+        })
+        logger.info('📧 Email enviado a %s', destination)
+        return {'success': True, 'result': result, 'to': destination, 'original_to': original_to}
+    except Exception as exc:
+        logger.exception('Error enviando email a %s', to_email)
+        return {'success': False, 'error': str(exc)}
+
+
+def send_verification_code_email(*, to_email: str, code: str, minutes_valid: int = 15) -> dict[str, Any]:
+    content = EmailContent(
+        subject=f'Tu código de verificación: {code}',
+        badge='Verificación',
+        headline='Confirmá tu correo',
+        body_html=f"""
+          <p style="margin:0 0 12px;font-size:15px;color:{TEXT};line-height:1.5;">
+            Usá este código para continuar con el registro en ALaVuelta:
+          </p>
+          <div style="text-align:center;margin:20px 0;">
+            <div style="display:inline-block;padding:16px 28px;border-radius:16px;background:{PRIMARY_LIGHTER};
+                        border:1px solid {BORDER};letter-spacing:0.35em;font-size:28px;font-weight:800;color:{PRIMARY};">
+              {_escape(code)}
+            </div>
+          </div>
+          <p style="margin:0;font-size:13px;color:{MUTED};line-height:1.6;text-align:center;">
+            El código vence en {minutes_valid} minutos. Si no pediste crear una cuenta, ignorá este correo.
+          </p>
+        """,
+        cta_label='',
+        cta_url='',
+    )
+    html = render_email_html(
+        content,
+        footer_text='Este código solo se usa para verificar tu correo al registrarte en ALaVuelta.',
+    )
+    return send_html_email(to_email=to_email, subject=content.subject, html=html)
 
 
 def send_notification_email(
@@ -239,11 +309,6 @@ def send_notification_email(
     Envía un email de notificación con el layout brand.
     Retorna dict con success/error (no lanza, para no romper el flow de push).
     """
-    api_key = getattr(settings, 'RESEND_API_KEY', None) or ''
-    if not api_key:
-        logger.warning('Email omitido: RESEND_API_KEY vacío')
-        return {'success': False, 'error': 'RESEND_API_KEY vacío'}
-
     if not to_email:
         return {'success': False, 'error': 'sin correo'}
 
@@ -254,17 +319,4 @@ def send_notification_email(
         usuario_nombre=usuario_nombre,
     )
     html = render_email_html(content)
-
-    try:
-        resend.api_key = api_key
-        result = resend.Emails.send({
-            'from': _from_address(),
-            'to': [to_email],
-            'subject': content.subject,
-            'html': html,
-        })
-        logger.info('📧 Email enviado a %s (tipo=%s)', to_email, (data or {}).get('tipo'))
-        return {'success': True, 'result': result}
-    except Exception as exc:
-        logger.exception('Error enviando email a %s', to_email)
-        return {'success': False, 'error': str(exc)}
+    return send_html_email(to_email=to_email, subject=content.subject, html=html)

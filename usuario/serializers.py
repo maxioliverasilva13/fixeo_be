@@ -494,6 +494,10 @@ class RegistroSerializer(serializers.Serializer):
         allow_null=True,
     )
     compartir_ubicacion_mapa = serializers.BooleanField(required=False, allow_null=True)
+    # Registro email/password: token emitido tras verificar el código OTP.
+    # Registro social: se puede omitir si se envía firebase_token válido.
+    email_verification_token = serializers.CharField(required=False, allow_blank=True)
+    firebase_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     def validate_compartir_ubicacion_mapa(self, value):
         if value is None:
@@ -536,7 +540,41 @@ class RegistroSerializer(serializers.Serializer):
                 else:
                     attrs['compartir_ubicacion_mapa'] = True
 
+        firebase_token = (attrs.get('firebase_token') or '').strip()
+        email_verification_token = (attrs.get('email_verification_token') or '').strip()
+        email = attrs.get('email') or ''
+
+        if firebase_token:
+            from firebase_admin import auth as firebase_auth
+            try:
+                decoded = firebase_auth.verify_id_token(firebase_token)
+            except Exception as exc:
+                raise serializers.ValidationError({
+                    'firebase_token': f'Token de Google/Facebook inválido: {exc}',
+                }) from exc
+            firebase_email = (decoded.get('email') or '').strip().lower()
+            if not firebase_email or firebase_email != email.strip().lower():
+                raise serializers.ValidationError({
+                    'firebase_token': 'El correo del proveedor social no coincide con el registro.',
+                })
+            attrs['email_verified_via'] = 'firebase'
+        else:
+            from usuario.email_verification import get_valid_email_verification_challenge
+            # Solo valida; el consume se hace en la vista al crear la cuenta con éxito.
+            get_valid_email_verification_challenge(email, email_verification_token)
+            attrs['email_verified_via'] = 'otp'
+            attrs['email_verification_token'] = email_verification_token
+
         return attrs
+
+
+class EnviarCodigoEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+
+class VerificarCodigoEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    codigo = serializers.CharField(required=True, max_length=6, min_length=4)
 
 class FilterUsersMapaSerializer(serializers.Serializer):
     north      = serializers.DecimalField(max_digits=20, decimal_places=15)

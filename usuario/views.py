@@ -9,6 +9,11 @@ from django.db import transaction
 from usuario.authentication import touch_token_activity
 from usuario.models import Usuario, PasswordResetToken
 from usuario.utils import obtener_localizacion_usuario, foto_usuario_api
+from usuario.email_verification import (
+    request_email_verification_code,
+    confirm_email_verification_code,
+    consume_email_verification_token,
+)
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
 from usuario.serializers import (
@@ -17,7 +22,8 @@ from usuario.serializers import (
     UpdateRangoMapaSerializer, FilterUsersMapaSerializer, UsuarioInMapaSerializer,
     UpdateUsuarioSerializer, ValidateEmailExistSerializer, SocialLoginSerializer,
     RequestPasswordResetSerializer, ConfirmPasswordResetSerializer,
-    AdminUsuarioSerializer, AdminUsuarioUpdateSerializer
+    AdminUsuarioSerializer, AdminUsuarioUpdateSerializer,
+    EnviarCodigoEmailSerializer, VerificarCodigoEmailSerializer,
 )
 from localizacion.models import Localizacion
 from empresas.models import Empresa
@@ -237,6 +243,25 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='enviar-codigo-verificacion')
+    def enviar_codigo_verificacion(self, request):
+        """Envía OTP al correo antes de crear la cuenta (registro email/password)."""
+        serializer = EnviarCodigoEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = request_email_verification_code(serializer.validated_data['email'])
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='verificar-codigo-email')
+    def verificar_codigo_email(self, request):
+        """Valida el OTP y devuelve email_verification_token para el registro."""
+        serializer = VerificarCodigoEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = confirm_email_verification_code(
+            serializer.validated_data['email'],
+            serializer.validated_data['codigo'],
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def registro(self, request):
         serializer = RegistroSerializer(data=request.data)
@@ -266,6 +291,12 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     rounded_foto_url=serializer.validated_data.get('rounded_foto_url', ''),
                     rango_mapa_km=rango_mapa if es_empresa else Decimal('10.00'),
                 )
+
+                if serializer.validated_data.get('email_verified_via') == 'otp':
+                    consume_email_verification_token(
+                        serializer.validated_data['email'],
+                        serializer.validated_data.get('email_verification_token') or '',
+                    )
                 
                 if serializer.validated_data.get('latitude') and serializer.validated_data.get('longitude'):
                     localizacion = Localizacion.objects.create(
