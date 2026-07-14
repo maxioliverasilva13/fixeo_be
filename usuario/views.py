@@ -214,18 +214,37 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
 
+    # Endpoints públicos de auth/registro (sin login).
+    # Security: rate-limit / OTP / firebase / cooldown — no JWT.
+    PUBLIC_AUTH_ACTIONS = frozenset({
+        'create',
+        'login',
+        'registro',
+        'validate_email',
+        'enviar_codigo_verificacion',
+        'verificar_codigo_email',
+        'social_login',
+        'request_reset_password',
+        'confirm_reset_password',
+    })
+
     def get_serializer_class(self):
         if self.action == 'create':
             return UsuarioCreateSerializer
         return UsuarioSerializer
 
     def get_permissions(self):
-        if self.action in [
-            'create', 'login', 'registro', 'validate_email', 'social_login',
-            'request_reset_password', 'confirm_reset_password',  # ← agregá estos
-            ]:
+        # Nota: get_permissions pisa permission_classes del @action; hay que listar acá.
+        if self.action in self.PUBLIC_AUTH_ACTIONS:
             return [AllowAny()]
         return [IsAuthenticated()]
+
+    def get_authenticators(self):
+        # Patrón recomendado para pre-auth: no exigir/validar JWT.
+        # Evita 401 si el cliente manda un Bearer viejo/inválido en registro.
+        if getattr(self, 'action', None) in self.PUBLIC_AUTH_ACTIONS:
+            return []
+        return super().get_authenticators()
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='validate-email')
     def validate_email(self, request):
