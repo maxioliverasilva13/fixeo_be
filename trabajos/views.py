@@ -383,15 +383,16 @@ class TrabajoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='contador-pendientes')
     def contador_pendientes(self, request):
         """
-        Conteo de trabajos en estado pendiente:
-        - como_cliente: reservas que pediste vos (esperan al profesional)
-        - como_profesional: reservas asignadas a vos que aún no aceptás
-        - total: suma de ambos (historial / negocío en navbar)
-        El front usa como_profesional solo en calendario (empresa).
+        Reservas activas (no finalizadas ni canceladas):
+        - como_cliente: las pediste vos
+        - como_profesional: te las asignaron a vos
+        - total: suma de ambos
+        Incluye pendiente, pendiente_urgente y aceptado.
         """
         user = request.user
-        cc = Trabajo.objects.filter(usuario=user, status='pendiente').count()
-        cp = Trabajo.objects.filter(profesional=user, status='pendiente').count()
+        activos = ~Q(status__in=['finalizado', 'cancelado'])
+        cc = Trabajo.objects.filter(usuario=user).filter(activos).count()
+        cp = Trabajo.objects.filter(profesional=user).filter(activos).count()
         return Response(
             {
                 'como_cliente': cc,

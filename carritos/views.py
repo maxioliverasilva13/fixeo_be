@@ -535,9 +535,9 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'], url_path='contador-pendientes')
     def contador_pendientes(self, request):
         """
-        Órdenes en estado inicial (equivalente UI "pendientes" de productos):
+        Órdenes en estado inicial (UI "Pendientes"):
         - como_cliente: compras tuyas en_proceso
-        - como_empresa: pedidos recibidos en tu negocio (admin empresa) en_proceso
+        - como_empresa: pedidos recibidos en tu negocio en_proceso
         - total: suma de ambos
         """
         user = request.user
@@ -545,6 +545,31 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
         empresas = Empresa.objects.filter(admin_id=user)
         como_empresa = (
             Orden.objects.filter(empresa__in=empresas, status='en_proceso').count()
+            if empresas.exists()
+            else 0
+        )
+        return Response(
+            {
+                'como_cliente': como_cliente,
+                'como_empresa': como_empresa,
+                'total': como_cliente + como_empresa,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['get'], url_path='contador-activas')
+    def contador_activas(self, request):
+        """
+        Órdenes no finalizadas ni canceladas:
+        - como_cliente / como_empresa / total
+        Incluye en_proceso, aceptada y entregada.
+        """
+        user = request.user
+        activos = ~Q(status__in=['finalizada', 'cancelada'])
+        como_cliente = Orden.objects.filter(usuario=user).filter(activos).count()
+        empresas = Empresa.objects.filter(admin_id=user)
+        como_empresa = (
+            Orden.objects.filter(empresa__in=empresas).filter(activos).count()
             if empresas.exists()
             else 0
         )
