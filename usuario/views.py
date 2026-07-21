@@ -56,10 +56,41 @@ from usuario.mapa_helpers import (
     batch_visibility_data as _batch_visibility_data,
     es_elegible_en_busqueda as _es_elegible_en_busqueda,
     es_visible_en_mapa as _es_visible_en_mapa,
+    plan_rank_tuple_from_sub as _plan_rank_tuple_from_sub,
     resolve_map_users_from_bounds,
     resolve_map_users_national,
     serialize_usuarios_mapa,
 )
+
+
+def _search_plan_fields(sub) -> tuple[int, str | None]:
+    """plan_rank numérico (mismo criterio que el mapa) + nombre del plan activo."""
+    precio, jobs = _plan_rank_tuple_from_sub(sub)
+    rank = int(precio * 1000 + (jobs or 0))
+    nombre = None
+    if sub is not None:
+        plan = getattr(sub, 'plan_id', None)
+        nombre = getattr(plan, 'nombre', None)
+    return rank, nombre
+
+
+def _sort_search_results(results: list, sort_by: str | None) -> None:
+    """Siempre prioriza mejor plan; luego sort_by / relevancia de texto."""
+
+    def key(x: dict) -> tuple:
+        plan = -(int(x.get('plan_rank') or 0))
+        text_rank = -float(x.get('rank') or 0)
+        if sort_by == 'mejor_valorados':
+            return (plan, -float(x.get('rating') or 0), text_rank)
+        if sort_by == 'mas_cercanos':
+            # Distancia real se calcula en FE; acá plan + relevancia de texto.
+            return (plan, text_rank)
+        if sort_by == 'mejor_precio':
+            p = _precio_para_filtro(x)
+            return (plan, p is None, p if p is not None else 0, text_rank)
+        return (plan, text_rank)
+
+    results.sort(key=key)
 
 SQL_QUERY = f"""
 SELECT *
@@ -830,11 +861,20 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 r['rounded_foto_url'] = foto_usuario_api(r.get('rounded_foto_url'))
 
         usuario_ids = [r['id'] for r in results if r.get('tipo') == 'usuario']
+        all_owner_ids = list({r['id'] for r in results if r.get('id') is not None})
+        subs_map, efectivo_counts = ({}, {})
+        if all_owner_ids:
+            subs_map, efectivo_counts = _batch_visibility_data(all_owner_ids)
+
         if usuario_ids:
             usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
-            subs_map, efectivo_counts = _batch_visibility_data(usuario_ids)
             visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
             results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
+
+        for r in results:
+            plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
+            r['plan_rank'] = plan_rank
+            r['plan_nombre'] = plan_nombre
 
         if profesion_id:
             pid = int(profesion_id)
@@ -847,12 +887,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         if is_urgent == 'true':
             results = [r for r in results if r.get('es_urgente')]
 
-        if sort_by == 'mejor_valorados':
-            results.sort(key=lambda x: float(x.get('rating') or 0), reverse=True)
-        elif sort_by == 'mas_cercanos':
-            results.sort(key=lambda x: x.get('rank', 0))
-        elif sort_by == 'mejor_precio':
-            results.sort(key=lambda x: (_precio_para_filtro(x) is None, _precio_para_filtro(x) or 0))
+        _sort_search_results(results, sort_by)
 
         return Response(results)
 
