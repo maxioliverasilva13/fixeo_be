@@ -978,19 +978,34 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         firebase_token = serializer.validated_data['firebase_token']
-        email          = serializer.validated_data['email']
-        nombre         = serializer.validated_data.get('nombre', '')
-        foto_url       = serializer.validated_data.get('foto_url', '')
+        nombre = serializer.validated_data.get('nombre', '')
+        foto_url = serializer.validated_data.get('foto_url', '')
 
         try:
-            firebase_auth.verify_id_token(firebase_token)
+            decoded = firebase_auth.verify_id_token(firebase_token)
         except Exception:
             return Response(
                 {'error': 'Token de Firebase inválido'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        usuario = Usuario.objects.filter(correo=email).first()
+        # Email del token es la fuente de verdad (Google / Facebook / Apple, incl. Hide My Email).
+        email = (
+            (decoded.get('email') or '').strip()
+            or (serializer.validated_data.get('email') or '').strip()
+        ).lower()
+        if not email:
+            return Response(
+                {
+                    'error': (
+                        'No se pudo obtener el email del proveedor social. '
+                        'Con Apple, autorizá el acceso al correo o desactivá «Ocultar mi correo».'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        usuario = Usuario.objects.filter(correo__iexact=email).first()
 
         if usuario:
             if usuario.is_deleted or not usuario.is_active:
@@ -1009,7 +1024,15 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             })
         else:
             return Response(
-                {'error': 'Usuario no registrado', 'isNewUser': True},
+                {
+                    'error': 'Usuario no registrado',
+                    'isNewUser': True,
+                    'email': email,
+                    'nombre': nombre,
+                    'foto_url': foto_url,
+                    'firebase_uid': decoded.get('uid'),
+                    'sign_in_provider': (decoded.get('firebase') or {}).get('sign_in_provider'),
+                },
                 status=status.HTTP_404_NOT_FOUND
             )
 

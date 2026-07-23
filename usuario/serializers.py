@@ -550,14 +550,16 @@ class RegistroSerializer(serializers.Serializer):
                 decoded = firebase_auth.verify_id_token(firebase_token)
             except Exception as exc:
                 raise serializers.ValidationError({
-                    'firebase_token': f'Token de Google/Facebook inválido: {exc}',
+                    'firebase_token': f'Token social (Google/Facebook/Apple) inválido: {exc}',
                 }) from exc
             firebase_email = (decoded.get('email') or '').strip().lower()
             if not firebase_email or firebase_email != email.strip().lower():
                 raise serializers.ValidationError({
                     'firebase_token': 'El correo del proveedor social no coincide con el registro.',
                 })
+            # Apple Hide My Email / private relay son válidos.
             attrs['email_verified_via'] = 'firebase'
+            attrs['sign_in_provider'] = (decoded.get('firebase') or {}).get('sign_in_provider')
         else:
             from usuario.email_verification import get_valid_email_verification_challenge
             # Solo valida; el consume se hace en la vista al crear la cuenta con éxito.
@@ -741,9 +743,10 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
 class SocialLoginSerializer(serializers.Serializer):
     firebase_token = serializers.CharField(required=True)
-    email          = serializers.EmailField(required=True)
-    nombre         = serializers.CharField(required=False, allow_blank=True, default='')
-    foto_url       = serializers.URLField(required=False, allow_blank=True, default='')
+    # Opcional: el email se toma preferentemente del token Firebase (Apple/Google/Facebook).
+    email = serializers.EmailField(required=False, allow_blank=True, default='')
+    nombre = serializers.CharField(required=False, allow_blank=True, default='')
+    foto_url = serializers.CharField(required=False, allow_blank=True, default='')
 
 class RequestPasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()
