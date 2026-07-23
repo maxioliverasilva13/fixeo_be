@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/recursos/', include('recursos.urls')),
     path('api/servicios/', include('servicios.urls')),
     path('api/pagos/', include('pagos.urls')),
+    path('api/whatsapp/', include('whatsapp.urls')),
     path('api/token/refresh/', SlidingTokenRefreshView.as_view(), name='token_refresh'),
     path('api/planes/', include(planes_urlpatterns)),
     path('api/suscripciones/', include(suscripciones_urlpatterns)),

@@ -18,10 +18,81 @@ from empresas.models import Empresa, Producto
 from empresas.delivery_utils import productos_comparten_modalidad, validar_tipo_entrega_productos
 from notificaciones.models import Notificaciones
 from notificaciones.tasks import notificar_usuario
+from whatsapp.tasks import enviar_mensaje_whatsapp_task
 from django.db.models import Q
+from django.utils import timezone
 from .chat_helpers import enviar_mensaje_orden_chat
 
 logger = logging.getLogger(__name__)
+
+TIPO_ENTREGA_TEXTOS = {
+    'retiro': 'Retiro en local',
+    'domicilio': 'Envío a domicilio',
+}
+
+
+def _detalle_productos_orden(orden):
+    """Ej: '2x Corte de cabello, 1x Shampoo'"""
+    items = list(orden.items.select_related('producto').all())
+    if not items:
+        return ''
+    return ', '.join(f"{item.cantidad}x {item.producto.nombre}" for item in items)
+
+
+def _total_formateado(orden):
+    moneda = f" {orden.currency}" if orden.currency else ''
+    return f"${orden.total}{moneda}"
+
+
+def _direccion_orden(orden):
+    """
+    Dirección relevante según el tipo de entrega: si es retiro, la del local
+    del profesional; si es a domicilio, la del usuario. Ambos casos ya
+    quedan resueltos en orden.localizacion_entrega al crear la orden.
+    """
+    loc = orden.localizacion_entrega
+    if not loc:
+        return ''
+    direccion = loc.address or loc.ubicacion
+    if loc.city:
+        direccion = f"{direccion}, {loc.city}" if direccion else loc.city
+    if not direccion:
+        return ''
+    etiqueta = 'Dirección de retiro' if orden.tipo_entrega == 'retiro' else 'Dirección de entrega'
+    return f"{etiqueta}: {direccion}"
+
+
+def _mensaje_whatsapp_orden(orden, encabezado, motivo=None):
+    """
+    Arma un mensaje de WhatsApp con el detalle de la orden: producto/s,
+    total, tipo de entrega, dirección, fecha/hora del evento, notas y
+    motivo (si aplica). El encabezado ya debe traer resaltado con *...* lo
+    importante (nro. de orden, nuevo estado).
+    """
+    lineas = [encabezado]
+
+    detalle = _detalle_productos_orden(orden)
+    if detalle:
+        lineas.append(f"  Producto/s: {detalle}")
+
+    lineas.append(f"  Total: *{_total_formateado(orden)}*")
+    lineas.append(f"  Entrega: {TIPO_ENTREGA_TEXTOS.get(orden.tipo_entrega, orden.tipo_entrega)}")
+
+    direccion = _direccion_orden(orden)
+    if direccion:
+        lineas.append(f"  {direccion}")
+
+    ahora = timezone.localtime(timezone.now())
+    lineas.append(f"  Fecha: *{ahora.strftime('%d/%m/%Y')}*")
+    lineas.append(f"  Hora: *{ahora.strftime('%H:%M')}*")
+
+    if orden.notas:
+        lineas.append(f"  Notas: {orden.notas}")
+
+    if motivo:
+        lineas.append(f"  Motivo: *{motivo}*")
+
+    return '\n'.join(lineas)
 
 
 class CarritoViewSet(viewsets.ModelViewSet):
@@ -374,6 +445,31 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 entity_id=orden.id,
             )
 
+            logger.info(
+                "Encolando WhatsApp de orden creada para orden %s (usuario_id=%s), se disparará on_commit",
+                orden.id, request.user.id,
+            )
+
+            def _enviar_whatsapp_orden_creada():
+                logger.info(
+                    "Disparando WhatsApp de orden creada (orden_id=%s, usuario_id=%s)",
+                    orden.id, request.user.id,
+                )
+                enviar_mensaje_whatsapp_task.delay(
+                    usuario_id=request.user.id,
+                    body=_mensaje_whatsapp_orden(
+                        orden,
+                        encabezado=(
+                            f'Tu orden *#{orden.numero_orden}* en {empresa.nombre} *fue registrada*.\n'
+                            f'Está *pendiente de confirmación* del profesional. '
+                            f'Te vamos a avisar por acá apenas la acepte.'
+                        ),
+                    ),
+                    profesional_id=empresa.admin_id_id,
+                )
+
+            transaction.on_commit(_enviar_whatsapp_orden_creada)
+
             if empresa.admin_id_id != request.user.id:
                 cliente_nombre = (
                     f"{request.user.nombre} {request.user.apellido}".strip()
@@ -458,9 +554,20 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        motivo = (request.data.get('motivo') or '').strip()
+        if nuevo_estado == 'cancelada' and not motivo:
+            return Response(
+                {'error': 'Debes indicar un motivo para cancelar la orden'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         estado_anterior = orden.get_status_display()
         orden.status = nuevo_estado
-        orden.save()
+        if nuevo_estado == 'cancelada':
+            orden.motivo_cancelacion = motivo
+            orden.save(update_fields=['status', 'motivo_cancelacion', 'updated_at'])
+        else:
+            orden.save()
 
         if nuevo_estado == 'finalizada' and orden.metodo_pago == 'mercadopago':
             try:
@@ -508,6 +615,26 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
         texto_estado = (
             f'Tu orden #{orden.numero_orden} de {orden.empresa.nombre} {mensaje_estado}.'
         )
+
+        encabezado_whatsapp = (
+            f'Tu orden *#{orden.numero_orden}* de {orden.empresa.nombre} *{mensaje_estado}*.'
+        )
+        texto_whatsapp = _mensaje_whatsapp_orden(
+            orden,
+            encabezado=encabezado_whatsapp,
+            motivo=motivo if nuevo_estado == 'cancelada' else None,
+        )
+
+        logger.info(
+            "Encolando WhatsApp de cambio de estado para orden %s (usuario_id=%s, %s -> %s)",
+            orden.id, orden.usuario_id, estado_anterior, nuevo_estado,
+        )
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=orden.usuario_id,
+            body=texto_whatsapp,
+            profesional_id=orden.empresa.admin_id_id,
+        )
+
         enviar_mensaje_orden_chat(
             orden,
             texto=texto_estado,

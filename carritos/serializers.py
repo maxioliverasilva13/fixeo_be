@@ -103,9 +103,10 @@ class OrdenSerializer(serializers.ModelSerializer):
         fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'usuario_info', 'empresa', 'empresa_nombre', 'empresa_info',
                   'empresa_admin_id', 'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega',
                   'localizacion_info', 'total', 'comision_plataforma', 'pago_status', 'notas',
-                  'fecha_entrega', 'items', 'pago_info', 'mi_calificacion', 'mi_calificacion_cliente', 'created_at', 'updated_at']
+                  'fecha_entrega', 'motivo_cancelacion', 'items', 'pago_info', 'mi_calificacion',
+                  'mi_calificacion_cliente', 'created_at', 'updated_at']
         read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
-                            'pago_status', 'localizacion_entrega', 'created_at', 'updated_at']
+                            'pago_status', 'localizacion_entrega', 'motivo_cancelacion', 'created_at', 'updated_at']
 
     def get_usuario_nombre(self, obj):
         return f"{obj.usuario.nombre} {obj.usuario.apellido}"

@@ -4,6 +4,7 @@ from django.db import transaction
 from localizacion.models import Localizacion
 from mensajeria.models import Chat
 from notificaciones.tasks import notificar_usuario
+from whatsapp.tasks import enviar_mensaje_whatsapp_task
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -18,6 +19,7 @@ from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
 from .models import Calificacion, CalificacionDireccion, OfertaTrabajo, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
+from .whatsapp_helpers import mensaje_whatsapp_trabajo
 from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
@@ -150,6 +152,15 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'entity_id': trabajo.id,
                 'tipo': 'trabajo_aceptado'
             }
+        )
+
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=trabajo.usuario.id,
+            body=mensaje_whatsapp_trabajo(
+                trabajo,
+                encabezado=f"Tu trabajo con *{request.user.nombre} {request.user.apellido}* *ha sido aceptado*.",
+            ),
+            profesional_id=trabajo.profesional_id,
         )
 
         chat = Chat.objects.filter(
@@ -549,7 +560,17 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'tipo': 'trabajo_rechazado'
             }
         )
-        
+
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=trabajo.usuario.id,
+            body=mensaje_whatsapp_trabajo(
+                trabajo,
+                encabezado=f"Tu trabajo con *{request.user.nombre} {request.user.apellido}* *fue rechazado*.",
+                motivo=motivo or None,
+            ),
+            profesional_id=trabajo.profesional_id,
+        )
+
         return Response({
             'message': 'Trabajo rechazado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
@@ -680,6 +701,23 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'entity_id': trabajo.id,
                 'tipo': 'trabajo_creado'
             }
+        )
+
+        if newStatus == 'aceptado':
+            encabezado_whatsapp = (
+                f"Tu trabajo con *{profesional.nombre} {profesional.apellido}* *ha sido aceptado*."
+            )
+        else:
+            encabezado_whatsapp = (
+                f"Tu solicitud de trabajo con *{profesional.nombre} {profesional.apellido}* fue registrada.\n"
+                f"Está *pendiente de confirmación* del profesional. "
+                f"Te vamos a avisar por acá apenas la acepte."
+            )
+
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=usuario.id,
+            body=mensaje_whatsapp_trabajo(trabajo, encabezado=encabezado_whatsapp),
+            profesional_id=profesional.id,
         )
 
         if profesional.auto_aprobacion_trabajos:

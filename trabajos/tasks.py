@@ -9,10 +9,69 @@ from trabajos.models import Calificacion, CalificacionDireccion, Trabajo
 
 logger = logging.getLogger(__name__)
 
+_MESES_ES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+]
+
 
 def _recordatorio_calificacion_countdown_seconds() -> int:
     minutos = getattr(settings, 'RECORDATORIO_CALIFICAR_PROFESIONAL_TRABAJO_MINUTES', 1)
     return max(0, int(minutos)) * 60
+
+
+def _nombre_completo(usuario, fallback: str) -> str:
+    nombre = f"{usuario.nombre} {usuario.apellido}".strip()
+    return nombre or fallback
+
+
+def _servicio_trabajo_nombre(trabajo: Trabajo) -> str:
+    """Nombre descriptivo del servicio del trabajo: servicios asociados, profesión urgente o descripción."""
+    servicios = list(
+        trabajo.trabajo_servicios
+        .select_related('servicio')
+        .values_list('servicio__nombre', flat=True)
+    )
+    servicios = [s for s in servicios if s]
+    if servicios:
+        return ', '.join(servicios)
+
+    if trabajo.profesion_urgente_id and trabajo.profesion_urgente:
+        return trabajo.profesion_urgente.nombre
+
+    descripcion = (trabajo.descripcion or '').strip()
+    if descripcion:
+        return descripcion if len(descripcion) <= 60 else f"{descripcion[:57]}..."
+
+    return 'tu servicio'
+
+
+def _fecha_trabajo_formateada(trabajo: Trabajo) -> str:
+    fecha = trabajo.fecha_fin or trabajo.fecha_inicio
+    if not fecha:
+        return ''
+    fecha_local = timezone.localtime(fecha)
+    mes = _MESES_ES[fecha_local.month - 1]
+    return f"{fecha_local.day} de {mes} a las {fecha_local.strftime('%H:%M')}"
+
+
+def _precio_trabajo_formateado(trabajo: Trabajo) -> str:
+    if trabajo.precio_final is None:
+        return ''
+    moneda = trabajo.currency or ''
+    return f"{trabajo.precio_final:.2f} {moneda}".strip()
+
+
+def _detalle_trabajo_lineas(trabajo: Trabajo) -> str:
+    """Líneas adicionales (fecha, precio) para el cuerpo del recordatorio, ya formateadas."""
+    lineas = []
+    fecha = _fecha_trabajo_formateada(trabajo)
+    if fecha:
+        lineas.append(f"📅 {fecha}")
+    precio = _precio_trabajo_formateado(trabajo)
+    if precio:
+        lineas.append(f"💰 {precio}")
+    return ('\n' + '\n'.join(lineas)) if lineas else ''
 
 
 def ejecutar_post_finalizacion_trabajo(trabajo: Trabajo) -> dict:
@@ -53,7 +112,8 @@ def enviar_recordatorio_calificacion_trabajo(trabajo_id: int):
     trabajo = (
         Trabajo.objects
         .filter(id=trabajo_id, status='finalizado')
-        .select_related('usuario', 'profesional')
+        .select_related('usuario', 'profesional', 'profesion_urgente')
+        .prefetch_related('trabajo_servicios__servicio')
         .first()
     )
     if not trabajo:
@@ -73,21 +133,24 @@ def enviar_recordatorio_calificacion_trabajo(trabajo_id: int):
         logger.info("Recordatorio calificación omitido: trabajo %s ya calificado", trabajo_id)
         return {'skipped': True, 'reason': 'already_rated', 'trabajo_id': trabajo_id}
 
-    profesional_nombre = (
-        f"{trabajo.profesional.nombre} {trabajo.profesional.apellido}".strip()
-        or 'el profesional'
-    )
+    profesional_nombre = _nombre_completo(trabajo.profesional, 'el profesional')
+    servicio_nombre = _servicio_trabajo_nombre(trabajo)
+    detalle = _detalle_trabajo_lineas(trabajo)
 
     notificar_usuario.delay(
         usuario_id=trabajo.usuario_id,
-        titulo=f"Califica a {profesional_nombre}",
-        mensaje=f"Tu trabajo con {profesional_nombre} ha finalizado. ¡Califícalo ahora!",
+        titulo=f"⭐ Calificá a {profesional_nombre}",
+        mensaje=(
+            f"Tu servicio de {servicio_nombre} con {profesional_nombre} "
+            f"ya finalizó.{detalle}\n¡Contanos cómo te fue!"
+        ),
         data={
             'deep_link': f'/historial?trabajoId={trabajo_id}&calificar=true',
             'entity_id': trabajo_id,
             'trabajo_id': str(trabajo_id),
             'profesional_id': str(trabajo.profesional_id),
             'profesional_nombre': profesional_nombre,
+            'servicio_nombre': servicio_nombre,
             'tipo': 'calificacion_pendiente',
         },
     )
@@ -105,7 +168,8 @@ def enviar_recordatorio_calificacion_profesional(trabajo_id: int):
     trabajo = (
         Trabajo.objects
         .filter(id=trabajo_id, status='finalizado')
-        .select_related('usuario', 'profesional')
+        .select_related('usuario', 'profesional', 'profesion_urgente')
+        .prefetch_related('trabajo_servicios__servicio')
         .first()
     )
     if not trabajo:
@@ -131,21 +195,24 @@ def enviar_recordatorio_calificacion_profesional(trabajo_id: int):
         )
         return {'skipped': True, 'reason': 'already_rated', 'trabajo_id': trabajo_id}
 
-    cliente_nombre = (
-        f"{trabajo.usuario.nombre} {trabajo.usuario.apellido}".strip()
-        or 'el cliente'
-    )
+    cliente_nombre = _nombre_completo(trabajo.usuario, 'el cliente')
+    servicio_nombre = _servicio_trabajo_nombre(trabajo)
+    detalle = _detalle_trabajo_lineas(trabajo)
 
     notificar_usuario.delay(
         usuario_id=trabajo.profesional_id,
-        titulo=f"Califica a {cliente_nombre}",
-        mensaje=f"Tu trabajo con {cliente_nombre} ha finalizado. ¡Califícalo ahora!",
+        titulo=f"⭐ Calificá a {cliente_nombre}",
+        mensaje=(
+            f"El servicio de {servicio_nombre} con {cliente_nombre} "
+            f"ya finalizó.{detalle}\nCalificalo para completarlo."
+        ),
         data={
             'deep_link': f'/historial?trabajoId={trabajo_id}&calificar=true',
             'entity_id': trabajo_id,
             'trabajo_id': str(trabajo_id),
             'cliente_id': str(trabajo.usuario_id),
             'cliente_nombre': cliente_nombre,
+            'servicio_nombre': servicio_nombre,
             'tipo': 'calificacion_pendiente_profesional',
         },
     )

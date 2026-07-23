@@ -19,7 +19,9 @@ from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
 from disponibilidad.models import Disponibilidad, Tipo
 from notificaciones.tasks import notificar_usuario, notificar_usuarios_multiple
+from whatsapp.tasks import enviar_mensaje_whatsapp_task
 from .models import Trabajo, OfertaTrabajo
+from .whatsapp_helpers import mensaje_whatsapp_trabajo
 from .serializers import (
     TrabajoUrgenteCreateSerializer,
     TrabajoUrgenteDetailSerializer,
@@ -211,7 +213,12 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     'tipo': 'nuevo_trabajo_urgente'
                 }
             )
-        
+
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=usuario.id,
+            body=f"Tu trabajo urgente de {profesion.nombre} fue publicado. Te avisaremos cuando recibas ofertas.",
+        )
+
         return Response(
             TrabajoUrgenteDetailSerializer(trabajo, context={'request': request}).data,
             status=status.HTTP_201_CREATED
@@ -569,7 +576,19 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 'tipo': 'oferta_aceptada'
             }
         )
-        
+
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=trabajo.usuario.id,
+            body=mensaje_whatsapp_trabajo(
+                trabajo,
+                encabezado=(
+                    f"Tu trabajo urgente fue asignado a "
+                    f"*{oferta.profesional.nombre} {oferta.profesional.apellido}* y *ha sido aceptado*."
+                ),
+            ),
+            profesional_id=oferta.profesional_id,
+        )
+
         ofertas_rechazadas = trabajo.ofertas.filter(status='rechazada').exclude(id=oferta.id)
         for oferta_rechazada in ofertas_rechazadas:
             notificar_usuario.delay(
@@ -787,6 +806,11 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                     'tipo': 'trabajo_urgente_cancelado'
                 }
             )
+
+        enviar_mensaje_whatsapp_task.delay(
+            usuario_id=trabajo.usuario.id,
+            body="Tu trabajo urgente fue cancelado.",
+        )
 
         return Response({
             'message': 'Trabajo urgente cancelado exitosamente',

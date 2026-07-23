@@ -27,11 +27,13 @@ services:
 
   web:
     build: .
-    command: python -m watchfiles "daphne -b 0.0.0.0 -p 8000 fixeo_project.asgi:application" .
+    command: python -m watchfiles --filter python "daphne -b 0.0.0.0 -p 8000 fixeo_project.asgi:application" .
     volumes:
       - .:/app
     ports:
       - "8000:8000"
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
     env_file:
       - .env
     depends_on:
@@ -42,9 +44,11 @@ services:
 
   celery:
     build: .
-    command: python -m watchfiles "celery -A fixeo_project worker --beat --loglevel=info" trabajos fixeo_project notificaciones
+    command: python -m watchfiles --filter python "celery -A fixeo_project worker --beat --loglevel=info" .
     volumes:
       - .:/app
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
     env_file:
       - .env
     depends_on:

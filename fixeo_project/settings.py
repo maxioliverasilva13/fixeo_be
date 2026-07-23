@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost').split(',')
+ALLOWED_HOSTS = [h.strip() for h in config('ALLOWED_HOSTS', default='localhost').split(',') if h.strip()]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'servicios',
     'horarios',
     'pagos',
+    'whatsapp',
     'rest_framework_simplejwt.token_blacklist',
     'channels',
     'survey'
@@ -168,28 +169,8 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 ]
 
 if DEBUG:
-    CORS_ALLOWED_ORIGINS = [
-        "http://localhost:3000",
-        "https://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://127.0.0.1:3000",
-        "http://localhost:5001",
-        "http://127.0.0.1:5001",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://172.20.10.4:3000",
-        "https://172.20.10.4:3000",
-        "https://172.20.10.3:3000",
-        "http://172.20.10.3:3000",
-        "http://172.20.10.3:8000",
-        "https://172.20.10.3:8000",
-        "http://172.20.10.5:3000",
-        "http://172.20.10.5:5001",
-        "http://172.20.10.5:8000",
-        "https://landingquestionalavuelta-production.up.railway.app",
-        "http://172.20.10.2:8000",
-        "http://172.20.10.2:3000",
-    ]
+    CORS_ALLOW_ALL_ORIGINS = True
+    
 else:
     CORS_ALLOW_ALL_ORIGINS = True
 
@@ -205,8 +186,8 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'ngrok-skip-browser-warning',
 ]
-
 # Métodos HTTP permitidos
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -256,6 +237,7 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_IMPORTS = (
     'trabajos.tasks',
     'notificaciones.tasks',
+    'whatsapp.tasks',
     'fixeo_project.tasks',
 )
 
@@ -317,4 +299,20 @@ GOOGLE_PLAY_PACKAGE_NAME = config('GOOGLE_PLAY_PACKAGE_NAME', default='')
 
 APP_STORE_SHARED_SECRET = config('APP_STORE_SHARED_SECRET', default='')
 APP_STORE_ENVIRONMENT = config('APP_STORE_ENVIRONMENT', default='sandbox')
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp (Meta Cloud API)
+# ---------------------------------------------------------------------------
+WHATSAPP_ACCESS_TOKEN = config('WHATSAPP_ACCESS_TOKEN', default='')
+WHATSAPP_PHONE_NUMBER_ID = config('WHATSAPP_PHONE_NUMBER_ID', default='')
+WHATSAPP_BUSINESS_ACCOUNT_ID = config('WHATSAPP_BUSINESS_ACCOUNT_ID', default='')
+WHATSAPP_API_VERSION = config('WHATSAPP_API_VERSION', default='v20.0')
+WHATSAPP_GRAPH_BASE_URL = config('WHATSAPP_GRAPH_BASE_URL', default='https://graph.facebook.com')
+WHATSAPP_WEBHOOK_TOKEN = config('WHATSAPP_WEBHOOK_TOKEN', default='')
+WHATSAPP_APP_SECRET = config('WHATSAPP_APP_SECRET', default='')
+# Usuario.telefono se guarda sin código de país (el matching de mensajes entrantes
+# usa los últimos 8 dígitos). Al enviar, si el número no trae código de país se le
+# antepone este default.
+WHATSAPP_DEFAULT_COUNTRY_CODE = config('WHATSAPP_DEFAULT_COUNTRY_CODE', default='598')
 

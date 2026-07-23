@@ -87,6 +87,7 @@ class Orden(BaseModel):
     comision_plataforma = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     notas = models.TextField(blank=True, default='')
     fecha_entrega = models.DateTimeField(null=True, blank=True)
+    motivo_cancelacion = models.TextField(blank=True, default='')
     pago_status = models.CharField(max_length=20, blank=True, default='', help_text='Estado del pago MP')
     currency = models.CharField(
         max_length=3,
