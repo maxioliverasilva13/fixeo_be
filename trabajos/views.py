@@ -401,22 +401,21 @@ class TrabajoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='contador-por-estado')
     def contador_por_estado(self, request):
         """
-        Conteo de reservas por estado, separado por rol.
-        pendiente incluye pendiente_urgente (misma etiqueta en UI).
+        Conteo de reservas por estado, mismo criterio que el listado del historial:
+        no incluye pendiente_urgente (esas van al flujo de urgentes, no a Historial).
         """
         from django.db.models import Count
 
         user = request.user
-        estados = ['pendiente', 'pendiente_urgente', 'aceptado', 'finalizado', 'cancelado']
+        estados = ['pendiente', 'aceptado', 'finalizado', 'cancelado']
 
         def _por_estado(qs):
             raw = {
                 row['status']: row['c']
                 for row in qs.values('status').annotate(c=Count('id'))
             }
-            pendiente = raw.get('pendiente', 0) + raw.get('pendiente_urgente', 0)
             return {
-                'pendiente': pendiente,
+                'pendiente': raw.get('pendiente', 0),
                 'aceptado': raw.get('aceptado', 0),
                 'finalizado': raw.get('finalizado', 0),
                 'cancelado': raw.get('cancelado', 0),
