@@ -9,7 +9,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Plan, Subscripcion
+from .models import Plan, Subscripcion, SubscripcionStatus
 from .serializers import (
     PlanSerializer,
     SubscripcionSerializer,
@@ -439,7 +439,7 @@ class AdminAsignarSubscripcionView(APIView):
             expiracion=expiracion,
             jobs_restantes=plan.cantidad_jobs + jobs_extra,
             source=fuente,
-            status=Subscripcion.SubscripcionStatus.ACTIVE,
+            status=SubscripcionStatus.ACTIVE,
         )
 
         # Si el usuario es owner de empresa, actualizar is_owner_empresa si es necesario

@@ -950,6 +950,8 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_staff=is_staff.lower() == 'true')
         if is_owner_empresa is not None:
             queryset = queryset.filter(is_owner_empresa=is_owner_empresa.lower() == 'true')
+        else:
+            queryset = queryset.filter(is_owner_empresa=False)
         if is_deleted is not None:
             queryset = queryset.filter(is_deleted=is_deleted.lower() == 'true')
         if rol_id:

@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     'trabajos',
     'mensajeria',
     'notificaciones',
+    'publicidades',
     'suscripciones',
     'recursos',
     'servicios',

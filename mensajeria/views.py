@@ -180,7 +180,71 @@ class ChatViewSet(viewsets.ModelViewSet):
             ChatSerializer(chat, context={'request': request}).data,
             status=status.HTTP_201_CREATED
         )
-    
+
+    @action(detail=False, methods=['post'], url_path='soporte')
+    def soporte(self, request):
+        """Obtiene (o crea) el chat de soporte del usuario con el admin de la plataforma."""
+        admin = Usuario.objects.filter(rol__nombre='admin').order_by('id').first()
+        if not admin:
+            return Response(
+                {'error': 'No hay un usuario admin configurado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if admin.id == request.user.id:
+            return Response(
+                {'error': 'No puedes crear un chat de soporte con tu propia cuenta'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        mensaje_inicial = request.data.get('mensaje_inicial')
+
+        chat = Chat.objects.filter(
+            Q(sender=request.user, receiver=admin) | Q(sender=admin, receiver=request.user)
+        ).first()
+
+        if chat:
+            return Response(
+                ChatSerializer(chat, context={'request': request}).data,
+                status=status.HTTP_200_OK
+            )
+
+        chat = Chat.objects.create(sender=request.user, receiver=admin)
+
+        if mensaje_inicial:
+            Mensajes.objects.create(
+                texto=mensaje_inicial,
+                sender=request.user,
+                chat=chat,
+                tipo=Mensajes.TipoMensaje.TEXTO,
+            )
+            chat.ultimo_mensaje_at = chat.created_at
+            chat.save()
+
+        channel_layer = get_channel_layer()
+        payload = {
+            'type': 'chat_message',
+            'message': mensaje_inicial if mensaje_inicial else '',
+            'user_id': request.user.id,
+            'leido': False,
+            'chat_id': chat.id,
+            'chat': {
+                'id': chat.id,
+                'sender_id': chat.sender.id,
+                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'receiver_id': chat.receiver.id,
+                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                'ultimo_mensaje_at': chat.ultimo_mensaje_at.isoformat(),
+            }
+        }
+        async_to_sync(channel_layer.group_send)(f'user_{admin.id}', payload)
+
+        return Response(
+            ChatSerializer(chat, context={'request': request}).data,
+            status=status.HTTP_201_CREATED
+        )
+
     @action(detail=True, methods=['get'])
     def mensajes(self, request, pk=None):
         chat = self.get_object()
