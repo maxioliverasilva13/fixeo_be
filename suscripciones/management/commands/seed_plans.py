@@ -32,7 +32,7 @@ PLANES_SEED = [
         'cantidad_jobs': 200,
         'activo': True,
         'google_play_id': 'alavuelta_monthly',
-        'appstore_id': 'com.alavueltaapp.basico.monthly',
+        'appstore_id': 'alavueltaapp_monthly',
         'caracteristicas': [
             'Hasta 200 trabajos por mes',
             'Acceso al mapa de profesionales',
@@ -50,7 +50,7 @@ PLANES_SEED = [
         'cantidad_jobs': 1000,
         'activo': True,
         'google_play_id': 'alavuelta_monthly_pro',
-        'appstore_id': 'com.alavueltaapp.pro.monthly',
+        'appstore_id': 'alavueltaapp_pro',
         'caracteristicas': [
             'Hasta 1000 trabajos por mes',
             'Acceso prioritario al mapa de profesionales',

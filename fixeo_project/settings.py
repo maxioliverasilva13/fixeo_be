@@ -266,8 +266,10 @@ CELERY_BEAT_SCHEDULE = {
 
 FIREBASE_CREDENTIALS = config('FIREBASE_CREDENTIALS', default=None)
 
-RESEND_API_KEY = config('RESEND_API_KEY')
+RESEND_API_KEY = config('RESEND_API_KEY', default='')
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8081')
+EMAIL_FROM = config('EMAIL_FROM', default='onboarding@resend.dev')
+EMAIL_LOGO_URL = config('EMAIL_LOGO_URL', default='')
 
 import logging
 logger = logging.getLogger(__name__)
@@ -300,6 +302,10 @@ GOOGLE_PLAY_PACKAGE_NAME = config('GOOGLE_PLAY_PACKAGE_NAME', default='')
 
 APP_STORE_SHARED_SECRET = config('APP_STORE_SHARED_SECRET', default='')
 APP_STORE_ENVIRONMENT = config('APP_STORE_ENVIRONMENT', default='sandbox')
+APP_STORE_KEY_ID = config('APP_STORE_KEY_ID', default='')
+APP_STORE_ISSUER_ID = config('APP_STORE_ISSUER_ID', default='')
+APP_STORE_BUNDLE_ID = config('APP_STORE_BUNDLE_ID', default='com.alavueltaapp')
+APP_STORE_API_KEY = config('APP_STORE_API_KEY', default='')
 
 
 # ---------------------------------------------------------------------------

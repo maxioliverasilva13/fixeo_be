@@ -34,7 +34,8 @@ class UsuarioSortSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 
                   'trabajo_domicilio', 'trabajo_local', 'is_owner_empresa', 
                   'is_active', 'is_staff', 'empresa', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle',
-                  'is_configured', 'auto_aprobacion_trabajos', 'localizacion_principal']
+                  'is_configured', 'auto_aprobacion_trabajos', 'localizacion_principal',
+                  'recibir_notificaciones', 'recibir_correos']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
@@ -82,7 +83,8 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana',
                   'subscripcion_activa', 'rating','cant_calif', 'rating_cliente', 'cant_calif_cliente',
-                  'es_visible_en_mapa', 'advertencias_mapa']
+                  'es_visible_en_mapa', 'advertencias_mapa',
+                  'recibir_notificaciones', 'recibir_correos']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def _puede_ver_rating_cliente(self):
@@ -492,6 +494,10 @@ class RegistroSerializer(serializers.Serializer):
         allow_null=True,
     )
     compartir_ubicacion_mapa = serializers.BooleanField(required=False, allow_null=True)
+    # Registro email/password: token emitido tras verificar el código OTP.
+    # Registro social: se puede omitir si se envía firebase_token válido.
+    email_verification_token = serializers.CharField(required=False, allow_blank=True)
+    firebase_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     def validate_compartir_ubicacion_mapa(self, value):
         if value is None:
@@ -534,7 +540,43 @@ class RegistroSerializer(serializers.Serializer):
                 else:
                     attrs['compartir_ubicacion_mapa'] = True
 
+        firebase_token = (attrs.get('firebase_token') or '').strip()
+        email_verification_token = (attrs.get('email_verification_token') or '').strip()
+        email = attrs.get('email') or ''
+
+        if firebase_token:
+            from firebase_admin import auth as firebase_auth
+            try:
+                decoded = firebase_auth.verify_id_token(firebase_token)
+            except Exception as exc:
+                raise serializers.ValidationError({
+                    'firebase_token': f'Token social (Google/Facebook/Apple) inválido: {exc}',
+                }) from exc
+            firebase_email = (decoded.get('email') or '').strip().lower()
+            if not firebase_email or firebase_email != email.strip().lower():
+                raise serializers.ValidationError({
+                    'firebase_token': 'El correo del proveedor social no coincide con el registro.',
+                })
+            # Apple Hide My Email / private relay son válidos.
+            attrs['email_verified_via'] = 'firebase'
+            attrs['sign_in_provider'] = (decoded.get('firebase') or {}).get('sign_in_provider')
+        else:
+            from usuario.email_verification import get_valid_email_verification_challenge
+            # Solo valida; el consume se hace en la vista al crear la cuenta con éxito.
+            get_valid_email_verification_challenge(email, email_verification_token)
+            attrs['email_verified_via'] = 'otp'
+            attrs['email_verification_token'] = email_verification_token
+
         return attrs
+
+
+class EnviarCodigoEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+
+
+class VerificarCodigoEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    codigo = serializers.CharField(required=True, max_length=6, min_length=4)
 
 class FilterUsersMapaSerializer(serializers.Serializer):
     north      = serializers.DecimalField(max_digits=20, decimal_places=15)
@@ -572,6 +614,8 @@ class UpdateUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             'rango_mapa_km',
             'auto_aprobacion_trabajos',
             'defaultMessageReservation',
+            'recibir_notificaciones',
+            'recibir_correos',
         ]
     
     def validate_rango_mapa_km(self, value):
@@ -699,9 +743,10 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
 class SocialLoginSerializer(serializers.Serializer):
     firebase_token = serializers.CharField(required=True)
-    email          = serializers.EmailField(required=True)
-    nombre         = serializers.CharField(required=False, allow_blank=True, default='')
-    foto_url       = serializers.URLField(required=False, allow_blank=True, default='')
+    # Opcional: el email se toma preferentemente del token Firebase (Apple/Google/Facebook).
+    email = serializers.EmailField(required=False, allow_blank=True, default='')
+    nombre = serializers.CharField(required=False, allow_blank=True, default='')
+    foto_url = serializers.CharField(required=False, allow_blank=True, default='')
 
 class RequestPasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()

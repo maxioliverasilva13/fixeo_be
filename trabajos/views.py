@@ -394,11 +394,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='contador-pendientes')
     def contador_pendientes(self, request):
         """
-        Conteo de trabajos en estado pendiente:
-        - como_cliente: reservas que pediste vos (esperan al profesional)
-        - como_profesional: reservas asignadas a vos que aún no aceptás
-        - total: suma de ambos (historial / negocío en navbar)
-        El front usa como_profesional solo en calendario (empresa).
+        Solo reservas en estado pendiente (ni aceptadas, finalizadas ni canceladas):
+        - como_cliente / como_profesional / total
         """
         user = request.user
         cc = Trabajo.objects.filter(usuario=user, status='pendiente').count()
@@ -408,6 +405,39 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 'como_cliente': cc,
                 'como_profesional': cp,
                 'total': cc + cp,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['get'], url_path='contador-por-estado')
+    def contador_por_estado(self, request):
+        """
+        Conteo de reservas por estado, mismo criterio que el listado del historial:
+        no incluye pendiente_urgente (esas van al flujo de urgentes, no a Historial).
+        """
+        from django.db.models import Count
+
+        user = request.user
+        estados = ['pendiente', 'aceptado', 'finalizado', 'cancelado']
+
+        def _por_estado(qs):
+            raw = {
+                row['status']: row['c']
+                for row in qs.values('status').annotate(c=Count('id'))
+            }
+            return {
+                'pendiente': raw.get('pendiente', 0),
+                'aceptado': raw.get('aceptado', 0),
+                'finalizado': raw.get('finalizado', 0),
+                'cancelado': raw.get('cancelado', 0),
+            }
+
+        como_cliente = _por_estado(Trabajo.objects.filter(usuario=user, status__in=estados))
+        como_profesional = _por_estado(Trabajo.objects.filter(profesional=user, status__in=estados))
+        return Response(
+            {
+                'como_cliente': como_cliente,
+                'como_profesional': como_profesional,
             },
             status=status.HTTP_200_OK,
         )
