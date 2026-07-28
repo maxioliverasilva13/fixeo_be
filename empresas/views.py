@@ -706,6 +706,19 @@ class EmpresaPublicLandingView(APIView):
             many=True,
         ).data
 
+        zonas_no_trabajo = [
+            {
+                'id': z.id,
+                'nombre': z.nombre or f'Zona {i + 1}',
+                'latitud': float(z.latitud),
+                'longitud': float(z.longitud),
+                'radio_km': float(z.radio_km),
+            }
+            for i, z in enumerate(
+                admin.zonas_no_trabajo.filter(activa=True).order_by('nombre', 'id')
+            )
+        ]
+
         return Response({
             'empresa': {
                 'id': empresa.id,
@@ -733,10 +746,12 @@ class EmpresaPublicLandingView(APIView):
                 'cant_calif': admin.cant_calif,
                 'trabajo_domicilio': admin.trabajo_domicilio,
                 'trabajo_local': admin.trabajo_local,
+                'rango_mapa_km': float(admin.rango_mapa_km or 10),
             },
             'admin_id': admin.id,
             'horarios': horarios,
             'servicios': servicios,
             'productos': productos,
             'profesiones': profesiones,
+            'zonas_no_trabajo': zonas_no_trabajo,
         })
