@@ -30,10 +30,12 @@ class PublicidadActivasViewSet(viewsets.ReadOnlyModelViewSet):
             Q(fecha_expiracion__isnull=True) | Q(fecha_expiracion__gt=timezone.now())
         )
 
-        rol_nombre = getattr(self.request.user.rol, 'nombre', None)
-        if rol_nombre:
-            qs = qs.filter(Q(dirigido_a='ambos') | Q(dirigido_a=rol_nombre))
+        user = self.request.user
+        if user.rol:
+            rol_nombre = user.rol.nombre
         else:
-            qs = qs.filter(dirigido_a='ambos')
+            rol_nombre = 'profesional' if user.is_owner_empresa else 'usuario'
+
+        qs = qs.filter(Q(dirigido_a='ambos') | Q(dirigido_a=rol_nombre))
 
         return qs.order_by('orden', '-created_at')
