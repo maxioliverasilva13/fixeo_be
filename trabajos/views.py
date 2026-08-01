@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        # Guest puede ver calificaciones públicas de un profesional
+        if self.action == 'listado_por_usuario':
+            from rest_framework.permissions import AllowAny
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
         user = self.request.user
 
@@ -799,6 +806,13 @@ class TrabajoViewSet(viewsets.ModelViewSet):
 class CalificacionViewSet(viewsets.ViewSet):
 
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        # Guest: resumen/listado de calificaciones de un profesional
+        if self.action in ('resumen',):
+            from rest_framework.permissions import AllowAny
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def _actualizar_rating_recibido(self, recibe, rating, direccion, created):
         if not created:

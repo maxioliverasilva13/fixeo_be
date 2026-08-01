@@ -259,14 +259,27 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         'confirm_reset_password',
     })
 
+    PUBLIC_READ_ACTIONS = frozenset({
+        'filter_users_mapa',
+        'search',
+        'top_nacionales',
+        'top_zona',
+        'retrieve',
+    })
+
     def get_serializer_class(self):
         if self.action == 'create':
             return UsuarioCreateSerializer
+        if self.action == 'retrieve':
+            user = getattr(self.request, 'user', None)
+            if not user or not user.is_authenticated:
+                from .serializers import UsuarioPublicoSerializer
+                return UsuarioPublicoSerializer
         return UsuarioSerializer
 
     def get_permissions(self):
         # Nota: get_permissions pisa permission_classes del @action; hay que listar acá.
-        if self.action in self.PUBLIC_AUTH_ACTIONS:
+        if self.action in self.PUBLIC_AUTH_ACTIONS or self.action in self.PUBLIC_READ_ACTIONS:
             return [AllowAny()]
         return [IsAuthenticated()]
 
@@ -833,7 +846,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         is_urgent    = request.query_params.get('is_urgent')
 
         like_q  = f"%{q}%"
-        user_id = request.user.id
+        user_id = request.user.id if request.user and request.user.is_authenticated else 0
 
         with connection.cursor() as cursor:
             cursor.execute(SQL_QUERY, [
