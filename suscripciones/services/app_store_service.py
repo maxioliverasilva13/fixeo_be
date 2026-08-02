@@ -107,8 +107,63 @@ class AppStoreService:
         }
 
     # ------------------------------------------------------------------
-    # Receipt verification
+    # Receipt / JWS verification
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _looks_like_jws(value: str) -> bool:
+        parts = (value or '').strip().split('.')
+        return len(parts) == 3 and all(parts)
+
+    def transaction_from_jws(self, jws: str, expected_transaction_id: str) -> dict:
+        """
+        StoreKit 2 envía un JWS por transacción (no el recibo base64 clásico).
+        Decodificamos el payload (mismo criterio que el webhook V2).
+        """
+        payload = self._decode_jwt(jws)
+        tx_id = str(payload.get('transactionId') or '').strip()
+        original_tx_id = str(payload.get('originalTransactionId') or tx_id).strip()
+        product_id = str(payload.get('productId') or '').strip()
+        expires_ms = payload.get('expiresDate')
+        if expires_ms is None:
+            expires_ms = payload.get('expires_date_ms')
+
+        logger.info(
+            '🍎 [APP STORE JWS] transactionId=%r original=%r productId=%r expiresDate=%r env=%r bundle=%r',
+            tx_id,
+            original_tx_id,
+            product_id,
+            expires_ms,
+            payload.get('environment'),
+            payload.get('bundleId'),
+        )
+
+        expected = str(expected_transaction_id or '').strip()
+        if expected and expected not in (tx_id, original_tx_id):
+            raise ValidationError('El JWS no corresponde a la transacción informada.')
+
+        if not product_id:
+            raise ValidationError('El JWS no incluye productId.')
+        if not expires_ms:
+            raise ValidationError('El JWS no incluye fecha de expiración.')
+
+        bundle = (getattr(settings, 'APP_STORE_BUNDLE_ID', '') or '').strip()
+        payload_bundle = str(payload.get('bundleId') or '').strip()
+        if bundle and payload_bundle and bundle != payload_bundle:
+            logger.warning(
+                '🍎 [APP STORE JWS] bundle mismatch config=%r jws=%r',
+                bundle,
+                payload_bundle,
+            )
+            raise ValidationError('El bundle del JWS no coincide con la app.')
+
+        return {
+            'transaction_id': tx_id or expected,
+            'original_transaction_id': original_tx_id or expected,
+            'product_id': product_id,
+            'expires_date_ms': str(int(expires_ms)),
+            'environment': payload.get('environment') or self._environment,
+        }
 
     def verify_receipt(self, receipt_data: str) -> dict:
         self._ensure_configured()
@@ -217,51 +272,57 @@ class AppStoreService:
         else:
             if not receipt_data:
                 logger.warning(
-                    '🍎 [APP STORE CREATE] falta receipt_data (sandbox/prod) user_id=%s transaction_id=%r',
+                    '🍎 [APP STORE CREATE] falta receipt_data/JWS (sandbox/prod) user_id=%s transaction_id=%r',
                     getattr(usuario, 'pk', None),
                     transaction_id,
                 )
-                raise ValidationError('Falta receipt_data para verificar la compra.')
-
-            verification = self.verify_receipt(receipt_data)
-            latest_receipt_info = verification.get('latest_receipt_info') or []
-            if not latest_receipt_info:
-                logger.warning(
-                    '🍎 [APP STORE CREATE] recibo sin latest_receipt_info keys=%s',
-                    list(verification.keys()),
+                raise ValidationError(
+                    'Falta receipt_data (JWS StoreKit 2 o recibo) para verificar la compra.'
                 )
-                raise ValidationError('No se encontró información de suscripción en el recibo.')
 
-            tx_ids = [
-                {
-                    'transaction_id': tx.get('transaction_id'),
-                    'original_transaction_id': tx.get('original_transaction_id'),
-                    'product_id': tx.get('product_id'),
-                }
-                for tx in latest_receipt_info[:8]
-            ]
-            logger.info(
-                '🍎 [APP STORE CREATE] buscando transaction_id=%r en %s txs: %s',
-                transaction_id,
-                len(latest_receipt_info),
-                tx_ids,
-            )
+            if self._looks_like_jws(receipt_data):
+                logger.info('🍎 [APP STORE CREATE] receipt_data es JWS (StoreKit 2)')
+                transaction = self.transaction_from_jws(receipt_data, transaction_id)
+            else:
+                verification = self.verify_receipt(receipt_data)
+                latest_receipt_info = verification.get('latest_receipt_info') or []
+                if not latest_receipt_info:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] recibo sin latest_receipt_info keys=%s',
+                        list(verification.keys()),
+                    )
+                    raise ValidationError('No se encontró información de suscripción en el recibo.')
 
-            transaction = next(
-                (
-                    tx
-                    for tx in latest_receipt_info
-                    if tx.get('transaction_id') == transaction_id
-                    or tx.get('original_transaction_id') == transaction_id
-                ),
-                None,
-            )
-            if not transaction:
-                logger.warning(
-                    '🍎 [APP STORE CREATE] transaction_id=%r no está en el recibo',
+                tx_ids = [
+                    {
+                        'transaction_id': tx.get('transaction_id'),
+                        'original_transaction_id': tx.get('original_transaction_id'),
+                        'product_id': tx.get('product_id'),
+                    }
+                    for tx in latest_receipt_info[:8]
+                ]
+                logger.info(
+                    '🍎 [APP STORE CREATE] buscando transaction_id=%r en %s txs: %s',
                     transaction_id,
+                    len(latest_receipt_info),
+                    tx_ids,
                 )
-                raise ValidationError('Transacción no encontrada en el recibo.')
+
+                transaction = next(
+                    (
+                        tx
+                        for tx in latest_receipt_info
+                        if tx.get('transaction_id') == transaction_id
+                        or tx.get('original_transaction_id') == transaction_id
+                    ),
+                    None,
+                )
+                if not transaction:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] transaction_id=%r no está en el recibo',
+                        transaction_id,
+                    )
+                    raise ValidationError('Transacción no encontrada en el recibo.')
 
             if (plan.appstore_id or '').strip() != (transaction.get('product_id') or '').strip():
                 logger.warning(
