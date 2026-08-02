@@ -287,9 +287,24 @@ class AppStoreSubscribeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        keys = list(request.data.keys()) if hasattr(request.data, 'keys') else []
         plan_id = request.data.get('plan_id') or request.data.get('planId')
         transaction_id = request.data.get('transaction_id') or request.data.get('transactionId')
         receipt_data = request.data.get('receipt_data') or request.data.get('receiptData')
+        receipt_len = len(receipt_data) if receipt_data else 0
+        receipt_preview = (str(receipt_data)[:40] + '…') if receipt_data else ''
+
+        logger.info(
+            '🍎 [APP STORE SUBSCRIBE] user_id=%s keys=%s plan_id=%r transaction_id=%r '
+            'receipt_len=%s receipt_preview=%r auth=%s',
+            getattr(request.user, 'id', None),
+            keys,
+            plan_id,
+            transaction_id,
+            receipt_len,
+            receipt_preview,
+            bool(request.user and request.user.is_authenticated),
+        )
 
         missing = [
             field
@@ -300,15 +315,48 @@ class AppStoreSubscribeView(APIView):
             if not value
         ]
         if missing:
+            logger.warning(
+                '🍎 [APP STORE SUBSCRIBE] 400 faltan campos=%s user_id=%s body_keys=%s',
+                missing,
+                getattr(request.user, 'id', None),
+                keys,
+            )
             raise ValidationError(f'Faltan campos: {", ".join(missing)}')
 
         # StoreKit Configuration File (simulador) no siempre trae receipt_data usable.
         # El service admite testing local sin recibo; sandbox/prod reales sí lo exigen.
-        subscription = get_app_store_service().create_or_update_subscription(
-            usuario=request.user,
-            plan_id=plan_id,
-            receipt_data=receipt_data or '',
-            transaction_id=transaction_id,
+        try:
+            subscription = get_app_store_service().create_or_update_subscription(
+                usuario=request.user,
+                plan_id=plan_id,
+                receipt_data=receipt_data or '',
+                transaction_id=transaction_id,
+            )
+        except ValidationError as exc:
+            logger.warning(
+                '🍎 [APP STORE SUBSCRIBE] 400 ValidationError user_id=%s plan_id=%r '
+                'transaction_id=%r receipt_len=%s detail=%s',
+                getattr(request.user, 'id', None),
+                plan_id,
+                transaction_id,
+                receipt_len,
+                getattr(exc, 'detail', str(exc)),
+            )
+            raise
+        except Exception:
+            logger.exception(
+                '🍎 [APP STORE SUBSCRIBE] error inesperado user_id=%s plan_id=%r transaction_id=%r',
+                getattr(request.user, 'id', None),
+                plan_id,
+                transaction_id,
+            )
+            raise
+
+        logger.info(
+            '🍎 [APP STORE SUBSCRIBE] OK user_id=%s subscription_id=%s plan_id=%s',
+            getattr(request.user, 'id', None),
+            getattr(subscription, 'pk', None),
+            plan_id,
         )
         return Response(
             UsuarioSubscripcionActivaSerializer(subscription).data,

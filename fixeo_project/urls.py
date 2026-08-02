@@ -29,6 +29,9 @@ urlpatterns = [
     path('api/token/refresh/', SlidingTokenRefreshView.as_view(), name='token_refresh'),
     path('api/planes/', include(planes_urlpatterns)),
     path('api/suscripciones/', include(suscripciones_urlpatterns)),
+    # Alias sin /api/ para Server Notifications de App Store / Google
+    # (si en App Store Connect quedó cargada la URL sin prefijo).
+    path('suscripciones/', include(suscripciones_urlpatterns)),
     path('api/survey/', include('survey.urls')),
     path('api/moderacion/', include('moderacion.urls')),
     path('api/admin/estadisticas/', AdminEstadisticasView.as_view(), name='admin-estadisticas'),

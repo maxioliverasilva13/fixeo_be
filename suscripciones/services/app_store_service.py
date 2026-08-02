@@ -119,6 +119,13 @@ class AppStoreService:
             'exclude-old-transactions': True,
         }
 
+        logger.info(
+            '🍎 [APP STORE VERIFY] env=%s url=%s receipt_len=%s',
+            self._environment,
+            url,
+            len(receipt_data or ''),
+        )
+
         try:
             response = requests.post(url, json=body, timeout=15)
             response.raise_for_status()
@@ -128,19 +135,36 @@ class AppStoreService:
             raise ValidationError(f'Error al verificar el recibo: {exc}')
 
         status_code = data.get('status')
+        logger.info(
+            '🍎 [APP STORE VERIFY] apple_status=%s environment=%s latest_count=%s',
+            status_code,
+            data.get('environment'),
+            len(data.get('latest_receipt_info') or []),
+        )
 
         # 21007 = recibo de sandbox enviado a producción → reintentar en sandbox.
         if status_code == 21007 and self._environment == 'production':
+            logger.info('🍎 [APP STORE VERIFY] status 21007 → reintento sandbox')
             try:
                 fallback = requests.post(SANDBOX_URL, json=body, timeout=15)
                 fallback.raise_for_status()
                 data = fallback.json() or {}
                 status_code = data.get('status')
+                logger.info(
+                    '🍎 [APP STORE VERIFY] sandbox fallback apple_status=%s latest_count=%s',
+                    status_code,
+                    len(data.get('latest_receipt_info') or []),
+                )
             except Exception as exc:
                 logger.exception('❌ Error en fallback sandbox')
                 raise ValidationError(f'Error al verificar el recibo (sandbox): {exc}')
 
         if status_code != 0:
+            logger.warning(
+                '🍎 [APP STORE VERIFY] recibo rechazado apple_status=%s is_retryable=%s',
+                status_code,
+                data.get('is-retryable'),
+            )
             raise ValidationError(f'Error verificando recibo: status {status_code}')
 
         return data
@@ -156,15 +180,33 @@ class AppStoreService:
         receipt_data: str,
         transaction_id: str,
     ) -> Subscripcion:
+        logger.info(
+            '🍎 [APP STORE CREATE] user_id=%s plan_id=%s transaction_id=%r receipt_len=%s configured=%s env=%s',
+            getattr(usuario, 'pk', None),
+            plan_id,
+            transaction_id,
+            len(receipt_data or ''),
+            self.is_configured,
+            self._environment,
+        )
+
         plan = Plan.objects.filter(pk=plan_id, activo=True).first()
         if not plan:
+            logger.warning('🍎 [APP STORE CREATE] plan_id=%s no encontrado/activo', plan_id)
             raise ValidationError('Plan no encontrado.')
 
         if not (plan.appstore_id or '').strip():
+            logger.warning('🍎 [APP STORE CREATE] plan_id=%s sin appstore_id', plan_id)
             raise ValidationError('El plan no tiene appstore_id configurado.')
 
         transaction_id = str(transaction_id).strip()
         is_testing = self.is_testing_transaction_id(transaction_id)
+        logger.info(
+            '🍎 [APP STORE CREATE] plan=%s appstore_id=%r is_testing=%s',
+            plan.nombre,
+            plan.appstore_id,
+            is_testing,
+        )
 
         if is_testing:
             logger.info(
@@ -174,12 +216,36 @@ class AppStoreService:
             transaction = self._mock_transaction_from_plan(plan, transaction_id)
         else:
             if not receipt_data:
+                logger.warning(
+                    '🍎 [APP STORE CREATE] falta receipt_data (sandbox/prod) user_id=%s transaction_id=%r',
+                    getattr(usuario, 'pk', None),
+                    transaction_id,
+                )
                 raise ValidationError('Falta receipt_data para verificar la compra.')
 
             verification = self.verify_receipt(receipt_data)
             latest_receipt_info = verification.get('latest_receipt_info') or []
             if not latest_receipt_info:
+                logger.warning(
+                    '🍎 [APP STORE CREATE] recibo sin latest_receipt_info keys=%s',
+                    list(verification.keys()),
+                )
                 raise ValidationError('No se encontró información de suscripción en el recibo.')
+
+            tx_ids = [
+                {
+                    'transaction_id': tx.get('transaction_id'),
+                    'original_transaction_id': tx.get('original_transaction_id'),
+                    'product_id': tx.get('product_id'),
+                }
+                for tx in latest_receipt_info[:8]
+            ]
+            logger.info(
+                '🍎 [APP STORE CREATE] buscando transaction_id=%r en %s txs: %s',
+                transaction_id,
+                len(latest_receipt_info),
+                tx_ids,
+            )
 
             transaction = next(
                 (
@@ -191,13 +257,26 @@ class AppStoreService:
                 None,
             )
             if not transaction:
+                logger.warning(
+                    '🍎 [APP STORE CREATE] transaction_id=%r no está en el recibo',
+                    transaction_id,
+                )
                 raise ValidationError('Transacción no encontrada en el recibo.')
 
             if (plan.appstore_id or '').strip() != (transaction.get('product_id') or '').strip():
+                logger.warning(
+                    '🍎 [APP STORE CREATE] product mismatch plan.appstore_id=%r receipt.product_id=%r',
+                    plan.appstore_id,
+                    transaction.get('product_id'),
+                )
                 raise ValidationError('El producto no coincide con el plan.')
 
         expires_ms = transaction.get('expires_date_ms')
         if not expires_ms:
+            logger.warning(
+                '🍎 [APP STORE CREATE] tx sin expires_date_ms keys=%s',
+                list(transaction.keys()),
+            )
             raise ValidationError('La transacción no tiene fecha de expiración.')
 
         expiration = datetime.fromtimestamp(int(expires_ms) / 1000, tz=dt_timezone.utc)
