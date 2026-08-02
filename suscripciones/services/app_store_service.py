@@ -170,8 +170,9 @@ class AppStoreService:
         url = PRODUCTION_URL if self._environment == 'production' else SANDBOX_URL
         body = {
             'receipt-data': receipt_data,
+            # False: en upgrades/sandbox a veces la tx nueva no es la "latest" aún.
+            'exclude-old-transactions': False,
             'password': self._shared_secret,
-            'exclude-old-transactions': True,
         }
 
         logger.info(
@@ -227,6 +228,71 @@ class AppStoreService:
     # ------------------------------------------------------------------
     # Subscription handling
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _collect_receipt_transactions(verification: dict) -> list[dict]:
+        """Une latest_receipt_info + receipt.in_app sin duplicar transaction_id."""
+        merged: list[dict] = []
+        seen: set[str] = set()
+        for source in (
+            verification.get('latest_receipt_info') or [],
+            (verification.get('receipt') or {}).get('in_app') or [],
+        ):
+            for tx in source:
+                if not isinstance(tx, dict):
+                    continue
+                key = str(tx.get('transaction_id') or tx.get('original_transaction_id') or '')
+                # Si no hay id, igual lo incluimos con clave sintética.
+                dedupe = key or f'anon-{len(merged)}-{tx.get("product_id")}'
+                if dedupe in seen:
+                    continue
+                seen.add(dedupe)
+                merged.append(tx)
+
+        def sort_key(tx: dict) -> int:
+            try:
+                return int(tx.get('expires_date_ms') or tx.get('purchase_date_ms') or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        merged.sort(key=sort_key, reverse=True)
+        return merged
+
+    @staticmethod
+    def _pick_receipt_transaction(
+        all_txs: list[dict],
+        *,
+        transaction_id: str,
+        product_id: str,
+    ) -> Optional[dict]:
+        tid = (transaction_id or '').strip()
+        pid = (product_id or '').strip()
+
+        if tid:
+            for tx in all_txs:
+                if tx.get('transaction_id') == tid or tx.get('original_transaction_id') == tid:
+                    return tx
+
+        if pid:
+            for tx in all_txs:
+                if (tx.get('product_id') or '').strip() == pid and tx.get('expires_date_ms'):
+                    logger.info(
+                        '🍎 [APP STORE CREATE] match por product_id=%r (tx recibo=%r)',
+                        pid,
+                        tx.get('transaction_id'),
+                    )
+                    return tx
+
+        # Último recurso: la suscripción más reciente del recibo (mismo grupo).
+        for tx in all_txs:
+            if tx.get('expires_date_ms') and tx.get('product_id'):
+                logger.info(
+                    '🍎 [APP STORE CREATE] fallback a tx más reciente product=%r tx=%r',
+                    tx.get('product_id'),
+                    tx.get('transaction_id'),
+                )
+                return tx
+        return None
 
     def create_or_update_subscription(
         self,
@@ -285,52 +351,75 @@ class AppStoreService:
                 transaction = self.transaction_from_jws(receipt_data, transaction_id)
             else:
                 verification = self.verify_receipt(receipt_data)
-                latest_receipt_info = verification.get('latest_receipt_info') or []
-                if not latest_receipt_info:
+                all_txs = self._collect_receipt_transactions(verification)
+                if not all_txs:
                     logger.warning(
-                        '🍎 [APP STORE CREATE] recibo sin latest_receipt_info keys=%s',
+                        '🍎 [APP STORE CREATE] recibo sin transacciones keys=%s',
                         list(verification.keys()),
                     )
                     raise ValidationError('No se encontró información de suscripción en el recibo.')
 
-                tx_ids = [
+                summary = [
                     {
                         'transaction_id': tx.get('transaction_id'),
                         'original_transaction_id': tx.get('original_transaction_id'),
                         'product_id': tx.get('product_id'),
+                        'expires_date_ms': tx.get('expires_date_ms'),
                     }
-                    for tx in latest_receipt_info[:8]
+                    for tx in all_txs[:12]
                 ]
                 logger.info(
-                    '🍎 [APP STORE CREATE] buscando transaction_id=%r en %s txs: %s',
+                    '🍎 [APP STORE CREATE] buscando transaction_id=%r product=%r en %s txs: %s',
                     transaction_id,
-                    len(latest_receipt_info),
-                    tx_ids,
+                    plan.appstore_id,
+                    len(all_txs),
+                    summary,
                 )
 
-                transaction = next(
-                    (
-                        tx
-                        for tx in latest_receipt_info
-                        if tx.get('transaction_id') == transaction_id
-                        or tx.get('original_transaction_id') == transaction_id
-                    ),
-                    None,
+                transaction = self._pick_receipt_transaction(
+                    all_txs,
+                    transaction_id=transaction_id,
+                    product_id=(plan.appstore_id or '').strip(),
                 )
                 if not transaction:
+                    products = sorted({
+                        str(tx.get('product_id') or '')
+                        for tx in all_txs
+                        if tx.get('product_id')
+                    })
                     logger.warning(
-                        '🍎 [APP STORE CREATE] transaction_id=%r no está en el recibo',
+                        '🍎 [APP STORE CREATE] no match tx=%r product=%r available=%s',
                         transaction_id,
+                        plan.appstore_id,
+                        products,
                     )
-                    raise ValidationError('Transacción no encontrada en el recibo.')
+                    raise ValidationError(
+                        'Transacción no encontrada en el recibo. '
+                        f'Productos en recibo: {", ".join(products) or "ninguno"}.'
+                    )
 
-            if (plan.appstore_id or '').strip() != (transaction.get('product_id') or '').strip():
-                logger.warning(
-                    '🍎 [APP STORE CREATE] product mismatch plan.appstore_id=%r receipt.product_id=%r',
-                    plan.appstore_id,
-                    transaction.get('product_id'),
-                )
-                raise ValidationError('El producto no coincide con el plan.')
+            receipt_product = (transaction.get('product_id') or '').strip()
+            plan_product = (plan.appstore_id or '').strip()
+            if receipt_product and plan_product and receipt_product != plan_product:
+                # En el mismo subscription group Apple puede devolver la tx/producto
+                # realmente activo (ej. monthly) aunque el FE pidió Pro.
+                alt_plan = Plan.objects.filter(appstore_id=receipt_product, activo=True).first()
+                if alt_plan:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] plan ajustado %s(%s) → %s(%s) según recibo',
+                        plan.nombre,
+                        plan_product,
+                        alt_plan.nombre,
+                        receipt_product,
+                    )
+                    plan = alt_plan
+                else:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] product mismatch plan.appstore_id=%r receipt.product_id=%r',
+                        plan_product,
+                        receipt_product,
+                    )
+                    raise ValidationError('El producto no coincide con el plan.')
 
         expires_ms = transaction.get('expires_date_ms')
         if not expires_ms:
