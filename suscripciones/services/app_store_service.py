@@ -541,6 +541,14 @@ class AppStoreService:
         transaction_info = self._decode_jwt(signed_transaction_info)
         original_transaction_id = transaction_info.get('originalTransactionId')
 
+        renewal_info: dict = {}
+        signed_renewal_info = data.get('signedRenewalInfo')
+        if isinstance(signed_renewal_info, str) and signed_renewal_info:
+            try:
+                renewal_info = self._decode_jwt(signed_renewal_info)
+            except Exception:
+                logger.exception('🔔 [APP STORE] No se pudo decodificar signedRenewalInfo')
+
         subscription = (
             Subscripcion.objects.filter(
                 appstore_original_transaction_id=original_transaction_id
@@ -576,7 +584,7 @@ class AppStoreService:
                 subscription.cancelada = True
                 update_fields.append('cancelada')
 
-        if notification_type in ('SUBSCRIBED', 'DID_RENEW'):
+        if notification_type in ('SUBSCRIBED', 'DID_RENEW', 'DID_CHANGE_RENEWAL_PREF'):
             transaction_id = transaction_info.get('transactionId')
             expires_date = transaction_info.get('expiresDate')
             if transaction_id:
@@ -588,7 +596,41 @@ class AppStoreService:
                 )
                 update_fields.append('expiracion')
 
-        subscription.save(update_fields=update_fields)
+            # UPGRADE suele ser inmediato; DOWNGRADE queda para el próximo ciclo.
+            # Usamos productId de la tx, o autoRenewProductId del renewal info.
+            product_id = (
+                str(transaction_info.get('productId') or '').strip()
+                if subtype == 'UPGRADE' or notification_type in ('SUBSCRIBED', 'DID_RENEW')
+                else ''
+            )
+            if not product_id and subtype == 'UPGRADE':
+                product_id = str(renewal_info.get('autoRenewProductId') or '').strip()
+            if product_id:
+                plan = Plan.objects.filter(appstore_id=product_id, activo=True).first()
+                if plan and subscription.plan_id_id != plan.pk:
+                    logger.info(
+                        '🔔 [APP STORE] Plan webhook %s → %s (%s) tipo=%s/%s',
+                        subscription.plan_id_id,
+                        plan.pk,
+                        product_id,
+                        notification_type,
+                        subtype,
+                    )
+                    subscription.plan_id = plan
+                    subscription.jobs_restantes = plan.cantidad_jobs
+                    update_fields.extend(['plan_id', 'jobs_restantes'])
+                    if subscription.status != SubscripcionStatus.ACTIVE:
+                        subscription.status = SubscripcionStatus.ACTIVE
+                        update_fields.append('status')
+            elif subtype == 'DOWNGRADE':
+                pending = str(renewal_info.get('autoRenewProductId') or '').strip()
+                logger.info(
+                    '🔔 [APP STORE] Downgrade programado sub=%s autoRenewProductId=%s',
+                    subscription.pk,
+                    pending or '(n/a)',
+                )
+
+        subscription.save(update_fields=list(dict.fromkeys(update_fields)))
         logger.info(
             '🔔 [APP STORE] Suscripción %s → %s (tipo %s/%s)',
             subscription.pk,
