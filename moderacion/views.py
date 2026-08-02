@@ -138,6 +138,32 @@ class ModeracionViewSet(viewsets.ViewSet):
             .select_related('reporter', 'reported_user')
             .order_by('-created_at')
         )
-        if status_filter:
+        if status_filter and status_filter != 'all':
             qs = qs.filter(status=status_filter)
-        return Response(ContentReportSerializer(qs[:100], many=True).data)
+        return Response(ContentReportSerializer(qs[:200], many=True).data)
+
+    @action(
+        detail=False,
+        methods=['patch'],
+        url_path=r'admin/reportes/(?P<report_id>[^/.]+)',
+        permission_classes=[IsAuthenticated, IsAdminUser],
+    )
+    def admin_actualizar_reporte(self, request, report_id=None):
+        report = get_object_or_404(ContentReport, id=report_id)
+        new_status = request.data.get('status')
+        admin_notes = request.data.get('admin_notes')
+
+        valid_statuses = {c.value for c in ContentReport.Status}
+        if new_status is not None:
+            if new_status not in valid_statuses:
+                return Response(
+                    {'error': f'status inválido. Usá: {", ".join(sorted(valid_statuses))}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            report.status = new_status
+
+        if admin_notes is not None:
+            report.admin_notes = str(admin_notes)[:5000]
+
+        report.save()
+        return Response(ContentReportSerializer(report).data)
