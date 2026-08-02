@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'horarios',
     'pagos',
     'whatsapp',
+    'moderacion',
     'rest_framework_simplejwt.token_blacklist',
     'channels',
     'survey'

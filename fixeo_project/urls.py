@@ -30,6 +30,7 @@ urlpatterns = [
     path('api/planes/', include(planes_urlpatterns)),
     path('api/suscripciones/', include(suscripciones_urlpatterns)),
     path('api/survey/', include('survey.urls')),
+    path('api/moderacion/', include('moderacion.urls')),
     path('api/admin/estadisticas/', AdminEstadisticasView.as_view(), name='admin-estadisticas'),
 ]
 
