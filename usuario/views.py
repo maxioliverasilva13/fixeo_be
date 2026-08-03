@@ -113,7 +113,7 @@ FROM (
         NULL::text AS foto_producto,
         CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS empresa_nombre,
         e.id AS empresa_id,
-        NULL::text AS ciudad,
+        COALESCE(e.ubicacion, loc.city) AS ciudad,
         NULL::text AS pais,
         COALESCE(e.latitud, loc.latitud) AS latitud,
         COALESCE(e.longitud, loc.longitud) AS longitud,
@@ -192,7 +192,7 @@ FROM (
         )
     GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif,
         e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud, e.compartir_ubicacion_mapa,
-        loc.latitud, loc.longitud
+        loc.latitud, loc.longitud, loc.city
 
     UNION ALL
 
