@@ -67,12 +67,17 @@ class ChatViewSet(viewsets.ModelViewSet):
         
     def get_queryset(self):
         user = self.request.user
-        return Chat.objects.filter(
+        from moderacion.services import blocked_user_ids_for
+        blocked_ids = blocked_user_ids_for(user.id)
+        qs = Chat.objects.filter(
             Q(sender=user) | Q(receiver=user)
         ).select_related('sender', 'receiver', 'trabajo').prefetch_related(
             'mensajes',
             'mensajes__recursos'
         ).order_by('-ultimo_mensaje_at')
+        if blocked_ids:
+            qs = qs.exclude(sender_id__in=blocked_ids).exclude(receiver_id__in=blocked_ids)
+        return qs
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -102,6 +107,13 @@ class ChatViewSet(viewsets.ModelViewSet):
             return Response(
                 {'error': 'No puedes crear un chat contigo mismo'},
                 status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from moderacion.services import users_blocked_either_way
+        if users_blocked_either_way(request.user.id, receiver_id):
+            return Response(
+                {'error': 'No podés chatear con este usuario'},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         try:
@@ -140,6 +152,10 @@ class ChatViewSet(viewsets.ModelViewSet):
         )
         
         if mensaje_inicial:
+            from moderacion.content_filter import filter_or_reject_message
+            reject_msg = filter_or_reject_message(mensaje_inicial)
+            if reject_msg:
+                return Response({'error': reject_msg}, status=status.HTTP_400_BAD_REQUEST)
             Mensajes.objects.create(
                 texto=mensaje_inicial,
                 sender=request.user,
@@ -276,9 +292,22 @@ class ChatViewSet(viewsets.ModelViewSet):
                 {'error': 'No tienes permiso para enviar mensajes en este chat'},
                 status=status.HTTP_403_FORBIDDEN
             )
+
+        other_id = chat.receiver_id if request.user.id == chat.sender_id else chat.sender_id
+        from moderacion.services import users_blocked_either_way
+        if users_blocked_either_way(request.user.id, other_id):
+            return Response(
+                {'error': 'No podés enviar mensajes a este usuario'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         
         serializer = MensajeCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        from moderacion.content_filter import filter_or_reject_message
+        reject_msg = filter_or_reject_message(serializer.validated_data.get('texto'))
+        if reject_msg:
+            return Response({'error': reject_msg}, status=status.HTTP_400_BAD_REQUEST)
         
         recurso = None
         if serializer.validated_data.get('recurso_id'):

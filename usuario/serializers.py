@@ -323,6 +323,21 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
         return result
 
+
+class UsuarioPublicoSerializer(UsuarioSerializer):
+    """Perfil público para guest: sin datos de contacto ni tokens."""
+
+    class Meta(UsuarioSerializer.Meta):
+        fields = [
+            'id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'foto_map_url',
+            'trabajo_domicilio', 'esta_abierta', 'trabajo_local', 'is_owner_empresa',
+            'rango_mapa_km', 'rol', 'rol_detalle', 'empresa',
+            'profesiones', 'localizaciones', 'localizacion_principal', 'servicios',
+            'horarios_semana', 'rating', 'cant_calif',
+            'es_visible_en_mapa',
+        ]
+
+
 class UsuarioBasicInformationSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     localizacion = serializers.SerializerMethodField()
     rating_cliente = serializers.SerializerMethodField()

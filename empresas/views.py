@@ -567,6 +567,13 @@ class CategoriaProductoViewSet(viewsets.ModelViewSet):
     serializer_class = CategoriaProductoSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        if self.action == 'retrieve':
+            return [AllowAny()]
+        if self.action == 'list' and self.request.query_params.get('empresa_id'):
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
         queryset = super().get_queryset()
         empresa_id = self.request.query_params.get('empresa_id', None)
@@ -574,6 +581,8 @@ class CategoriaProductoViewSet(viewsets.ModelViewSet):
         if empresa_id:
             queryset = queryset.filter(empresa_id=empresa_id)
         else:
+            if not self.request.user or not self.request.user.is_authenticated:
+                return queryset.none()
             empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
             queryset = queryset.filter(empresa__in=empresas_usuario)
         
@@ -608,6 +617,14 @@ class ProductoViewSet(viewsets.ModelViewSet):
     serializer_class = ProductoSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        # Guest: ver catálogo público de una empresa (mapa / perfil)
+        if self.action == 'retrieve':
+            return [AllowAny()]
+        if self.action == 'list' and self.request.query_params.get('empresa_id'):
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
         queryset = super().get_queryset()
         empresa_id = self.request.query_params.get('empresa_id', None)
@@ -621,6 +638,8 @@ class ProductoViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(categoria_id=categoria_id)
         
         if not empresa_id and not categoria_id:
+            if not self.request.user or not self.request.user.is_authenticated:
+                return queryset.none()
             empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
             queryset = queryset.filter(empresa__in=empresas_usuario)
         
@@ -706,6 +725,19 @@ class EmpresaPublicLandingView(APIView):
             many=True,
         ).data
 
+        zonas_no_trabajo = [
+            {
+                'id': z.id,
+                'nombre': z.nombre or f'Zona {i + 1}',
+                'latitud': float(z.latitud),
+                'longitud': float(z.longitud),
+                'radio_km': float(z.radio_km),
+            }
+            for i, z in enumerate(
+                admin.zonas_no_trabajo.filter(activa=True).order_by('nombre', 'id')
+            )
+        ]
+
         return Response({
             'empresa': {
                 'id': empresa.id,
@@ -733,10 +765,12 @@ class EmpresaPublicLandingView(APIView):
                 'cant_calif': admin.cant_calif,
                 'trabajo_domicilio': admin.trabajo_domicilio,
                 'trabajo_local': admin.trabajo_local,
+                'rango_mapa_km': float(admin.rango_mapa_km or 10),
             },
             'admin_id': admin.id,
             'horarios': horarios,
             'servicios': servicios,
             'productos': productos,
             'profesiones': profesiones,
+            'zonas_no_trabajo': zonas_no_trabajo,
         })

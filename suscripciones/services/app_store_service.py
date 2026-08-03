@@ -107,17 +107,80 @@ class AppStoreService:
         }
 
     # ------------------------------------------------------------------
-    # Receipt verification
+    # Receipt / JWS verification
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _looks_like_jws(value: str) -> bool:
+        parts = (value or '').strip().split('.')
+        return len(parts) == 3 and all(parts)
+
+    def transaction_from_jws(self, jws: str, expected_transaction_id: str) -> dict:
+        """
+        StoreKit 2 envía un JWS por transacción (no el recibo base64 clásico).
+        Decodificamos el payload (mismo criterio que el webhook V2).
+        """
+        payload = self._decode_jwt(jws)
+        tx_id = str(payload.get('transactionId') or '').strip()
+        original_tx_id = str(payload.get('originalTransactionId') or tx_id).strip()
+        product_id = str(payload.get('productId') or '').strip()
+        expires_ms = payload.get('expiresDate')
+        if expires_ms is None:
+            expires_ms = payload.get('expires_date_ms')
+
+        logger.info(
+            '🍎 [APP STORE JWS] transactionId=%r original=%r productId=%r expiresDate=%r env=%r bundle=%r',
+            tx_id,
+            original_tx_id,
+            product_id,
+            expires_ms,
+            payload.get('environment'),
+            payload.get('bundleId'),
+        )
+
+        expected = str(expected_transaction_id or '').strip()
+        if expected and expected not in (tx_id, original_tx_id):
+            raise ValidationError('El JWS no corresponde a la transacción informada.')
+
+        if not product_id:
+            raise ValidationError('El JWS no incluye productId.')
+        if not expires_ms:
+            raise ValidationError('El JWS no incluye fecha de expiración.')
+
+        bundle = (getattr(settings, 'APP_STORE_BUNDLE_ID', '') or '').strip()
+        payload_bundle = str(payload.get('bundleId') or '').strip()
+        if bundle and payload_bundle and bundle != payload_bundle:
+            logger.warning(
+                '🍎 [APP STORE JWS] bundle mismatch config=%r jws=%r',
+                bundle,
+                payload_bundle,
+            )
+            raise ValidationError('El bundle del JWS no coincide con la app.')
+
+        return {
+            'transaction_id': tx_id or expected,
+            'original_transaction_id': original_tx_id or expected,
+            'product_id': product_id,
+            'expires_date_ms': str(int(expires_ms)),
+            'environment': payload.get('environment') or self._environment,
+        }
 
     def verify_receipt(self, receipt_data: str) -> dict:
         self._ensure_configured()
         url = PRODUCTION_URL if self._environment == 'production' else SANDBOX_URL
         body = {
             'receipt-data': receipt_data,
+            # False: en upgrades/sandbox a veces la tx nueva no es la "latest" aún.
+            'exclude-old-transactions': False,
             'password': self._shared_secret,
-            'exclude-old-transactions': True,
         }
+
+        logger.info(
+            '🍎 [APP STORE VERIFY] env=%s url=%s receipt_len=%s',
+            self._environment,
+            url,
+            len(receipt_data or ''),
+        )
 
         try:
             response = requests.post(url, json=body, timeout=15)
@@ -128,19 +191,36 @@ class AppStoreService:
             raise ValidationError(f'Error al verificar el recibo: {exc}')
 
         status_code = data.get('status')
+        logger.info(
+            '🍎 [APP STORE VERIFY] apple_status=%s environment=%s latest_count=%s',
+            status_code,
+            data.get('environment'),
+            len(data.get('latest_receipt_info') or []),
+        )
 
         # 21007 = recibo de sandbox enviado a producción → reintentar en sandbox.
         if status_code == 21007 and self._environment == 'production':
+            logger.info('🍎 [APP STORE VERIFY] status 21007 → reintento sandbox')
             try:
                 fallback = requests.post(SANDBOX_URL, json=body, timeout=15)
                 fallback.raise_for_status()
                 data = fallback.json() or {}
                 status_code = data.get('status')
+                logger.info(
+                    '🍎 [APP STORE VERIFY] sandbox fallback apple_status=%s latest_count=%s',
+                    status_code,
+                    len(data.get('latest_receipt_info') or []),
+                )
             except Exception as exc:
                 logger.exception('❌ Error en fallback sandbox')
                 raise ValidationError(f'Error al verificar el recibo (sandbox): {exc}')
 
         if status_code != 0:
+            logger.warning(
+                '🍎 [APP STORE VERIFY] recibo rechazado apple_status=%s is_retryable=%s',
+                status_code,
+                data.get('is-retryable'),
+            )
             raise ValidationError(f'Error verificando recibo: status {status_code}')
 
         return data
@@ -149,6 +229,71 @@ class AppStoreService:
     # Subscription handling
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _collect_receipt_transactions(verification: dict) -> list[dict]:
+        """Une latest_receipt_info + receipt.in_app sin duplicar transaction_id."""
+        merged: list[dict] = []
+        seen: set[str] = set()
+        for source in (
+            verification.get('latest_receipt_info') or [],
+            (verification.get('receipt') or {}).get('in_app') or [],
+        ):
+            for tx in source:
+                if not isinstance(tx, dict):
+                    continue
+                key = str(tx.get('transaction_id') or tx.get('original_transaction_id') or '')
+                # Si no hay id, igual lo incluimos con clave sintética.
+                dedupe = key or f'anon-{len(merged)}-{tx.get("product_id")}'
+                if dedupe in seen:
+                    continue
+                seen.add(dedupe)
+                merged.append(tx)
+
+        def sort_key(tx: dict) -> int:
+            try:
+                return int(tx.get('expires_date_ms') or tx.get('purchase_date_ms') or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        merged.sort(key=sort_key, reverse=True)
+        return merged
+
+    @staticmethod
+    def _pick_receipt_transaction(
+        all_txs: list[dict],
+        *,
+        transaction_id: str,
+        product_id: str,
+    ) -> Optional[dict]:
+        tid = (transaction_id or '').strip()
+        pid = (product_id or '').strip()
+
+        if tid:
+            for tx in all_txs:
+                if tx.get('transaction_id') == tid or tx.get('original_transaction_id') == tid:
+                    return tx
+
+        if pid:
+            for tx in all_txs:
+                if (tx.get('product_id') or '').strip() == pid and tx.get('expires_date_ms'):
+                    logger.info(
+                        '🍎 [APP STORE CREATE] match por product_id=%r (tx recibo=%r)',
+                        pid,
+                        tx.get('transaction_id'),
+                    )
+                    return tx
+
+        # Último recurso: la suscripción más reciente del recibo (mismo grupo).
+        for tx in all_txs:
+            if tx.get('expires_date_ms') and tx.get('product_id'):
+                logger.info(
+                    '🍎 [APP STORE CREATE] fallback a tx más reciente product=%r tx=%r',
+                    tx.get('product_id'),
+                    tx.get('transaction_id'),
+                )
+                return tx
+        return None
+
     def create_or_update_subscription(
         self,
         usuario: Usuario,
@@ -156,15 +301,33 @@ class AppStoreService:
         receipt_data: str,
         transaction_id: str,
     ) -> Subscripcion:
+        logger.info(
+            '🍎 [APP STORE CREATE] user_id=%s plan_id=%s transaction_id=%r receipt_len=%s configured=%s env=%s',
+            getattr(usuario, 'pk', None),
+            plan_id,
+            transaction_id,
+            len(receipt_data or ''),
+            self.is_configured,
+            self._environment,
+        )
+
         plan = Plan.objects.filter(pk=plan_id, activo=True).first()
         if not plan:
+            logger.warning('🍎 [APP STORE CREATE] plan_id=%s no encontrado/activo', plan_id)
             raise ValidationError('Plan no encontrado.')
 
         if not (plan.appstore_id or '').strip():
+            logger.warning('🍎 [APP STORE CREATE] plan_id=%s sin appstore_id', plan_id)
             raise ValidationError('El plan no tiene appstore_id configurado.')
 
         transaction_id = str(transaction_id).strip()
         is_testing = self.is_testing_transaction_id(transaction_id)
+        logger.info(
+            '🍎 [APP STORE CREATE] plan=%s appstore_id=%r is_testing=%s',
+            plan.nombre,
+            plan.appstore_id,
+            is_testing,
+        )
 
         if is_testing:
             logger.info(
@@ -174,30 +337,96 @@ class AppStoreService:
             transaction = self._mock_transaction_from_plan(plan, transaction_id)
         else:
             if not receipt_data:
-                raise ValidationError('Falta receipt_data para verificar la compra.')
+                logger.warning(
+                    '🍎 [APP STORE CREATE] falta receipt_data/JWS (sandbox/prod) user_id=%s transaction_id=%r',
+                    getattr(usuario, 'pk', None),
+                    transaction_id,
+                )
+                raise ValidationError(
+                    'Falta receipt_data (JWS StoreKit 2 o recibo) para verificar la compra.'
+                )
 
-            verification = self.verify_receipt(receipt_data)
-            latest_receipt_info = verification.get('latest_receipt_info') or []
-            if not latest_receipt_info:
-                raise ValidationError('No se encontró información de suscripción en el recibo.')
+            if self._looks_like_jws(receipt_data):
+                logger.info('🍎 [APP STORE CREATE] receipt_data es JWS (StoreKit 2)')
+                transaction = self.transaction_from_jws(receipt_data, transaction_id)
+            else:
+                verification = self.verify_receipt(receipt_data)
+                all_txs = self._collect_receipt_transactions(verification)
+                if not all_txs:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] recibo sin transacciones keys=%s',
+                        list(verification.keys()),
+                    )
+                    raise ValidationError('No se encontró información de suscripción en el recibo.')
 
-            transaction = next(
-                (
-                    tx
-                    for tx in latest_receipt_info
-                    if tx.get('transaction_id') == transaction_id
-                    or tx.get('original_transaction_id') == transaction_id
-                ),
-                None,
-            )
-            if not transaction:
-                raise ValidationError('Transacción no encontrada en el recibo.')
+                summary = [
+                    {
+                        'transaction_id': tx.get('transaction_id'),
+                        'original_transaction_id': tx.get('original_transaction_id'),
+                        'product_id': tx.get('product_id'),
+                        'expires_date_ms': tx.get('expires_date_ms'),
+                    }
+                    for tx in all_txs[:12]
+                ]
+                logger.info(
+                    '🍎 [APP STORE CREATE] buscando transaction_id=%r product=%r en %s txs: %s',
+                    transaction_id,
+                    plan.appstore_id,
+                    len(all_txs),
+                    summary,
+                )
 
-            if (plan.appstore_id or '').strip() != (transaction.get('product_id') or '').strip():
-                raise ValidationError('El producto no coincide con el plan.')
+                transaction = self._pick_receipt_transaction(
+                    all_txs,
+                    transaction_id=transaction_id,
+                    product_id=(plan.appstore_id or '').strip(),
+                )
+                if not transaction:
+                    products = sorted({
+                        str(tx.get('product_id') or '')
+                        for tx in all_txs
+                        if tx.get('product_id')
+                    })
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] no match tx=%r product=%r available=%s',
+                        transaction_id,
+                        plan.appstore_id,
+                        products,
+                    )
+                    raise ValidationError(
+                        'Transacción no encontrada en el recibo. '
+                        f'Productos en recibo: {", ".join(products) or "ninguno"}.'
+                    )
+
+            receipt_product = (transaction.get('product_id') or '').strip()
+            plan_product = (plan.appstore_id or '').strip()
+            if receipt_product and plan_product and receipt_product != plan_product:
+                # En el mismo subscription group Apple puede devolver la tx/producto
+                # realmente activo (ej. monthly) aunque el FE pidió Pro.
+                alt_plan = Plan.objects.filter(appstore_id=receipt_product, activo=True).first()
+                if alt_plan:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] plan ajustado %s(%s) → %s(%s) según recibo',
+                        plan.nombre,
+                        plan_product,
+                        alt_plan.nombre,
+                        receipt_product,
+                    )
+                    plan = alt_plan
+                else:
+                    logger.warning(
+                        '🍎 [APP STORE CREATE] product mismatch plan.appstore_id=%r receipt.product_id=%r',
+                        plan_product,
+                        receipt_product,
+                    )
+                    raise ValidationError('El producto no coincide con el plan.')
 
         expires_ms = transaction.get('expires_date_ms')
         if not expires_ms:
+            logger.warning(
+                '🍎 [APP STORE CREATE] tx sin expires_date_ms keys=%s',
+                list(transaction.keys()),
+            )
             raise ValidationError('La transacción no tiene fecha de expiración.')
 
         expiration = datetime.fromtimestamp(int(expires_ms) / 1000, tz=dt_timezone.utc)
@@ -312,6 +541,14 @@ class AppStoreService:
         transaction_info = self._decode_jwt(signed_transaction_info)
         original_transaction_id = transaction_info.get('originalTransactionId')
 
+        renewal_info: dict = {}
+        signed_renewal_info = data.get('signedRenewalInfo')
+        if isinstance(signed_renewal_info, str) and signed_renewal_info:
+            try:
+                renewal_info = self._decode_jwt(signed_renewal_info)
+            except Exception:
+                logger.exception('🔔 [APP STORE] No se pudo decodificar signedRenewalInfo')
+
         subscription = (
             Subscripcion.objects.filter(
                 appstore_original_transaction_id=original_transaction_id
@@ -347,7 +584,7 @@ class AppStoreService:
                 subscription.cancelada = True
                 update_fields.append('cancelada')
 
-        if notification_type in ('SUBSCRIBED', 'DID_RENEW'):
+        if notification_type in ('SUBSCRIBED', 'DID_RENEW', 'DID_CHANGE_RENEWAL_PREF'):
             transaction_id = transaction_info.get('transactionId')
             expires_date = transaction_info.get('expiresDate')
             if transaction_id:
@@ -359,7 +596,41 @@ class AppStoreService:
                 )
                 update_fields.append('expiracion')
 
-        subscription.save(update_fields=update_fields)
+            # UPGRADE suele ser inmediato; DOWNGRADE queda para el próximo ciclo.
+            # Usamos productId de la tx, o autoRenewProductId del renewal info.
+            product_id = (
+                str(transaction_info.get('productId') or '').strip()
+                if subtype == 'UPGRADE' or notification_type in ('SUBSCRIBED', 'DID_RENEW')
+                else ''
+            )
+            if not product_id and subtype == 'UPGRADE':
+                product_id = str(renewal_info.get('autoRenewProductId') or '').strip()
+            if product_id:
+                plan = Plan.objects.filter(appstore_id=product_id, activo=True).first()
+                if plan and subscription.plan_id_id != plan.pk:
+                    logger.info(
+                        '🔔 [APP STORE] Plan webhook %s → %s (%s) tipo=%s/%s',
+                        subscription.plan_id_id,
+                        plan.pk,
+                        product_id,
+                        notification_type,
+                        subtype,
+                    )
+                    subscription.plan_id = plan
+                    subscription.jobs_restantes = plan.cantidad_jobs
+                    update_fields.extend(['plan_id', 'jobs_restantes'])
+                    if subscription.status != SubscripcionStatus.ACTIVE:
+                        subscription.status = SubscripcionStatus.ACTIVE
+                        update_fields.append('status')
+            elif subtype == 'DOWNGRADE':
+                pending = str(renewal_info.get('autoRenewProductId') or '').strip()
+                logger.info(
+                    '🔔 [APP STORE] Downgrade programado sub=%s autoRenewProductId=%s',
+                    subscription.pk,
+                    pending or '(n/a)',
+                )
+
+        subscription.save(update_fields=list(dict.fromkeys(update_fields)))
         logger.info(
             '🔔 [APP STORE] Suscripción %s → %s (tipo %s/%s)',
             subscription.pk,
