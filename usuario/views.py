@@ -835,6 +835,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         
         limit = int(request.query_params.get("limit", 50))
         lim = max(1, min(limit, 100))
+        fetch_limit = min(500, max(lim * 10, 300))
 
         profesion_id = request.query_params.get('profesion_id')
         sort_by      = request.query_params.get('sort_by')
@@ -859,7 +860,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 user_id,
                 q, q, q,
                 like_q, like_q, like_q,
-                lim,
+                fetch_limit,
             ])
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -899,7 +900,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         _sort_search_results(results, sort_by)
 
-        return Response(results)
+        return Response(results[:lim])
 
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):
