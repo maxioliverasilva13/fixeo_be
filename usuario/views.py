@@ -117,20 +117,18 @@ FROM (
         NULL::text AS pais,
         COALESCE(e.latitud, loc.latitud) AS latitud,
         COALESCE(e.longitud, loc.longitud) AS longitud,
-        CASE WHEN e.id IS NOT NULL THEN
-            GREATEST(
-                similarity(e.nombre, %s),
-                COALESCE(similarity(e.descripcion, %s), 0),
-                COALESCE(similarity(e.ubicacion, %s), 0),
-                COALESCE(MAX(similarity(p.nombre, %s)), 0)
-            )
-        ELSE
-            GREATEST(
-                similarity(u.nombre, %s),
-                similarity(u.apellido, %s),
-                COALESCE(MAX(similarity(p.nombre, %s)), 0)
-            )
-        END AS rank,
+        GREATEST(
+            similarity(u.nombre, %s),
+            similarity(u.apellido, %s),
+            CASE WHEN e.id IS NOT NULL THEN
+                GREATEST(
+                    similarity(e.nombre, %s),
+                    COALESCE(similarity(e.descripcion, %s), 0),
+                    COALESCE(similarity(e.ubicacion, %s), 0)
+                )
+            ELSE 0 END,
+            COALESCE(MAX(similarity(p.nombre, %s)), 0)
+        ) AS rank,
         u.rating,
         EXISTS(
             SELECT 1 FROM trabajo t
@@ -165,7 +163,11 @@ FROM (
         u.id != %s
         AND u.is_active = true
         AND (
-            (
+            u.nombre %% %s
+            OR u.nombre ILIKE %s
+            OR u.apellido %% %s
+            OR u.apellido ILIKE %s
+            OR (
                 e.id IS NOT NULL
                 AND (
                     e.nombre %% %s
@@ -174,21 +176,10 @@ FROM (
                     OR e.descripcion ILIKE %s
                     OR e.ubicacion %% %s
                     OR e.ubicacion ILIKE %s
-                    OR p.nombre %% %s
-                    OR p.nombre ILIKE %s
                 )
             )
-            OR (
-                e.id IS NULL
-                AND (
-                    u.nombre %% %s
-                    OR u.nombre ILIKE %s
-                    OR u.apellido %% %s
-                    OR u.apellido ILIKE %s
-                    OR p.nombre %% %s
-                    OR p.nombre ILIKE %s
-                )
-            )
+            OR p.nombre %% %s
+            OR p.nombre ILIKE %s
         )
     GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif,
         e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud, e.compartir_ubicacion_mapa,
@@ -850,13 +841,13 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         with connection.cursor() as cursor:
             cursor.execute(SQL_QUERY, [
-                # usuario: rank (4 params empresa + 3 freelancer; el CASE elige por fila)
-                q, q, q, q,
-                q, q, q,
+                # usuario: rank (nombre/apellido usuario + empresa si tiene + profesión)
+                q, q, q, q, q, q,
                 # usuario: where
                 user_id,
-                q, like_q, q, like_q, q, like_q, q, like_q,
+                q, like_q, q, like_q,
                 q, like_q, q, like_q, q, like_q,
+                q, like_q,
                 # producto: rank + where
                 q, q,
                 user_id,
