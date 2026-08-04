@@ -139,7 +139,8 @@ FROM (
         NULL::numeric AS precio_servicio,
         NULL::integer AS producto_id,
         u.cant_calif,
-        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa
+        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+        CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS business_name
     FROM usuario u
     LEFT JOIN LATERAL (
         SELECT
@@ -216,7 +217,8 @@ FROM (
         NULL::numeric AS precio_servicio,
         pr.id AS producto_id,
         0::integer AS cant_calif,
-        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa
+        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+        e.nombre AS business_name
     FROM producto pr
     JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
     JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
