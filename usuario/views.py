@@ -120,6 +120,7 @@ FROM (
         GREATEST(
             similarity(u.nombre, %s),
             similarity(u.apellido, %s),
+            similarity(TRIM(CONCAT_WS(' ', u.nombre, u.apellido)), %s),
             CASE WHEN e.id IS NOT NULL THEN
                 GREATEST(
                     similarity(e.nombre, %s),
@@ -167,6 +168,8 @@ FROM (
             OR u.nombre ILIKE %s
             OR u.apellido %% %s
             OR u.apellido ILIKE %s
+            OR TRIM(CONCAT_WS(' ', u.nombre, u.apellido)) %% %s
+            OR TRIM(CONCAT_WS(' ', u.nombre, u.apellido)) ILIKE %s
             OR (
                 e.id IS NOT NULL
                 AND (
@@ -842,10 +845,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         with connection.cursor() as cursor:
             cursor.execute(SQL_QUERY, [
                 # usuario: rank (nombre/apellido usuario + empresa si tiene + profesión)
-                q, q, q, q, q, q,
+                q, q, q, q, q, q, q,
                 # usuario: where
                 user_id,
                 q, like_q, q, like_q,
+                q, like_q,
                 q, like_q, q, like_q, q, like_q,
                 q, like_q,
                 # producto: rank + where
