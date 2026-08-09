@@ -9,7 +9,7 @@ ALTER TABLE empresa
 
 
 def create_admin_user(apps, schema_editor):
-    """Best-effort: no debe tumbar la migración si el user ya existe o falla el seed."""
+    """Best-effort: no debe tumbar la migración ni forzar deps de rol/usuario."""
     try:
         Usuario = apps.get_model('usuario', 'Usuario')
         Rol = apps.get_model('rol', 'Rol')
@@ -32,7 +32,6 @@ def create_admin_user(apps, schema_editor):
             rol=rol_admin,
         )
     except Exception:
-        # La columna ya se agregó; el admin se puede crear con seed_admin.
         pass
 
 
@@ -42,10 +41,10 @@ def noop_reverse(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    # Solo empresas: no depender de rol/usuario (en prod esas tablas existen
+    # pero a veces no están en django_migrations → "relation already exists").
     dependencies = [
         ('empresas', '0011_empresa_landing_fields'),
-        ('usuario', '0009_email_verification_challenge'),
-        ('rol', '0001_initial'),
     ]
 
     operations = [

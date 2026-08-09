@@ -18,13 +18,49 @@ conn.close()
 EOF
 
 echo "📊 Aplicando migraciones..."
-if ! python manage.py migrate --noinput; then
-  echo "⚠️  migrate falló; reintentando..."
-  python manage.py migrate --noinput || echo "⚠️  migrate sigue fallando"
+migrate_ok=0
+if python manage.py migrate --noinput; then
+  migrate_ok=1
+else
+  echo "⚠️  migrate falló (historial django_migrations vs esquema real)."
+  echo "    Recuperando: si la tabla/columna ya existe, se marca esa migración como --fake..."
+
+  max_attempts=40
+  attempt=0
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    attempt=$((attempt + 1))
+    migrate_out=""
+    if migrate_out=$(python manage.py migrate --noinput 2>&1); then
+      echo "$migrate_out"
+      migrate_ok=1
+      break
+    fi
+
+    echo "$migrate_out"
+
+    if echo "$migrate_out" | grep -qiE 'DuplicateColumn|DuplicateTable|already exists'; then
+      failing=$(echo "$migrate_out" | grep -oE 'Applying [a-z_]+\.[0-9]+_[a-zA-Z0-9_]+' | tail -1 | sed 's/Applying //')
+      if [ -z "$failing" ]; then
+        break
+      fi
+      app="${failing%%.*}"
+      mig="${failing#*.}"
+      echo "    → Ya existe: marcando ${app}.${mig} como aplicada (--fake)..."
+      if ! python manage.py migrate "$app" "$mig" --fake --noinput; then
+        break
+      fi
+      continue
+    fi
+
+    break
+  done
+fi
+
+if [ "$migrate_ok" -ne 1 ]; then
+  echo "⚠️  migrate sigue fallando; continúo con schema ensure + seeds"
 fi
 
 # Safety net: columnas críticas que el código ya referencia.
-# Evita UndefinedColumn si django_migrations quedó desfasado del esquema real.
 python - <<'EOF'
 import os
 import psycopg2

@@ -3,6 +3,20 @@
 from django.db import migrations, models
 
 
+CREATE_ROL_SQL = """
+CREATE TABLE IF NOT EXISTS rol (
+    id bigserial PRIMARY KEY,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    is_deleted boolean NOT NULL DEFAULT false,
+    deleted_at timestamptz NULL,
+    nombre varchar(50) NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS rol_created_at_idx ON rol (created_at);
+CREATE INDEX IF NOT EXISTS rol_is_deleted_idx ON rol (is_deleted);
+"""
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -11,20 +25,27 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.CreateModel(
-            name='Rol',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True, db_index=True, verbose_name='Creado en')),
-                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Actualizado en')),
-                ('is_deleted', models.BooleanField(db_index=True, default=False, verbose_name='Eliminado')),
-                ('deleted_at', models.DateTimeField(blank=True, null=True, verbose_name='Eliminado en')),
-                ('nombre', models.CharField(choices=[('admin', 'Admin'), ('usuario', 'Usuario'), ('profesional', 'Profesional')], max_length=50, unique=True)),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name='Rol',
+                    fields=[
+                        ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                        ('created_at', models.DateTimeField(auto_now_add=True, db_index=True, verbose_name='Creado en')),
+                        ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Actualizado en')),
+                        ('is_deleted', models.BooleanField(db_index=True, default=False, verbose_name='Eliminado')),
+                        ('deleted_at', models.DateTimeField(blank=True, null=True, verbose_name='Eliminado en')),
+                        ('nombre', models.CharField(choices=[('admin', 'Admin'), ('usuario', 'Usuario'), ('profesional', 'Profesional')], max_length=50, unique=True)),
+                    ],
+                    options={
+                        'verbose_name': 'Rol',
+                        'verbose_name_plural': 'Roles',
+                        'db_table': 'rol',
+                    },
+                ),
             ],
-            options={
-                'verbose_name': 'Rol',
-                'verbose_name_plural': 'Roles',
-                'db_table': 'rol',
-            },
+            database_operations=[
+                migrations.RunSQL(CREATE_ROL_SQL, migrations.RunSQL.noop),
+            ],
         ),
     ]
