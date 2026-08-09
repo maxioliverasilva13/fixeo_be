@@ -50,6 +50,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'landing_slogan',
             'landing_descripcion',
             'landing_foto_url',
+            'tiene_landing_page',
             'tiene_landing_activa',
         ]
         read_only_fields = ['currency', 'moneda_local', 'tiene_landing_activa']

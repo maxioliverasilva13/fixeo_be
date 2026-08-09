@@ -4,9 +4,12 @@ from .models import Empresa, Horarios, CategoriaProducto, Producto
 
 @admin.register(Empresa)
 class EmpresaAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'ubicacion', 'admin_id', 'unipersonal', 'vende_productos', 'vende_servicios', 'created_at')
+    list_display = (
+        'nombre', 'ubicacion', 'admin_id', 'unipersonal',
+        'vende_productos', 'vende_servicios', 'tiene_landing_page', 'created_at',
+    )
     search_fields = ('nombre', 'descripcion')
-    list_filter = ('created_at', 'unipersonal', 'vende_productos', 'vende_servicios')
+    list_filter = ('created_at', 'unipersonal', 'vende_productos', 'vende_servicios', 'tiene_landing_page')
 
 
 @admin.register(CategoriaProducto)

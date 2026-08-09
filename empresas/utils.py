@@ -71,6 +71,10 @@ def crear_empresa(
 
 
 def empresa_tiene_landing_activa(empresa) -> bool:
+    """Landing activa si la empresa lo tiene habilitado o su plan lo incluye."""
+    if getattr(empresa, 'tiene_landing_page', False):
+        return True
+
     from django.utils import timezone
     from suscripciones.models import Subscripcion
 

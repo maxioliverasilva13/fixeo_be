@@ -201,7 +201,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
 
         if not empresa_tiene_landing_activa(empresa):
             return Response(
-                {'error': 'Tu plan no incluye landing page activa'},
+                {'error': 'Esta empresa no tiene landing page activa'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

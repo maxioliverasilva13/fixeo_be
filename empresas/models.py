@@ -100,6 +100,10 @@ class Empresa(BaseModel):
         default='',
         help_text='Imagen de portada o logo para la landing.',
     )
+    tiene_landing_page = models.BooleanField(
+        default=False,
+        help_text='Si es True, la empresa tiene landing page aunque su plan no la incluya.',
+    )
     class Meta:
         db_table = 'empresa'
         verbose_name = 'Empresa'
