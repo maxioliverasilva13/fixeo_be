@@ -7,6 +7,7 @@ from .delivery_utils import aplicar_limites_modalidad, modalidad_desde_usuario
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
+    descripcion = serializers.CharField(required=False, allow_blank=True)
     trabajo_domicilio = serializers.BooleanField(source='admin_id.trabajo_domicilio', read_only=True)
     trabajo_local = serializers.BooleanField(source='admin_id.trabajo_local', read_only=True)
     efectivo_disponible = serializers.SerializerMethodField()

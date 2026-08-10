@@ -642,29 +642,6 @@ class UpdateUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             raise serializers.ValidationError("El rango máximo es 500 km")
         return value
     
-    def validate(self, attrs):
-        usuario = self.instance 
-
-        if not usuario or not usuario.is_owner_empresa:
-            return attrs
-
-        trabajo_domicilio = attrs.get(
-            'trabajo_domicilio',
-            usuario.trabajo_domicilio
-        )
-
-        trabajo_local = attrs.get(
-            'trabajo_local',
-            usuario.trabajo_local
-        )
-
-        if not trabajo_domicilio and not trabajo_local:
-            raise serializers.ValidationError(
-                "Debe tener al menos un tipo de trabajo activo (domicilio o local)."
-            )
-
-        return attrs
-
 class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     profesiones = serializers.SerializerMethodField()
     localizacion = serializers.SerializerMethodField()
