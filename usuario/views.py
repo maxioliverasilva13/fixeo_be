@@ -322,8 +322,20 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def registro(self, request):
+        import logging
+        logger = logging.getLogger(__name__)
+
         serializer = RegistroSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning(
+                'Registro 400: errors=%s keys=%s email=%s has_otp=%s has_firebase=%s',
+                serializer.errors,
+                list(request.data.keys()) if hasattr(request.data, 'keys') else type(request.data),
+                request.data.get('email'),
+                bool(request.data.get('email_verification_token')),
+                bool(request.data.get('firebase_token')),
+            )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
 
         try:

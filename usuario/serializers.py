@@ -481,7 +481,6 @@ class ValidateEmailExistSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
 
 class RegistroSerializer(serializers.Serializer):
-    # max_length=500 alinea con Usuario.foto_url (Google profile URLs suelen >200)
     foto_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
     rounded_foto_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
     nombre = serializers.CharField(required=True, max_length=100)
@@ -493,8 +492,9 @@ class RegistroSerializer(serializers.Serializer):
     trabajo_domicilio = serializers.BooleanField(required=False, default=False)
     telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
     trabajo_local = serializers.BooleanField(required=False, default=False)
-    latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
+    # FloatField: el GPS del FE manda >7 decimales y DecimalField(decimal_places=7) lo rechaza antes del validate_*.
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
     direction_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     profesion_ids = serializers.ListField(
         child=serializers.IntegerField(),
@@ -504,12 +504,7 @@ class RegistroSerializer(serializers.Serializer):
     )
     vende_productos = serializers.BooleanField(required=False, default=False)
     vende_servicios = serializers.BooleanField(required=False, default=True)
-    rango_mapa_km = serializers.DecimalField(
-        max_digits=5,
-        decimal_places=2,
-        required=False,
-        allow_null=True,
-    )
+    rango_mapa_km = serializers.FloatField(required=False, allow_null=True)
     compartir_ubicacion_mapa = serializers.BooleanField(required=False, allow_null=True)
     # Registro email/password: token emitido tras verificar el código OTP.
     # Registro social: se puede omitir si se envía firebase_token válido.
@@ -520,15 +515,6 @@ class RegistroSerializer(serializers.Serializer):
         if value is None:
             return True
         return bool(value)
-
-    def validate_rango_mapa_km(self, value):
-        if value is None or value == '':
-            return None
-        if value < Decimal('0.5'):
-            raise serializers.ValidationError('El rango mínimo es 0.5 km')
-        if value > Decimal('500'):
-            raise serializers.ValidationError('El rango máximo es 500 km')
-        return value
 
     def validate_email(self, value):
         email = (value or '').strip().lower()
@@ -547,6 +533,27 @@ class RegistroSerializer(serializers.Serializer):
         if len(phone) > 20:
             raise serializers.ValidationError('El teléfono es demasiado largo.')
         return phone
+
+    def validate_latitude(self, value):
+        if value is None or value == '':
+            return None
+        # GPS del FE suele traer muchos decimales; el modelo guarda 7.
+        return Decimal(str(value)).quantize(Decimal('0.0000001'))
+
+    def validate_longitude(self, value):
+        if value is None or value == '':
+            return None
+        return Decimal(str(value)).quantize(Decimal('0.0000001'))
+
+    def validate_rango_mapa_km(self, value):
+        if value is None or value == '':
+            return None
+        quantized = Decimal(str(value)).quantize(Decimal('0.01'))
+        if quantized < Decimal('0.5'):
+            raise serializers.ValidationError('El rango mínimo es 0.5 km')
+        if quantized > Decimal('500'):
+            raise serializers.ValidationError('El rango máximo es 500 km')
+        return quantized
 
     def validate(self, attrs):
         lat = attrs.get('latitude')
