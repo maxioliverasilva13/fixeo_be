@@ -39,7 +39,6 @@ from decimal import Decimal
 import math
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
-import resend
 from django.conf import settings
 from django.db import connection
 from django.db.models import Min
@@ -684,66 +683,47 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='request-reset-password')
     def request_reset_password(self, request):
+        from notificaciones.email_service import send_password_reset_email
+
         serializer = RequestPasswordResetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        email = serializer.validated_data['email']
-        usuario = Usuario.objects.filter(correo=email).first()
+        email = (serializer.validated_data['email'] or '').strip().lower()
+        usuario = Usuario.objects.filter(correo__iexact=email, is_deleted=False).first()
 
+        # Misma respuesta siempre (no filtrar existencia de cuentas).
         if usuario:
             PasswordResetToken.objects.filter(usuario=usuario, used=False).update(used=True)
-
             reset_token = PasswordResetToken.objects.create(usuario=usuario)
-            reset_url = f"{settings.FRONTEND_URL}/resetPassword?token={reset_token.token}"
+            frontend = (getattr(settings, 'FRONTEND_URL', None) or 'http://localhost:8081').rstrip('/')
+            reset_url = f"{frontend}/resetPassword?token={reset_token.token}"
 
-            resend.api_key = settings.RESEND_API_KEY
+            send_result = send_password_reset_email(
+                to_email=usuario.correo,
+                reset_url=reset_url,
+                usuario_nombre=usuario.nombre or '',
+                hours_valid=1,
+            )
+            if not send_result.get('success'):
+                return Response(
+                    {
+                        'error': 'No se pudo enviar el correo. Probá de nuevo en unos minutos.',
+                        'detail': send_result.get('error'),
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
 
-            resend.Emails.send({
-                # "from": "noreply@alavuelta.com",
-                "from": "onboarding@resend.dev",
-                "to":      ['alavueltaapp@gmail.com'],
-                # "to":      [email],
-                "subject": "Restablecer tu contraseña",
-                "html": f"""
-                <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#fff;border-radius:16px;">
-                <div style="text-align:center;margin-bottom:32px;">
-                    <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#8972FD,#AFA0FF);
-                                margin:0 auto;line-height:64px;text-align:center;">
-                        <span style="font-size:28px;">🔐</span>
-                    </div>
-                </div>
-
-                <h1 style="font-size:22px;font-weight:700;color:#111;margin:0 0 8px;">
-                    Recuperar contraseña
-                </h1>
-                <p style="font-size:14px;color:#6B7280;margin:0 0 24px;line-height:1.6;">
-                    Recibimos una solicitud para restablecer la contraseña de tu cuenta.
-                    Si no fuiste vos, podés ignorar este correo.
-                </p>
-
-                <a href="{reset_url}"
-                    style="display:block;width:100%;padding:16px;background:linear-gradient(135deg,#8972FD,#AFA0FF);
-                            color:#fff;font-size:15px;font-weight:700;text-align:center;
-                            border-radius:12px;text-decoration:none;box-sizing:border-box;
-                            box-shadow:0 4px 20px rgba(137,114,253,0.4);">
-                    Restablecer contraseña
-                </a>
-
-                <p style="font-size:12px;color:#9CA3AF;margin:24px 0 0;text-align:center;">
-                    Este enlace expira en <strong>1 hora</strong>.
-                </p>
-                </div>
-                """,
-            })
-
-        return Response({'message': 'Si el correo existe, recibirás un enlace.'}, status=status.HTTP_200_OK)
+        return Response(
+            {'message': 'Si el correo existe, recibirás un enlace.'},
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='confirm-reset-password')
     def confirm_reset_password(self, request):
         serializer = ConfirmPasswordResetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        token_value  = serializer.validated_data['token']
+        token_value = serializer.validated_data['token']
         new_password = serializer.validated_data['new_password']
 
         try:
@@ -752,14 +732,26 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Token inválido o expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if not reset_token.is_valid():
-            return Response({'error': 'El enlace expiró. Solicitá uno nuevo.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': 'El enlace expiró. Solicitá uno nuevo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         usuario = reset_token.usuario
+        if usuario.is_deleted or not usuario.is_active:
+            return Response(
+                {'error': 'Token inválido o expirado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         usuario.set_password(new_password)
-        usuario.save()
+        usuario.save(update_fields=['password', 'updated_at'])
 
         reset_token.used = True
-        reset_token.save()
+        reset_token.save(update_fields=['used'])
+
+        # Invalidar otros tokens pendientes del mismo usuario
+        PasswordResetToken.objects.filter(usuario=usuario, used=False).exclude(pk=reset_token.pk).update(used=True)
 
         return Response({'message': 'Contraseña actualizada exitosamente.'}, status=status.HTTP_200_OK)
 

@@ -297,6 +297,40 @@ def send_verification_code_email(*, to_email: str, code: str, minutes_valid: int
     return send_html_email(to_email=to_email, subject=content.subject, html=html)
 
 
+def send_password_reset_email(
+    *,
+    to_email: str,
+    reset_url: str,
+    usuario_nombre: str = '',
+    hours_valid: int = 1,
+) -> dict[str, Any]:
+    greeting = f'Hola {_escape(usuario_nombre)},' if usuario_nombre else 'Hola,'
+    content = EmailContent(
+        subject='Restablecer tu contraseña',
+        badge='Seguridad',
+        headline='Recuperar contraseña',
+        body_html=f"""
+          <p style="margin:0 0 12px;font-size:15px;color:{TEXT};line-height:1.5;">
+            {greeting}
+          </p>
+          <p style="margin:0 0 16px;font-size:14px;color:{MUTED};line-height:1.65;">
+            Recibimos una solicitud para restablecer la contraseña de tu cuenta en ALaVuelta.
+            Si no fuiste vos, podés ignorar este correo.
+          </p>
+          <p style="margin:0;font-size:13px;color:{MUTED};line-height:1.6;text-align:center;">
+            Este enlace expira en <strong>{hours_valid} hora{'s' if hours_valid != 1 else ''}</strong>.
+          </p>
+        """,
+        cta_label='Restablecer contraseña',
+        cta_url=reset_url,
+    )
+    html = render_email_html(
+        content,
+        footer_text='Si no pediste restablecer tu contraseña, ignorá este correo. Tu cuenta sigue segura.',
+    )
+    return send_html_email(to_email=to_email, subject=content.subject, html=html)
+
+
 def send_notification_email(
     *,
     to_email: str,

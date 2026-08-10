@@ -126,7 +126,10 @@ class PasswordResetToken(models.Model):
 
     def is_valid(self):
         """Token válido por 1 hora y no utilizado."""
-        return not self.used and (timezone.now() - self.created_at).seconds < 3600
+        if self.used:
+            return False
+        age = (timezone.now() - self.created_at).total_seconds()
+        return age < 3600
 
     def __str__(self):
         return f"Reset token for {self.usuario.correo}"
