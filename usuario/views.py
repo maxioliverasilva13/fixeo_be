@@ -324,71 +324,73 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def registro(self, request):
         serializer = RegistroSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+        data = serializer.validated_data
+
         try:
             with transaction.atomic():
-                if serializer.validated_data['es_empresa']:
-                    if not serializer.validated_data.get('latitude') or not serializer.validated_data.get('longitude'):
-                        raise ValueError('Las coordenadas son requeridas para crear una empresa')
-                
-                es_empresa = serializer.validated_data['es_empresa']
-                rango_mapa = serializer.validated_data.get('rango_mapa_km')
+                es_empresa = bool(data.get('es_empresa', False))
+                lat = data.get('latitude')
+                lng = data.get('longitude')
+
+                if es_empresa and (lat is None or lng is None):
+                    raise ValueError('Las coordenadas son requeridas para crear una empresa')
+
+                rango_mapa = data.get('rango_mapa_km')
                 if es_empresa and rango_mapa is None:
+                    rango_mapa = Decimal('10.00')
+                if rango_mapa is None:
                     rango_mapa = Decimal('10.00')
 
                 usuario = Usuario.objects.create_user(
-                    correo=serializer.validated_data['email'],
-                    password=serializer.validated_data['password'],
-                    nombre=serializer.validated_data['nombre'],
-                    apellido=serializer.validated_data['apellido'],
-                    foto_url=serializer.validated_data.get('foto_url', ''),
-                    trabajo_domicilio=serializer.validated_data['trabajo_domicilio'],
-                    trabajo_local=serializer.validated_data['trabajo_local'],
-                    telefono=serializer.validated_data.get('telefono', ''),
+                    correo=data['email'],
+                    password=data['password'],
+                    nombre=data['nombre'],
+                    apellido=data['apellido'],
+                    foto_url=data.get('foto_url') or '',
+                    trabajo_domicilio=bool(data.get('trabajo_domicilio', False)),
+                    trabajo_local=bool(data.get('trabajo_local', False)),
+                    telefono=data.get('telefono') or '',
                     is_owner_empresa=es_empresa,
-                    rounded_foto_url=serializer.validated_data.get('rounded_foto_url', ''),
-                    rango_mapa_km=rango_mapa if es_empresa else Decimal('10.00'),
+                    rounded_foto_url=data.get('rounded_foto_url') or '',
+                    rango_mapa_km=rango_mapa,
                 )
 
-                if serializer.validated_data.get('email_verified_via') == 'otp':
+                if data.get('email_verified_via') == 'otp':
                     consume_email_verification_token(
-                        serializer.validated_data['email'],
-                        serializer.validated_data.get('email_verification_token') or '',
+                        data['email'],
+                        data.get('email_verification_token') or '',
                     )
-                
-                if serializer.validated_data.get('latitude') and serializer.validated_data.get('longitude'):
+
+                if lat is not None and lng is not None:
                     localizacion = Localizacion.objects.create(
-                        ubicacion=serializer.validated_data.get('direction_name', ''),
-                        latitud=serializer.validated_data['latitude'],
-                        longitud=serializer.validated_data['longitude'],
-                        address=serializer.validated_data.get('direction_name', ''),
+                        ubicacion=data.get('direction_name') or '',
+                        latitud=lat,
+                        longitud=lng,
+                        address=data.get('direction_name') or '',
                         city='',
                         country='',
                         county='',
                         state='',
-                        isPrimary=True
+                        isPrimary=True,
                     )
-                    
+
                     UsuarioLocalizacion.objects.create(
                         usuario=usuario,
                         localizacion=localizacion,
                         es_principal=True,
                     )
-                
-                profesion_ids = serializer.validated_data.get('profesion_ids', [])
-                for profesion_id in profesion_ids:
+
+                for profesion_id in data.get('profesion_ids') or []:
                     profesion = obtener_profesion_por_id(profesion_id)
                     if profesion:
                         UsuarioProfesion.objects.create(
                             usuario=usuario,
-                            profesion=profesion
+                            profesion=profesion,
                         )
-                
-                if serializer.validated_data['es_empresa']:
+
+                if es_empresa:
                     localizacion_empresa = UsuarioLocalizacion.objects.filter(usuario=usuario).first()
-                    nombre_empresa = (
-                        serializer.validated_data.get('nombre_empresa') or ''
-                    ).strip()
+                    nombre_empresa = (data.get('nombre_empresa') or '').strip()
                     if not nombre_empresa:
                         nombre_empresa = f"{usuario.nombre} {usuario.apellido}".strip()
                     if not validar_nombre_empresa_unico(nombre_empresa):
@@ -397,40 +399,57 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         )
                     crear_empresa(
                         nombre=nombre_empresa,
-                        ubicacion=serializer.validated_data.get('direction_name', ''),
-                        latitud=serializer.validated_data['latitude'],
-                        longitud=serializer.validated_data['longitude'],
+                        ubicacion=data.get('direction_name') or '',
+                        latitud=lat,
+                        longitud=lng,
                         admin_id=usuario,
                         descripcion='',
                         unipersonal=True,
                         localizacion=localizacion_empresa.localizacion if localizacion_empresa else None,
-                        vende_productos=serializer.validated_data.get('vende_productos', False),
-                        vende_servicios=serializer.validated_data.get('vende_servicios', True),
-                        compartir_ubicacion_mapa=serializer.validated_data.get(
-                            'compartir_ubicacion_mapa', True
-                        ),
+                        vende_productos=data.get('vende_productos', False),
+                        vende_servicios=data.get('vende_servicios', True),
+                        compartir_ubicacion_mapa=data.get('compartir_ubicacion_mapa', True),
                     )
-                
-                touch_token_activity(usuario)
-                refresh = RefreshToken.for_user(usuario)
+
+                usuario_id = usuario.id
+
+            # Tokens + serialize fuera del atomic: si falla el serializer, la cuenta ya quedó creada.
+            usuario = Usuario.objects.get(pk=usuario_id)
+            touch_token_activity(usuario)
+            refresh = RefreshToken.for_user(usuario)
+            try:
                 user_data = UsuarioSerializer(usuario, context={'request': request}).data
-                
-                return Response({
-                    'user': user_data,
-                    'tokens': {
-                        'refresh': str(refresh),
-                        'access': str(refresh.access_token),
-                    }
-                }, status=status.HTTP_201_CREATED)
+            except Exception:
+                user_data = {
+                    'id': usuario.id,
+                    'correo': usuario.correo,
+                    'nombre': usuario.nombre,
+                    'apellido': usuario.apellido,
+                    'telefono': usuario.telefono,
+                    'foto_url': usuario.foto_url or '',
+                    'rounded_foto_url': usuario.rounded_foto_url or '',
+                    'is_owner_empresa': usuario.is_owner_empresa,
+                    'trabajo_domicilio': usuario.trabajo_domicilio,
+                    'trabajo_local': usuario.trabajo_local,
+                    'rango_mapa_km': str(usuario.rango_mapa_km),
+                }
+
+            return Response({
+                'user': user_data,
+                'tokens': {
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                },
+            }, status=status.HTTP_201_CREATED)
         except ValueError as e:
             return Response(
                 {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as e:
             return Response(
                 {'error': f'Error al crear el usuario: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
     

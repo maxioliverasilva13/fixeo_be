@@ -481,24 +481,26 @@ class ValidateEmailExistSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
 
 class RegistroSerializer(serializers.Serializer):
-    foto_url = serializers.URLField(required=False, allow_blank=True)
-    rounded_foto_url = serializers.URLField(required=False, allow_blank=True)
+    # max_length=500 alinea con Usuario.foto_url (Google profile URLs suelen >200)
+    foto_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
+    rounded_foto_url = serializers.URLField(required=False, allow_blank=True, max_length=500)
     nombre = serializers.CharField(required=True, max_length=100)
     apellido = serializers.CharField(required=True, max_length=100)
     email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
-    es_empresa = serializers.BooleanField(required=False)
+    es_empresa = serializers.BooleanField(required=False, default=False)
     nombre_empresa = serializers.CharField(required=False, allow_blank=True, max_length=200)
-    trabajo_domicilio = serializers.BooleanField(required=False)
+    trabajo_domicilio = serializers.BooleanField(required=False, default=False)
     telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
-    trabajo_local = serializers.BooleanField(required=False)
+    trabajo_local = serializers.BooleanField(required=False, default=False)
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False, allow_null=True)
     direction_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     profesion_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
-        allow_empty=True
+        allow_empty=True,
+        default=list,
     )
     vende_productos = serializers.BooleanField(required=False, default=False)
     vende_servicios = serializers.BooleanField(required=False, default=True)
@@ -529,14 +531,29 @@ class RegistroSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
-        if Usuario.objects.filter(correo=value).exists():
+        email = (value or '').strip().lower()
+        if Usuario.objects.filter(correo__iexact=email).exists():
             raise serializers.ValidationError("Ya existe un usuario con este correo electrónico.")
-        return value
-    
+        return email
+
+    def validate_foto_url(self, value):
+        return (value or '').strip()
+
+    def validate_rounded_foto_url(self, value):
+        return (value or '').strip()
+
+    def validate_telefono(self, value):
+        phone = (value or '').strip()
+        if len(phone) > 20:
+            raise serializers.ValidationError('El teléfono es demasiado largo.')
+        return phone
+
     def validate(self, attrs):
-        if attrs.get('latitude') and not attrs.get('longitude'):
+        lat = attrs.get('latitude')
+        lng = attrs.get('longitude')
+        if lat is not None and lng is None:
             raise serializers.ValidationError({"longitude": "La longitud es requerida cuando se proporciona la latitud."})
-        if attrs.get('longitude') and not attrs.get('latitude'):
+        if lng is not None and lat is None:
             raise serializers.ValidationError({"latitude": "La latitud es requerida cuando se proporciona la longitud."})
 
         if attrs.get('es_empresa'):
@@ -546,9 +563,13 @@ class RegistroSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     'La empresa debe vender productos y/o servicios.'
                 )
+            if lat is None or lng is None:
+                raise serializers.ValidationError({
+                    'latitude': 'La ubicación es obligatoria para registrar una empresa.',
+                })
             if attrs.get('rango_mapa_km') is None:
                 attrs['rango_mapa_km'] = Decimal('10.00')
-            if 'compartir_ubicacion_mapa' not in attrs:
+            if attrs.get('compartir_ubicacion_mapa') is None:
                 raw = self.initial_data.get('compartir_ubicacion_mapa')
                 if raw is False or str(raw).lower() in ('false', '0', 'no'):
                     attrs['compartir_ubicacion_mapa'] = False

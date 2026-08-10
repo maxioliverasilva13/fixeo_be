@@ -81,6 +81,24 @@ class StandardizedResponseMiddleware(MiddlewareMixin):
                 return data['detail']
             if 'error' in data:
                 return data['error']
+            # ValidationError de DRF: {campo: [msgs]} o {campo: msg}
+            if not is_success:
+                field_msgs = []
+                for key, value in data.items():
+                    if key in ('ok', 'data'):
+                        continue
+                    if isinstance(value, (list, tuple)):
+                        field_msgs.extend(str(v) for v in value if v)
+                    elif isinstance(value, dict):
+                        for nested in value.values():
+                            if isinstance(nested, (list, tuple)):
+                                field_msgs.extend(str(v) for v in nested if v)
+                            elif nested:
+                                field_msgs.append(str(nested))
+                    elif value:
+                        field_msgs.append(str(value))
+                if field_msgs:
+                    return field_msgs[0]
         
         messages = {
             200: 'Operación exitosa',
