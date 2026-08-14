@@ -331,6 +331,53 @@ def send_password_reset_email(
     return send_html_email(to_email=to_email, subject=content.subject, html=html)
 
 
+def send_welcome_professional_email(
+    *,
+    to_email: str,
+    usuario_nombre: str = '',
+    meses_gratis: int = 3,
+) -> dict[str, Any]:
+    """
+    Email de bienvenida para profesionales recién registrados.
+    Anuncia el lanzamiento y el regalo de meses gratis.
+    """
+    if not to_email:
+        return {'success': False, 'error': 'sin correo'}
+
+    greeting = f'Hola {_escape(usuario_nombre)},' if usuario_nombre else 'Hola,'
+    content = EmailContent(
+        subject=f'¡Bienvenido/a a ALaVuelta! Te regalamos {meses_gratis} meses gratis 🎉',
+        badge='Bienvenida',
+        headline=f'¡Gracias por sumarte a ALaVuelta!',
+        body_html=f"""
+          <p style="margin:0 0 12px;font-size:15px;color:{TEXT};line-height:1.5;">
+            {greeting}
+          </p>
+          <p style="margin:0 0 16px;font-size:14px;color:{MUTED};line-height:1.65;">
+            Estamos a punto de salir al público y, para lograrlo, necesitamos contar con
+            profesionales como vos. Tu colaboración en esta etapa es clave para nosotros.
+          </p>
+          <div style="background:{PRIMARY_LIGHTER};border:1px solid {BORDER};border-radius:14px;padding:16px 18px;margin:0 0 16px;">
+            <p style="margin:0;font-size:14px;color:{TEXT};line-height:1.65;">
+              Como forma de agradecerte por confiar y acompañarnos desde el inicio, queremos
+              regalarte <strong>{meses_gratis} meses de uso totalmente gratis</strong>.
+            </p>
+          </div>
+          <p style="margin:0;font-size:14px;color:{MUTED};line-height:1.65;">
+            Cualquier duda o sugerencia, estamos a tu disposición. ¡Nos entusiasma mucho
+            construir esto junto a vos!
+          </p>
+        """,
+        cta_label='Abrir ALaVuelta',
+        cta_url=_frontend_url(),
+    )
+    html = render_email_html(
+        content,
+        footer_text='Recibiste este correo porque creaste una cuenta de profesional en ALaVuelta.',
+    )
+    return send_html_email(to_email=to_email, subject=content.subject, html=html)
+
+
 def send_notification_email(
     *,
     to_email: str,

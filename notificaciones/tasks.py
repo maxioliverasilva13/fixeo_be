@@ -130,6 +130,91 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
     return result
 
 
+WELCOME_PROFESIONAL_CHAT = (
+    '¡Hola {nombre}! 👋 Gracias por sumarte a ALaVuelta.\n\n'
+    'Estamos por salir al público y necesitamos profesionales como vos para lograrlo. '
+    'Para agradecerte por acompañarnos desde el inicio, te regalamos 3 meses gratis 🎁\n\n'
+    '¡Bienvenido/a! Estamos para ayudarte en lo que necesites.'
+)
+
+
+@shared_task(name='notificaciones.enviar_bienvenida_profesional')
+def enviar_bienvenida_profesional(usuario_id):
+    """
+    Da la bienvenida a un profesional recién registrado:
+    - Crea (o reutiliza) el chat de soporte con el admin y envía un mensaje.
+    - Envía el email de bienvenida con la promo de meses gratis.
+    """
+    from django.db.models import Q
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+
+    from usuario.models import Usuario
+    from mensajeria.models import Chat, Mensajes
+    from notificaciones.email_service import send_welcome_professional_email
+
+    try:
+        usuario = Usuario.objects.get(id=usuario_id)
+    except Usuario.DoesNotExist:
+        return {'error': f'Usuario {usuario_id} no encontrado'}
+
+    result = {'success': True, 'usuario_id': usuario_id, 'chat': None, 'email': None}
+
+    # --- Mensaje de chat desde la cuenta admin (mismo patrón que el chat de soporte) ---
+    admin = Usuario.objects.filter(rol__nombre='admin').order_by('id').first()
+    if not admin:
+        result['chat'] = {'skipped': True, 'reason': 'no_admin'}
+    elif admin.id == usuario.id:
+        result['chat'] = {'skipped': True, 'reason': 'usuario_es_admin'}
+    else:
+        chat = Chat.objects.filter(
+            Q(sender=admin, receiver=usuario) | Q(sender=usuario, receiver=admin)
+        ).first()
+        if not chat:
+            chat = Chat.objects.create(sender=admin, receiver=usuario)
+
+        texto = WELCOME_PROFESIONAL_CHAT.format(nombre=usuario.nombre or '')
+        mensaje = Mensajes.objects.create(
+            texto=texto,
+            sender=admin,
+            chat=chat,
+            tipo=Mensajes.TipoMensaje.TEXTO,
+        )
+        chat.ultimo_mensaje_at = mensaje.created_at
+        chat.save()
+
+        try:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(f'user_{usuario.id}', {
+                'type': 'chat_message',
+                'message': mensaje.texto,
+                'mensaje_id': mensaje.mensaje_id,
+                'user_id': admin.id,
+                'created_at': mensaje.created_at.isoformat(),
+                'chat_id': chat.id,
+                'leido': False,
+                'tipo': mensaje.tipo,
+                'metadata': mensaje.metadata,
+                'recurso': None,
+            })
+        except Exception as e:
+            logger.warning('Bienvenida: fallo al emitir por websocket (usuario=%s): %s', usuario_id, e)
+
+        result['chat'] = {'chat_id': chat.id, 'mensaje_id': mensaje.mensaje_id}
+
+    # --- Email de bienvenida con la promo ---
+    if getattr(usuario, 'recibir_correos', True):
+        nombre = f'{usuario.nombre or ""} {usuario.apellido or ""}'.strip()
+        result['email'] = send_welcome_professional_email(
+            to_email=usuario.correo,
+            usuario_nombre=nombre,
+        )
+    else:
+        result['email'] = {'email_skipped': True, 'reason': 'recibir_correos=False'}
+
+    return result
+
+
 @shared_task(name='notificaciones.notificar_usuarios_multiple')
 def notificar_usuarios_multiple(usuarios_ids, titulo, mensaje, data=None):
     resultados = []

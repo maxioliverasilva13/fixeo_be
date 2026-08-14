@@ -428,6 +428,14 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             # Tokens + serialize fuera del atomic: si falla el serializer, la cuenta ya quedó creada.
             usuario = Usuario.objects.get(pk=usuario_id)
             touch_token_activity(usuario)
+
+            # Bienvenida a profesionales (empresa): mensaje de chat + email con promo.
+            if es_empresa:
+                try:
+                    from notificaciones.tasks import enviar_bienvenida_profesional
+                    enviar_bienvenida_profesional.delay(usuario_id)
+                except Exception as e:
+                    logger.warning('No se pudo encolar la bienvenida de profesional (usuario=%s): %s', usuario_id, e)
             refresh = RefreshToken.for_user(usuario)
             try:
                 user_data = UsuarioSerializer(usuario, context={'request': request}).data
