@@ -138,8 +138,13 @@ WELCOME_PROFESIONAL_CHAT = (
 )
 
 
-@shared_task(name='notificaciones.enviar_bienvenida_profesional')
-def enviar_bienvenida_profesional(usuario_id):
+@shared_task(
+    bind=True,
+    name='notificaciones.enviar_bienvenida_profesional',
+    max_retries=5,
+    default_retry_delay=5,
+)
+def enviar_bienvenida_profesional(self, usuario_id):
     """
     Da la bienvenida a un profesional recién registrado:
     - Crea (o reutiliza) el chat de soporte con el admin y envía un mensaje.
@@ -155,7 +160,15 @@ def enviar_bienvenida_profesional(usuario_id):
 
     try:
         usuario = Usuario.objects.get(id=usuario_id)
-    except Usuario.DoesNotExist:
+    except Usuario.DoesNotExist as exc:
+        # El commit de la cuenta puede no ser visible aún para el worker
+        # (transacción en curso / latencia de replica). Reintentamos.
+        if self.request.retries < self.max_retries:
+            logger.info(
+                'Bienvenida: usuario %s aún no visible, reintentando (%s/%s)',
+                usuario_id, self.request.retries + 1, self.max_retries,
+            )
+            raise self.retry(exc=exc)
         return {'error': f'Usuario {usuario_id} no encontrado'}
 
     result = {'success': True, 'usuario_id': usuario_id, 'chat': None, 'email': None}
