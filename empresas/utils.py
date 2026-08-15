@@ -71,8 +71,12 @@ def crear_empresa(
 
 
 def empresa_tiene_landing_activa(empresa) -> bool:
-    """Landing activa si la empresa lo tiene habilitado o su plan lo incluye."""
-    if getattr(empresa, 'tiene_landing_page', False):
+    """
+    Landing pública activa si:
+    - empresa.tiene_landing_page = True (override admin), O
+    - el plan de la suscripción activa incluye tiene_landing_page.
+    """
+    if bool(getattr(empresa, 'tiene_landing_page', False)):
         return True
 
     from django.utils import timezone
@@ -89,4 +93,5 @@ def empresa_tiene_landing_activa(empresa) -> bool:
         .order_by('-created_at')
         .first()
     )
-    return bool(sub and sub.plan_id.tiene_landing_page)
+    return bool(sub and getattr(sub.plan_id, 'tiene_landing_page', False))
+

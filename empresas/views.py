@@ -766,6 +766,7 @@ class EmpresaPublicLandingView(APIView):
                 'trabajo_domicilio': admin.trabajo_domicilio,
                 'trabajo_local': admin.trabajo_local,
                 'rango_mapa_km': float(admin.rango_mapa_km or 10),
+                'tiene_landing_page': bool(empresa.tiene_landing_page),
             },
             'admin_id': admin.id,
             'horarios': horarios,
