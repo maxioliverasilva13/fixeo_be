@@ -236,110 +236,155 @@ ORDER BY rank DESC
 LIMIT %s;
 """
 
-# Feed de recomendados: misma forma de fila que SQL_QUERY (para reusar el shape en el
-# front), pero SIN filtro de texto. Trae profesionales (con empresa) + sus productos.
-# El orden final por cercanía se calcula en Python (igual criterio que el mapa).
-SQL_RECOMENDADOS = f"""
-SELECT *
-FROM (
-    SELECT
-        'usuario' AS tipo,
-        u.id,
-        CASE
-            WHEN e.id IS NOT NULL THEN e.nombre
-            ELSE NULLIF(
-                TRIM(CONCAT_WS(' ', NULLIF(TRIM(u.nombre), ''), NULLIF(TRIM(u.apellido), ''))),
-                ''
-            )
-        END AS titulo,
-        string_agg(DISTINCT p.nombre, ', ') AS extra,
-        u.foto_url,
-        u.rounded_foto_url,
-        NULL::numeric AS precio,
-        NULL::text AS codigo,
-        NULL::text AS foto_producto,
-        CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS empresa_nombre,
-        e.id AS empresa_id,
-        COALESCE(e.ubicacion, loc.city) AS ciudad,
-        NULL::text AS pais,
-        COALESCE(e.latitud, loc.latitud) AS latitud,
-        COALESCE(e.longitud, loc.longitud) AS longitud,
-        COALESCE(u.rating, 0) AS rank,
-        u.rating,
-        EXISTS(
-            SELECT 1 FROM trabajo t
-            WHERE t.profesional_id = u.id AND t."esUrgente" = true
-        ) AS es_urgente,
-        array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
-        NULL::numeric AS precio_servicio,
-        NULL::integer AS producto_id,
-        u.cant_calif,
-        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
-        CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS business_name
-    FROM usuario u
-    LEFT JOIN LATERAL (
-        SELECT
-            e0.id,
-            e0.nombre,
-            e0.descripcion,
-            e0.ubicacion,
-            e0.latitud,
-            e0.longitud,
-            e0.compartir_ubicacion_mapa
-        FROM empresa e0
-        WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
-          AND NOT COALESCE(e0.is_deleted, false)
-        ORDER BY e0.id
-        LIMIT 1
-    ) e ON TRUE
-    LEFT JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
-    LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
-    LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
-    LEFT JOIN profesion p ON p.id = up.profesion_id
-    WHERE
-        u.id != %s
-        AND u.is_active = true
-        AND e.id IS NOT NULL
-    GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif, u.rating,
-        e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud, e.compartir_ubicacion_mapa,
-        loc.latitud, loc.longitud, loc.city
+# Feed de recomendados: MISMA forma de fila que SQL_QUERY (para reusar el shape en el
+# front), pero SIN filtro de texto y separado por categoría (profesionales / productos /
+# servicios) para no mezclar todo. El orden final por cercanía se calcula en Python.
+# Las 3 consultas devuelven exactamente las mismas columnas y en el mismo orden.
 
-    UNION ALL
-
-    SELECT
-        'producto' AS tipo,
-        u.id,
-        pr.nombre AS titulo,
-        pr.descripcion AS extra,
-        NULL,
-        NULL,
-        pr.precio,
-        pr.codigo,
-        pr.foto,
-        e.nombre,
-        e.id,
-        NULL::text AS ciudad,
-        NULL::text AS pais,
-        e.latitud,
-        e.longitud,
-        2.5::numeric AS rank,
-        0::numeric AS rating,
-        false AS es_urgente,
-        NULL::integer[] AS profesion_ids,
-        NULL::numeric AS precio_servicio,
-        pr.id AS producto_id,
-        0::integer AS cant_calif,
-        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
-        e.nombre AS business_name
-    FROM producto pr
-    JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
-    JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
-    WHERE
-        u.id != %s
-) combined
+SQL_REC_PROFESIONALES = f"""
+SELECT
+    'usuario' AS tipo,
+    u.id,
+    CASE
+        WHEN e.id IS NOT NULL THEN e.nombre
+        ELSE NULLIF(
+            TRIM(CONCAT_WS(' ', NULLIF(TRIM(u.nombre), ''), NULLIF(TRIM(u.apellido), ''))),
+            ''
+        )
+    END AS titulo,
+    string_agg(DISTINCT p.nombre, ', ') AS extra,
+    u.foto_url,
+    u.rounded_foto_url,
+    NULL::numeric AS precio,
+    NULL::text AS codigo,
+    NULL::text AS foto_producto,
+    CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS empresa_nombre,
+    e.id AS empresa_id,
+    COALESCE(e.ubicacion, loc.city) AS ciudad,
+    NULL::text AS pais,
+    COALESCE(e.latitud, loc.latitud) AS latitud,
+    COALESCE(e.longitud, loc.longitud) AS longitud,
+    COALESCE(u.rating, 0) AS rank,
+    u.rating,
+    EXISTS(
+        SELECT 1 FROM trabajo t
+        WHERE t.profesional_id = u.id AND t."esUrgente" = true
+    ) AS es_urgente,
+    array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
+    NULL::numeric AS precio_servicio,
+    NULL::integer AS producto_id,
+    u.cant_calif,
+    COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+    CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS business_name
+FROM usuario u
+LEFT JOIN LATERAL (
+    SELECT e0.id, e0.nombre, e0.descripcion, e0.ubicacion, e0.latitud, e0.longitud, e0.compartir_ubicacion_mapa
+    FROM empresa e0
+    WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id AND NOT COALESCE(e0.is_deleted, false)
+    ORDER BY e0.id
+    LIMIT 1
+) e ON TRUE
+LEFT JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
+LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
+LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
+LEFT JOIN profesion p ON p.id = up.profesion_id
+WHERE
+    u.id != %s
+    AND u.is_active = true
+    AND e.id IS NOT NULL
+GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif, u.rating,
+    e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud, e.compartir_ubicacion_mapa,
+    loc.latitud, loc.longitud, loc.city
 ORDER BY rank DESC
 LIMIT %s;
 """
+
+SQL_REC_PRODUCTOS = f"""
+SELECT
+    'producto' AS tipo,
+    u.id,
+    pr.nombre AS titulo,
+    pr.descripcion AS extra,
+    NULL::text AS foto_url,
+    NULL::text AS rounded_foto_url,
+    pr.precio,
+    pr.codigo,
+    pr.foto AS foto_producto,
+    e.nombre AS empresa_nombre,
+    e.id AS empresa_id,
+    NULL::text AS ciudad,
+    NULL::text AS pais,
+    e.latitud,
+    e.longitud,
+    0::numeric AS rank,
+    0::numeric AS rating,
+    false AS es_urgente,
+    NULL::integer[] AS profesion_ids,
+    NULL::numeric AS precio_servicio,
+    pr.id AS producto_id,
+    0::integer AS cant_calif,
+    COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+    e.nombre AS business_name
+FROM producto pr
+JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
+JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
+WHERE
+    u.id != %s
+    AND NOT COALESCE(pr.is_deleted, false)
+ORDER BY pr.id DESC
+LIMIT %s;
+"""
+
+SQL_REC_SERVICIOS = f"""
+SELECT
+    'servicio' AS tipo,
+    u.id,
+    s.nombre AS titulo,
+    NULLIF(s.notas, '') AS extra,
+    u.foto_url,
+    u.rounded_foto_url,
+    s.precio,
+    NULL::text AS codigo,
+    NULLIF(s.foto, '') AS foto_producto,
+    CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS empresa_nombre,
+    e.id AS empresa_id,
+    COALESCE(e.ubicacion, loc.city) AS ciudad,
+    NULL::text AS pais,
+    COALESCE(e.latitud, loc.latitud) AS latitud,
+    COALESCE(e.longitud, loc.longitud) AS longitud,
+    COALESCE(u.rating, 0) AS rank,
+    u.rating,
+    false AS es_urgente,
+    ARRAY[s.profesion_id]::integer[] AS profesion_ids,
+    s.precio AS precio_servicio,
+    NULL::integer AS producto_id,
+    u.cant_calif,
+    COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+    CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS business_name
+FROM usuario_servicios s
+JOIN usuario u ON u.id = s.usuario_id AND u.is_active = true
+LEFT JOIN LATERAL (
+    SELECT e0.id, e0.nombre, e0.ubicacion, e0.latitud, e0.longitud, e0.compartir_ubicacion_mapa
+    FROM empresa e0
+    WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id AND NOT COALESCE(e0.is_deleted, false)
+    ORDER BY e0.id
+    LIMIT 1
+) e ON TRUE
+LEFT JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
+LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
+WHERE
+    u.id != %s
+    AND NOT COALESCE(s.is_deleted, false)
+ORDER BY rank DESC
+LIMIT %s;
+"""
+
+# Mapea el parámetro ?tipo= del front a la consulta correspondiente.
+SQL_REC_POR_TIPO = {
+    'profesional': SQL_REC_PROFESIONALES,
+    'producto': SQL_REC_PRODUCTOS,
+    'servicio': SQL_REC_SERVICIOS,
+}
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
@@ -1047,8 +1092,9 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def recomendados(self, request):
         """
         Feed de recomendados (sin búsqueda de texto), con la MISMA forma de fila
-        que /search para reusar el shape en el front. Mezcla profesionales + productos
-        y los ordena por cercanía a lat/lng (si el cliente los envía), priorizando plan.
+        que /search para reusar el shape en el front. Devuelve UNA categoría por vez
+        (?tipo=profesional|producto|servicio, default profesional) y la ordena por
+        cercanía a lat/lng (si el cliente los envía), priorizando plan.
         """
         try:
             limit = int(request.query_params.get("limit", 20))
@@ -1058,6 +1104,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         fetch_limit = min(500, max(lim * 10, 300))
 
         profesion_id = request.query_params.get('profesion_id')
+        tipo = (request.query_params.get('tipo') or 'profesional').strip().lower()
+        sql = SQL_REC_POR_TIPO.get(tipo, SQL_REC_PROFESIONALES)
 
         def _to_float(v):
             try:
@@ -1071,7 +1119,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         user_id = request.user.id if request.user and request.user.is_authenticated else 0
 
         with connection.cursor() as cursor:
-            cursor.execute(SQL_RECOMENDADOS, [user_id, user_id, fetch_limit])
+            cursor.execute(sql, [user_id, fetch_limit])
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
