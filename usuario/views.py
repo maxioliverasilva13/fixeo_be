@@ -1097,11 +1097,20 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         cercanía a lat/lng (si el cliente los envía), priorizando plan.
         """
         try:
-            limit = int(request.query_params.get("limit", 20))
+            limit = int(request.query_params.get("limit", 10))
         except (TypeError, ValueError):
-            limit = 20
-        lim = max(1, min(limit, 100))
-        fetch_limit = min(500, max(lim * 10, 300))
+            limit = 10
+        lim = max(1, min(limit, 50))
+
+        try:
+            offset = int(request.query_params.get("offset", 0))
+        except (TypeError, ValueError):
+            offset = 0
+        offset = max(0, offset)
+
+        # Traemos un pool amplio (para que el orden por cercanía sea bueno) y paginamos
+        # en Python; el pool debe cubrir la ventana pedida (offset + lim).
+        fetch_limit = min(500, max(lim * 10, 300, offset + lim))
 
         profesion_id = request.query_params.get('profesion_id')
         tipo = (request.query_params.get('tipo') or 'profesional').strip().lower()
@@ -1178,7 +1187,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 -float(x.get('rating') or 0),
             ))
 
-        return Response(results[:lim])
+        # Paginación: se devuelve la ventana [offset, offset+lim) del pool ya ordenado.
+        return Response(results[offset:offset + lim])
 
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):
