@@ -236,6 +236,111 @@ ORDER BY rank DESC
 LIMIT %s;
 """
 
+# Feed de recomendados: misma forma de fila que SQL_QUERY (para reusar el shape en el
+# front), pero SIN filtro de texto. Trae profesionales (con empresa) + sus productos.
+# El orden final por cercanía se calcula en Python (igual criterio que el mapa).
+SQL_RECOMENDADOS = f"""
+SELECT *
+FROM (
+    SELECT
+        'usuario' AS tipo,
+        u.id,
+        CASE
+            WHEN e.id IS NOT NULL THEN e.nombre
+            ELSE NULLIF(
+                TRIM(CONCAT_WS(' ', NULLIF(TRIM(u.nombre), ''), NULLIF(TRIM(u.apellido), ''))),
+                ''
+            )
+        END AS titulo,
+        string_agg(DISTINCT p.nombre, ', ') AS extra,
+        u.foto_url,
+        u.rounded_foto_url,
+        NULL::numeric AS precio,
+        NULL::text AS codigo,
+        NULL::text AS foto_producto,
+        CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS empresa_nombre,
+        e.id AS empresa_id,
+        COALESCE(e.ubicacion, loc.city) AS ciudad,
+        NULL::text AS pais,
+        COALESCE(e.latitud, loc.latitud) AS latitud,
+        COALESCE(e.longitud, loc.longitud) AS longitud,
+        COALESCE(u.rating, 0) AS rank,
+        u.rating,
+        EXISTS(
+            SELECT 1 FROM trabajo t
+            WHERE t.profesional_id = u.id AND t."esUrgente" = true
+        ) AS es_urgente,
+        array_agg(DISTINCT p.id) FILTER (WHERE p.id IS NOT NULL) AS profesion_ids,
+        NULL::numeric AS precio_servicio,
+        NULL::integer AS producto_id,
+        u.cant_calif,
+        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+        CASE WHEN e.id IS NOT NULL THEN e.nombre ELSE NULL::text END AS business_name
+    FROM usuario u
+    LEFT JOIN LATERAL (
+        SELECT
+            e0.id,
+            e0.nombre,
+            e0.descripcion,
+            e0.ubicacion,
+            e0.latitud,
+            e0.longitud,
+            e0.compartir_ubicacion_mapa
+        FROM empresa e0
+        WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
+          AND NOT COALESCE(e0.is_deleted, false)
+        ORDER BY e0.id
+        LIMIT 1
+    ) e ON TRUE
+    LEFT JOIN usuario_localizacion ul ON ul.usuario_id = u.id AND ul.es_principal = true
+    LEFT JOIN localizacion loc ON loc.id = ul.localizacion_id
+    LEFT JOIN usuario_profesion up ON up.usuario_id = u.id
+    LEFT JOIN profesion p ON p.id = up.profesion_id
+    WHERE
+        u.id != %s
+        AND u.is_active = true
+        AND e.id IS NOT NULL
+    GROUP BY u.id, u.foto_url, u.rounded_foto_url, u.nombre, u.apellido, u.cant_calif, u.rating,
+        e.id, e.nombre, e.descripcion, e.ubicacion, e.latitud, e.longitud, e.compartir_ubicacion_mapa,
+        loc.latitud, loc.longitud, loc.city
+
+    UNION ALL
+
+    SELECT
+        'producto' AS tipo,
+        u.id,
+        pr.nombre AS titulo,
+        pr.descripcion AS extra,
+        NULL,
+        NULL,
+        pr.precio,
+        pr.codigo,
+        pr.foto,
+        e.nombre,
+        e.id,
+        NULL::text AS ciudad,
+        NULL::text AS pais,
+        e.latitud,
+        e.longitud,
+        2.5::numeric AS rank,
+        0::numeric AS rating,
+        false AS es_urgente,
+        NULL::integer[] AS profesion_ids,
+        NULL::numeric AS precio_servicio,
+        pr.id AS producto_id,
+        0::integer AS cant_calif,
+        COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
+        e.nombre AS business_name
+    FROM producto pr
+    JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
+    JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
+    WHERE
+        u.id != %s
+) combined
+ORDER BY rank DESC
+LIMIT %s;
+"""
+
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
@@ -257,6 +362,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     PUBLIC_READ_ACTIONS = frozenset({
         'filter_users_mapa',
         'search',
+        'recomendados',
         'top_nacionales',
         'top_zona',
         'retrieve',
@@ -934,6 +1040,88 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             results = [r for r in results if r.get('es_urgente')]
 
         _sort_search_results(results, sort_by)
+
+        return Response(results[:lim])
+
+    @action(detail=False, methods=['get'], url_path='recomendados')
+    def recomendados(self, request):
+        """
+        Feed de recomendados (sin búsqueda de texto), con la MISMA forma de fila
+        que /search para reusar el shape en el front. Mezcla profesionales + productos
+        y los ordena por cercanía a lat/lng (si el cliente los envía), priorizando plan.
+        """
+        try:
+            limit = int(request.query_params.get("limit", 20))
+        except (TypeError, ValueError):
+            limit = 20
+        lim = max(1, min(limit, 100))
+        fetch_limit = min(500, max(lim * 10, 300))
+
+        profesion_id = request.query_params.get('profesion_id')
+
+        def _to_float(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        mi_lat = _to_float(request.query_params.get('lat'))
+        mi_lng = _to_float(request.query_params.get('lng'))
+
+        user_id = request.user.id if request.user and request.user.is_authenticated else 0
+
+        with connection.cursor() as cursor:
+            cursor.execute(SQL_RECOMENDADOS, [user_id, user_id, fetch_limit])
+            columns = [col[0] for col in cursor.description]
+            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        for r in results:
+            if 'foto_url' in r:
+                r['foto_url'] = foto_usuario_api(r.get('foto_url'))
+            if 'rounded_foto_url' in r:
+                r['rounded_foto_url'] = foto_usuario_api(r.get('rounded_foto_url'))
+
+        usuario_ids = [r['id'] for r in results if r.get('tipo') == 'usuario']
+        all_owner_ids = list({r['id'] for r in results if r.get('id') is not None})
+        subs_map, efectivo_counts = ({}, {})
+        if all_owner_ids:
+            subs_map, efectivo_counts = _batch_visibility_data(all_owner_ids)
+
+        # Misma elegibilidad que /search: sólo profesionales con medio de pago válido.
+        if usuario_ids:
+            usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
+            visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
+            results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
+
+        for r in results:
+            plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
+            r['plan_rank'] = plan_rank
+            r['plan_nombre'] = plan_nombre
+
+        if profesion_id:
+            pid = int(profesion_id)
+            results = [r for r in results if pid in (r.get('profesion_ids') or [])]
+
+        # Orden final: (1) mejor plan, (2) más cercano si tenemos lat/lng, si no, mejor rating.
+        if mi_lat is not None and mi_lng is not None:
+            for r in results:
+                lat, lng = r.get('latitud'), r.get('longitud')
+                if lat is not None and lng is not None:
+                    r['_dist'] = calcular_distancia_km(mi_lat, mi_lng, float(lat), float(lng))
+                else:
+                    r['_dist'] = None
+            results.sort(key=lambda x: (
+                -(int(x.get('plan_rank') or 0)),
+                x.get('_dist') is None,
+                x.get('_dist') if x.get('_dist') is not None else 0.0,
+            ))
+            for r in results:
+                r.pop('_dist', None)
+        else:
+            results.sort(key=lambda x: (
+                -(int(x.get('plan_rank') or 0)),
+                -float(x.get('rating') or 0),
+            ))
 
         return Response(results[:lim])
 
