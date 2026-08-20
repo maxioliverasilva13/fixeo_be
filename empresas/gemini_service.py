@@ -111,7 +111,7 @@ def analizar_imagen_productos(image_bytes, mime_type, categorias_existentes=None
     categorias_existentes = list(categorias_existentes or [])
 
     model = genai.GenerativeModel(
-        model_name=getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash'),
+        model_name=getattr(settings, 'GEMINI_MODEL', 'gemini-2.5-flash'),
         generation_config={
             'response_mime_type': 'application/json',
             'temperature': 0.2,
