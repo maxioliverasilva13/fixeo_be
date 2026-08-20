@@ -1141,6 +1141,13 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
             results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
 
+        # Servicios: sólo de usuarios con suscripción activa (subs_map = suscripción vigente,
+        # cancelada=False y expiracion > now según _batch_visibility_data).
+        results = [
+            r for r in results
+            if r.get('tipo') != 'servicio' or subs_map.get(r.get('id')) is not None
+        ]
+
         for r in results:
             plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
             r['plan_rank'] = plan_rank
