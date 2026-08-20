@@ -153,6 +153,11 @@ class Command(BaseCommand):
                 'logo_svg_url': 'https://dibvhmpmocsmqvlemcqk.supabase.co/storage/v1/object/public/bucketFixea/iconsProfesiones/barber-shop.png'
             },
             {
+                'nombre': 'Vendedor@',
+                'descripcion': 'Venta de productos físicos y catálogo online',
+                'logo_svg_url': 'https://dibvhmpmocsmqvlemcqk.supabase.co/storage/v1/object/public/bucketFixea/iconsProfesiones/box-open.png'
+            },
+            {
                 'nombre': 'Instructor de Fitness',
                 'descripcion': 'Entrenamiento personal y clases de ejercicio',
                 'logo_svg_url': 'https://dibvhmpmocsmqvlemcqk.supabase.co/storage/v1/object/public/bucketFixea/iconsProfesiones/gym.png'

@@ -31,7 +31,7 @@ from empresas.utils import crear_empresa, validar_nombre_empresa_unico
 from suscripciones.models import Subscripcion
 # Columna real en BD para admin_id (p. ej. admin_id_id); el SQL evita suposiciones.
 _EMPRESA_ADMIN_FK_COL = Empresa._meta.get_field("admin_id").column
-from profesion.utils import obtener_profesion_por_id
+from profesion.utils import obtener_profesion_por_id, get_or_create_vendedor_profesion
 from decimal import Decimal 
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, F
@@ -551,6 +551,13 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                             profesion=profesion,
                         )
 
+                if es_empresa and data.get('vende_productos', False):
+                    vendedor = get_or_create_vendedor_profesion()
+                    UsuarioProfesion.objects.get_or_create(
+                        usuario=usuario,
+                        profesion=vendedor,
+                    )
+
                 if es_empresa:
                     localizacion_empresa = UsuarioLocalizacion.objects.filter(usuario=usuario).first()
                     nombre_empresa = (data.get('nombre_empresa') or '').strip()
@@ -581,16 +588,20 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             touch_token_activity(usuario)
 
             # Bienvenida a profesionales (empresa): mensaje de chat + email con promo.
+            # Nunca bloquear el registro si Redis/Celery está caído.
             if es_empresa:
-                try:
-                    from notificaciones.tasks import enviar_bienvenida_profesional
-                    # Encolar SOLO cuando la transacción haya hecho commit, para que el
-                    # worker vea la cuenta al buscarla (evita "Usuario X no encontrado").
-                    transaction.on_commit(
-                        lambda: enviar_bienvenida_profesional.delay(usuario_id)
-                    )
-                except Exception as e:
-                    logger.warning('No se pudo encolar la bienvenida de profesional (usuario=%s): %s', usuario_id, e)
+                def _enqueue_bienvenida(uid=usuario_id):
+                    try:
+                        from notificaciones.tasks import enviar_bienvenida_profesional
+                        enviar_bienvenida_profesional.delay(uid)
+                    except Exception as exc:
+                        logger.warning(
+                            'No se pudo encolar bienvenida profesional (usuario=%s): %s',
+                            uid,
+                            exc,
+                        )
+
+                transaction.on_commit(_enqueue_bienvenida)
             refresh = RefreshToken.for_user(usuario)
             try:
                 user_data = UsuarioSerializer(usuario, context={'request': request}).data
