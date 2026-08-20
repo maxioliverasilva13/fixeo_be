@@ -14,6 +14,7 @@ from .utils import validar_nombre_empresa_unico, generar_subdomain_unico, empres
 from .estadisticas import estadisticas_empresa
 from rest_framework.decorators import action
 from rest_framework.views import APIView
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from servicios.models import Servicio
@@ -528,6 +529,38 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
             return denied
         return super().partial_update(request, *args, **kwargs)
 
+    def destroy(self, request, *args, **kwargs):
+        """Soft delete de la empresa y desactiva al usuario owner asociado."""
+        empresa = self.get_object()
+        owner = empresa.admin_id
+        user = request.user
+
+        if owner and (owner.pk == user.pk or owner.is_superuser):
+            return Response(
+                {'error': 'No se puede eliminar la empresa de un administrador del sistema'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from notificaciones.models import DeviceToken
+
+        with transaction.atomic():
+            empresa.delete(user=user)
+            if owner and not owner.is_staff:
+                owner.is_deleted = True
+                owner.is_active = False
+                owner.deleted_at = timezone.now()
+                owner.save(update_fields=['is_deleted', 'is_active', 'deleted_at'])
+                DeviceToken.objects.filter(usuario=owner).delete()
+
+        return Response(
+            {
+                'message': 'Empresa eliminada. El usuario owner fue desactivado.',
+                'empresa_id': empresa.id,
+                'owner_id': owner.pk if owner else None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
     def get_queryset(self):
         queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
         
@@ -766,6 +799,7 @@ class EmpresaPublicLandingView(APIView):
                 'trabajo_domicilio': admin.trabajo_domicilio,
                 'trabajo_local': admin.trabajo_local,
                 'rango_mapa_km': float(admin.rango_mapa_km or 10),
+                'tiene_landing_page': bool(empresa.tiene_landing_page),
             },
             'admin_id': admin.id,
             'horarios': horarios,
