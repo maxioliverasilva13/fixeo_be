@@ -268,6 +268,11 @@ CELERY_BEAT_SCHEDULE = {
 FIREBASE_CREDENTIALS = config('FIREBASE_CREDENTIALS', default=None)
 
 RESEND_API_KEY = config('RESEND_API_KEY', default='')
+
+# Google Gemini (visión) para análisis de imágenes de productos
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+GEMINI_MODEL = config('GEMINI_MODEL', default='gemini-3.6-flash')
+
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:8081')
 EMAIL_FROM = config('EMAIL_FROM', default='onboarding@resend.dev')
 EMAIL_LOGO_URL = config('EMAIL_LOGO_URL', default='')

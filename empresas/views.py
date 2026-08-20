@@ -11,6 +11,7 @@ from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
 from .utils import validar_nombre_empresa_unico, generar_subdomain_unico, empresa_tiene_landing_activa
+from .gemini_service import analizar_imagen_productos
 from .estadisticas import estadisticas_empresa
 from rest_framework.decorators import action
 from rest_framework.views import APIView
@@ -711,8 +712,68 @@ class ProductoViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.empresa.admin_id != self.request.user:
             raise serializers.ValidationError({'error': 'No tienes permisos para eliminar este producto'})
-        
+
         instance.delete()
+
+    @action(detail=False, methods=['post'], url_path='analizar-imagen')
+    def analizar_imagen(self, request):
+        """Detecta productos en una imagen con Gemini (visión). No crea nada:
+        devuelve los productos detectados para que el usuario los revise/edite
+        y confirme el alta desde el frontend.
+        """
+        empresa_id = request.data.get('empresa')
+        empresa = Empresa.objects.filter(id=empresa_id, admin_id=request.user).first()
+        if not empresa:
+            return Response(
+                {'ok': False, 'error': 'No tienes permisos sobre esta empresa'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        archivo = request.FILES.get('file')
+        if not archivo:
+            return Response(
+                {'ok': False, 'error': 'No se envió ninguna imagen'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mime_type = archivo.content_type or 'image/jpeg'
+        if not mime_type.startswith('image/'):
+            return Response(
+                {'ok': False, 'error': 'El archivo debe ser una imagen'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if archivo.size > 10 * 1024 * 1024:
+            return Response(
+                {'ok': False, 'error': 'La imagen supera el tamaño máximo (10MB)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        categorias = list(
+            CategoriaProducto.objects.filter(empresa=empresa).values_list('nombre', flat=True)
+        )
+
+        try:
+            productos = analizar_imagen_productos(
+                image_bytes=archivo.read(),
+                mime_type=mime_type,
+                categorias_existentes=categorias,
+                divisa_default=empresa.currency or empresa.moneda_local,
+            )
+        except RuntimeError as exc:
+            logger.error('Gemini no configurado: %s', exc)
+            return Response(
+                {'ok': False, 'error': 'El servicio de IA no está disponible'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception:
+            logger.exception('Error analizando imagen de productos con Gemini')
+            return Response(
+                {'ok': False, 'error': 'No se pudo analizar la imagen. Probá con otra foto.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({'ok': True, 'productos': productos})
 
 
 class EmpresaPublicLandingView(APIView):
