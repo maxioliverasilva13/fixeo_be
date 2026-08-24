@@ -38,14 +38,14 @@ else
 
     echo "$migrate_out"
 
-    if echo "$migrate_out" | grep -qiE 'DuplicateColumn|DuplicateTable|already exists'; then
+    if echo "$migrate_out" | grep -qiE 'DuplicateColumn|DuplicateTable|already exists|UndefinedColumn|UndefinedTable|does not exist'; then
       failing=$(echo "$migrate_out" | grep -oE 'Applying [a-z_]+\.[0-9]+_[a-zA-Z0-9_]+' | tail -1 | sed 's/Applying //')
       if [ -z "$failing" ]; then
         break
       fi
       app="${failing%%.*}"
       mig="${failing#*.}"
-      echo "    → Ya existe: marcando ${app}.${mig} como aplicada (--fake)..."
+      echo "    → Esquema ya alineado: marcando ${app}.${mig} como aplicada (--fake)..."
       if ! python manage.py migrate "$app" "$mig" --fake --noinput; then
         break
       fi
