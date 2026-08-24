@@ -22,43 +22,47 @@ python manage.py reconcile_migrations || echo "⚠️  reconcile_migrations fall
 
 echo "📊 Aplicando migraciones..."
 migrate_ok=0
-if python manage.py migrate --noinput; then
-  migrate_ok=1
-else
-  echo "⚠️  migrate falló (historial django_migrations vs esquema real)."
-  echo "    Recuperando: registrando migración conflictiva en django_migrations (SQL directo)..."
+max_rounds=50
+round=0
+while [ "$round" -lt "$max_rounds" ]; do
+  round=$((round + 1))
+  python manage.py reconcile_migrations --auto || true
 
-  max_attempts=40
-  attempt=0
-  while [ "$attempt" -lt "$max_attempts" ]; do
-    attempt=$((attempt + 1))
-    migrate_out=""
-    if migrate_out=$(python manage.py migrate --noinput 2>&1); then
-      echo "$migrate_out"
-      migrate_ok=1
-      break
-    fi
-
+  migrate_out=""
+  if migrate_out=$(python manage.py migrate --noinput 2>&1); then
     echo "$migrate_out"
+    migrate_ok=1
+    break
+  fi
 
-    if echo "$migrate_out" | grep -qiE 'DuplicateColumn|DuplicateTable|already exists|UndefinedColumn|UndefinedTable|does not exist'; then
-      failing=$(echo "$migrate_out" | grep -oE 'Applying [a-z_]+\.[0-9]+_[a-zA-Z0-9_]+' | tail -1 | sed 's/Applying //')
-      if [ -z "$failing" ]; then
-        break
-      fi
+  echo "$migrate_out"
+
+  if echo "$migrate_out" | grep -qi 'InconsistentMigrationHistory'; then
+    dep=$(echo "$migrate_out" | grep -oE 'dependency [a-z_]+\.[0-9]+_[a-zA-Z0-9_]+' | head -1 | sed 's/dependency //')
+    if [ -n "$dep" ]; then
+      app="${dep%%.*}"
+      mig="${dep#*.}"
+      echo "    → Dependencia faltante: registrando ${app}.${mig}..."
+      python manage.py reconcile_migrations --record "$app" "$mig" || break
+      continue
+    fi
+    python manage.py reconcile_migrations --fix-history || true
+    continue
+  fi
+
+  if echo "$migrate_out" | grep -qiE 'DuplicateColumn|DuplicateTable|already exists|UndefinedColumn|UndefinedTable|does not exist'; then
+    failing=$(echo "$migrate_out" | grep -oE 'Applying [a-z_]+\.[0-9]+_[a-zA-Z0-9_]+' | tail -1 | sed 's/Applying //')
+    if [ -n "$failing" ]; then
       app="${failing%%.*}"
       mig="${failing#*.}"
       echo "    → Esquema ya alineado: registrando ${app}.${mig} en django_migrations..."
-      if ! python manage.py reconcile_migrations --record "$app" "$mig"; then
-        echo "    ❌ No se pudo registrar ${app}.${mig}"
-        break
-      fi
+      python manage.py reconcile_migrations --record "$app" "$mig" || break
       continue
     fi
+  fi
 
-    break
-  done
-fi
+  break
+done
 
 if [ "$migrate_ok" -ne 1 ]; then
   echo "⚠️  migrate sigue fallando; continúo con schema ensure + seeds"
