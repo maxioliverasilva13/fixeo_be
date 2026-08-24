@@ -765,8 +765,9 @@ class CategoriaProductoViewSet(viewsets.ModelViewSet):
         else:
             if not self.request.user or not self.request.user.is_authenticated:
                 return queryset.none()
-            empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
-            queryset = queryset.filter(empresa__in=empresas_usuario)
+            if not self.request.user.is_staff:
+                empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
+                queryset = queryset.filter(empresa__in=empresas_usuario)
         
         return queryset
 
@@ -852,8 +853,9 @@ class ProductoViewSet(viewsets.ModelViewSet):
         if not empresa_id and not categoria_id:
             if not self.request.user or not self.request.user.is_authenticated:
                 return queryset.none()
-            empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
-            queryset = queryset.filter(empresa__in=empresas_usuario)
+            if not self.request.user.is_staff:
+                empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
+                queryset = queryset.filter(empresa__in=empresas_usuario)
 
         if search:
             palabras = search.strip().split()
