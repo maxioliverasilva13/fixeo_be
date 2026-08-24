@@ -17,13 +17,16 @@ cur.close()
 conn.close()
 EOF
 
+echo "📊 Reconciliando historial de migraciones..."
+python manage.py reconcile_migrations || echo "⚠️  reconcile_migrations falló (continúo)"
+
 echo "📊 Aplicando migraciones..."
 migrate_ok=0
 if python manage.py migrate --noinput; then
   migrate_ok=1
 else
   echo "⚠️  migrate falló (historial django_migrations vs esquema real)."
-  echo "    Recuperando: si la tabla/columna ya existe, se marca esa migración como --fake..."
+  echo "    Recuperando: registrando migración conflictiva en django_migrations (SQL directo)..."
 
   max_attempts=40
   attempt=0
@@ -45,8 +48,9 @@ else
       fi
       app="${failing%%.*}"
       mig="${failing#*.}"
-      echo "    → Esquema ya alineado: marcando ${app}.${mig} como aplicada (--fake)..."
-      if ! python manage.py migrate "$app" "$mig" --fake --noinput; then
+      echo "    → Esquema ya alineado: registrando ${app}.${mig} en django_migrations..."
+      if ! python manage.py reconcile_migrations --record "$app" "$mig"; then
+        echo "    ❌ No se pudo registrar ${app}.${mig}"
         break
       fi
       continue
