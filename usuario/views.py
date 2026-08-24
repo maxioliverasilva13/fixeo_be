@@ -551,7 +551,10 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                             profesion=profesion,
                         )
 
-                if es_empresa and data.get('vende_productos', False):
+                if es_empresa and (
+                    data.get('vende_productos', False)
+                    or data.get('vende_menu_diario', False)
+                ):
                     vendedor = get_or_create_vendedor_profesion()
                     UsuarioProfesion.objects.get_or_create(
                         usuario=usuario,
@@ -578,6 +581,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         localizacion=localizacion_empresa.localizacion if localizacion_empresa else None,
                         vende_productos=data.get('vende_productos', False),
                         vende_servicios=data.get('vende_servicios', True),
+                        vende_menu_diario=data.get('vende_menu_diario', False),
                         compartir_ubicacion_mapa=data.get('compartir_ubicacion_mapa', True),
                     )
 

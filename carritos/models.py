@@ -9,6 +9,12 @@ class Carrito(BaseModel):
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='carritos')
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='carritos')
     activo = models.BooleanField(default=True)
+    # Menú diario: todos los ítems del carrito son para esta fecha (un solo día).
+    fecha_menu = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Fecha de entrega/consumo del menú diario. Un carrito = un solo día.',
+    )
 
     class Meta:
         db_table = 'carrito'
@@ -37,6 +43,13 @@ class Carrito(BaseModel):
 class CarritoItem(BaseModel):
     carrito = models.ForeignKey(Carrito, on_delete=models.CASCADE, related_name='items')
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE)
+    variante = models.ForeignKey(
+        'empresas.ProductoVariante',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='carrito_items',
+    )
     cantidad = models.PositiveIntegerField(default=1)
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
 
@@ -44,10 +57,19 @@ class CarritoItem(BaseModel):
         db_table = 'carrito_item'
         verbose_name = 'Item de Carrito'
         verbose_name_plural = 'Items de Carrito'
-        unique_together = ['carrito', 'producto']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['carrito', 'producto', 'variante'],
+                name='unique_carrito_producto_variante',
+                nulls_distinct=False,
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.producto.nombre} x{self.cantidad}"
+        label = self.producto.nombre
+        if self.variante_id:
+            label = f"{label} ({self.variante.nombre})"
+        return f"{label} x{self.cantidad}"
 
     @property
     def subtotal(self):
@@ -88,7 +110,18 @@ class Orden(BaseModel):
     notas = models.TextField(blank=True, default='')
     fecha_entrega = models.DateTimeField(null=True, blank=True)
     motivo_cancelacion = models.TextField(blank=True, default='')
-    pago_status = models.CharField(max_length=20, blank=True, default='', help_text='Estado del pago MP')
+    pago_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default='',
+        help_text='MP: aprobado/liberado/… | Manual (efectivo/transferencia): pendiente/pagado/pago_en_domicilio',
+    )
+    comprobante_pago_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text='Foto/comprobante opcional al marcar el pago (transferencia/efectivo).',
+    )
     currency = models.CharField(
         max_length=3,
         choices=CURRENCY_CHOICES,
@@ -118,6 +151,8 @@ class OrdenItem(BaseModel):
     cantidad = models.PositiveIntegerField()
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
+    variante_nombre = models.CharField(max_length=200, blank=True, default='')
+    variante_precio_extra = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     class Meta:
         db_table = 'orden_item'
@@ -125,4 +160,7 @@ class OrdenItem(BaseModel):
         verbose_name_plural = 'Items de Orden'
 
     def __str__(self):
-        return f"{self.producto.nombre} x{self.cantidad}"
+        label = self.producto.nombre
+        if self.variante_nombre:
+            label = f"{label} ({self.variante_nombre})"
+        return f"{label} x{self.cantidad}"

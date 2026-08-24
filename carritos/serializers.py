@@ -10,13 +10,20 @@ class CarritoItemSerializer(serializers.ModelSerializer):
     producto_foto = serializers.CharField(source='producto.foto', read_only=True)
     producto_acepta_domicilio = serializers.BooleanField(source='producto.acepta_domicilio', read_only=True)
     producto_acepta_retiro = serializers.BooleanField(source='producto.acepta_retiro', read_only=True)
+    variante_nombre = serializers.CharField(source='variante.nombre', read_only=True, allow_null=True)
+    variante_precio_extra = serializers.DecimalField(
+        source='variante.precio_extra', max_digits=10, decimal_places=2, read_only=True, allow_null=True,
+    )
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-    
+
     class Meta:
         model = CarritoItem
-        fields = ['id', 'carrito', 'producto', 'producto_nombre', 'producto_precio', 'producto_divisa',
-                  'producto_agotado', 'producto_foto', 'producto_acepta_domicilio', 'producto_acepta_retiro',
-                  'cantidad', 'precio_unitario', 'subtotal', 'created_at']
+        fields = [
+            'id', 'carrito', 'producto', 'variante', 'variante_nombre', 'variante_precio_extra',
+            'producto_nombre', 'producto_precio', 'producto_divisa',
+            'producto_agotado', 'producto_foto', 'producto_acepta_domicilio', 'producto_acepta_retiro',
+            'cantidad', 'precio_unitario', 'subtotal', 'created_at',
+        ]
         read_only_fields = ['id', 'carrito', 'precio_unitario', 'created_at']
 
     def validate_producto(self, value):
@@ -35,10 +42,12 @@ class CarritoSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Carrito
-        fields = ['id', 'usuario', 'empresa', 'empresa_nombre', 'activo', 'items', 
-                  'total', 'totales_por_divisa', 'tiene_multiples_divisas',
-                  'cantidad_items', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'usuario', 'activo', 'created_at', 'updated_at']
+        fields = [
+            'id', 'usuario', 'empresa', 'empresa_nombre', 'activo', 'fecha_menu', 'items',
+            'total', 'totales_por_divisa', 'tiene_multiples_divisas',
+            'cantidad_items', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'usuario', 'activo', 'fecha_menu', 'created_at', 'updated_at']
 
     def get_totales_por_divisa(self, obj):
         from collections import defaultdict
@@ -60,17 +69,23 @@ class CarritoSerializer(serializers.ModelSerializer):
 class CarritoItemCreateSerializer(serializers.Serializer):
     producto_id = serializers.IntegerField(required=True)
     cantidad = serializers.IntegerField(required=True, min_value=1)
+    variante_id = serializers.IntegerField(required=False, allow_null=True)
+    # YYYY-MM-DD — requerido al agregar el primer plato de menú diario
+    fecha_menu = serializers.DateField(required=False, allow_null=True)
 
 
 class OrdenItemSerializer(serializers.ModelSerializer):
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_codigo = serializers.CharField(source='producto.codigo', read_only=True)
     producto_foto = serializers.CharField(source='producto.foto', read_only=True)
-    
+
     class Meta:
         model = OrdenItem
-        fields = ['id', 'orden', 'producto', 'producto_nombre', 'producto_codigo', 
-                  'producto_foto', 'cantidad', 'precio_unitario', 'subtotal']
+        fields = [
+            'id', 'orden', 'producto', 'producto_nombre', 'producto_codigo',
+            'producto_foto', 'cantidad', 'precio_unitario', 'subtotal',
+            'variante_nombre', 'variante_precio_extra',
+        ]
         read_only_fields = ['id', 'orden']
 
 
@@ -97,19 +112,42 @@ class OrdenSerializer(serializers.ModelSerializer):
     pago_info = serializers.SerializerMethodField()
     mi_calificacion = serializers.SerializerMethodField()
     mi_calificacion_cliente = serializers.SerializerMethodField()
+    pago_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Orden
         fields = ['id', 'numero_orden', 'usuario', 'usuario_nombre', 'usuario_info', 'empresa', 'empresa_nombre', 'empresa_info',
                   'empresa_admin_id', 'status', 'metodo_pago', 'tipo_entrega', 'localizacion_entrega',
-                  'localizacion_info', 'total', 'comision_plataforma', 'pago_status', 'notas',
+                  'localizacion_info', 'total', 'comision_plataforma', 'pago_status', 'pago_label',
+                  'comprobante_pago_url', 'notas',
                   'fecha_entrega', 'motivo_cancelacion', 'items', 'pago_info', 'mi_calificacion',
                   'mi_calificacion_cliente', 'created_at', 'updated_at']
         read_only_fields = ['id', 'numero_orden', 'usuario', 'total', 'comision_plataforma',
-                            'pago_status', 'localizacion_entrega', 'motivo_cancelacion', 'created_at', 'updated_at']
+                            'pago_status', 'comprobante_pago_url', 'localizacion_entrega',
+                            'motivo_cancelacion', 'created_at', 'updated_at']
 
     def get_usuario_nombre(self, obj):
         return f"{obj.usuario.nombre} {obj.usuario.apellido}"
+
+    def get_pago_label(self, obj):
+        """Etiqueta humana del estado de pago (listados / detalle)."""
+        if obj.metodo_pago == 'mercadopago':
+            if obj.pago_status in ('aprobado', 'liberado'):
+                return 'Pagado'
+            if obj.pago_status == 'devuelto':
+                return 'Devuelto'
+            return 'Pago con tarjeta'
+        if obj.pago_status == 'pagado':
+            return 'Pagado'
+        if obj.pago_status == 'pago_en_domicilio':
+            return 'Pago en domicilio'
+        if obj.pago_status == 'pendiente':
+            return 'Pendiente de pago'
+        if obj.metodo_pago == 'transferencia':
+            return 'Pendiente de pago'
+        if obj.metodo_pago == 'efectivo':
+            return 'Pago en domicilio' if obj.tipo_entrega == 'domicilio' else 'Pendiente de pago'
+        return None
 
     def get_usuario_info(self, obj):
         u = obj.usuario

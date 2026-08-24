@@ -236,6 +236,18 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Montevideo'
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
+# Si Redis está caído, fallar rápido en vez de colgar el request HTTP ~20s.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'socket_timeout': 2,
+    'socket_connect_timeout': 2,
+    'retry_on_timeout': False,
+}
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'socket_timeout': 2,
+    'socket_connect_timeout': 2,
+    'retry_on_timeout': False,
+}
+CELERY_TASK_IGNORE_RESULT = True
 CELERY_IMPORTS = (
     'trabajos.tasks',
     'notificaciones.tasks',

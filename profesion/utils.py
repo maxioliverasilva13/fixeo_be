@@ -1,7 +1,7 @@
 from .models import Profesion
 
 VENDEDOR_PROFESION_NOMBRE = 'Vendedor@'
-VENDEDOR_PROFESION_DESCRIPCION = 'Venta de productos físicos y catálogo online'
+VENDEDOR_PROFESION_DESCRIPCION = 'Venta de productos, menú diario y catálogo online'
 
 
 def obtener_profesion_por_id(profesion_id):

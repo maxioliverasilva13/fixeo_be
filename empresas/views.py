@@ -499,7 +499,7 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
     queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
     serializer_class = EmpresaSerializer
     permission_classes = [IsAuthenticated, IsAdminUser]
-    OWNER_WRITABLE_FIELDS = frozenset({'vende_productos', 'vende_servicios'})
+    OWNER_WRITABLE_FIELDS = frozenset({'vende_productos', 'vende_servicios', 'vende_menu_diario'})
 
     def get_permissions(self):
         if self.action in ('retrieve', 'update', 'partial_update'):
@@ -651,6 +651,13 @@ class ProductoViewSet(viewsets.ModelViewSet):
     serializer_class = ProductoSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        dia = getattr(self, '_dia_semana_ctx', None)
+        if dia is not None:
+            ctx['dia_semana'] = dia
+        return ctx
+
     def get_permissions(self):
         # Guest: ver catálogo público de una empresa (mapa / perfil)
         if self.action == 'retrieve':
@@ -664,49 +671,79 @@ class ProductoViewSet(viewsets.ModelViewSet):
         empresa_id = self.request.query_params.get('empresa_id', None)
         categoria_id = self.request.query_params.get('categoria_id', None)
         search = self.request.query_params.get('search', None)
-        
+        es_menu_diario = self.request.query_params.get('es_menu_diario', None)
+        dia_semana = self.request.query_params.get('dia_semana', None)
+
         if empresa_id:
             queryset = queryset.filter(empresa_id=empresa_id)
-        
+
         if categoria_id:
             queryset = queryset.filter(categoria_id=categoria_id)
-        
+
+        if es_menu_diario is not None:
+            queryset = queryset.filter(
+                es_menu_diario=str(es_menu_diario).lower() in ('1', 'true', 'yes')
+            )
+        elif self.action == 'list':
+            # Catálogo retail por defecto en list (compat FE existente)
+            queryset = queryset.filter(es_menu_diario=False)
+
+        if dia_semana is not None:
+            try:
+                dia = int(dia_semana)
+            except (TypeError, ValueError):
+                dia = None
+            if dia and 1 <= dia <= 7:
+                incluir_inactivos = str(
+                    self.request.query_params.get('incluir_inactivos', '')
+                ).lower() in ('1', 'true', 'yes')
+                dia_filter = {
+                    'dias_menu__dia_semana': dia,
+                    'dias_menu__is_deleted': False,
+                }
+                if not incluir_inactivos:
+                    dia_filter['dias_menu__activo'] = True
+                queryset = queryset.filter(**dia_filter).distinct()
+                # Pasar día al serializer para activo_en_dia
+                self._dia_semana_ctx = dia
+                self._incluir_inactivos = incluir_inactivos
+
         if not empresa_id and not categoria_id:
             if not self.request.user or not self.request.user.is_authenticated:
                 return queryset.none()
             empresas_usuario = Empresa.objects.filter(admin_id=self.request.user)
             queryset = queryset.filter(empresa__in=empresas_usuario)
-        
+
         if search:
             palabras = search.strip().split()
             q_filter = Q()
-            
+
             for palabra in palabras:
                 if palabra:
                     q_filter &= (
-                        Q(nombre__icontains=palabra) | 
+                        Q(nombre__icontains=palabra) |
                         Q(descripcion__icontains=palabra)
                     )
-            
+
             queryset = queryset.filter(q_filter)
-        
-        return queryset.select_related('empresa', 'categoria')
+
+        return queryset.select_related('empresa', 'categoria').prefetch_related('dias_menu', 'variantes')
 
     def perform_create(self, serializer):
         empresa_id = self.request.data.get('empresa')
         empresa = Empresa.objects.filter(id=empresa_id, admin_id=self.request.user).first()
-        
+
         if not empresa:
             raise serializers.ValidationError({'error': 'No tienes permisos para crear productos en esta empresa'})
-        
+
         serializer.save()
 
     def perform_update(self, serializer):
         empresa = serializer.instance.empresa
-        
+
         if empresa.admin_id != self.request.user:
             raise serializers.ValidationError({'error': 'No tienes permisos para modificar este producto'})
-        
+
         serializer.save()
 
     def perform_destroy(self, instance):
@@ -714,6 +751,87 @@ class ProductoViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError({'error': 'No tienes permisos para eliminar este producto'})
 
         instance.delete()
+
+    @action(detail=True, methods=['post'], url_path='vincular-dia')
+    def vincular_dia(self, request, pk=None):
+        """Agrega un día al plato de menú (reusar plato de otro día)."""
+        from .models import ProductoDia
+
+        producto = self.get_object()
+        if producto.empresa.admin_id_id != request.user.id:
+            return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
+        if not producto.es_menu_diario:
+            return Response(
+                {'error': 'Solo aplica a platos de menú diario'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            dia = int(request.data.get('dia_semana'))
+        except (TypeError, ValueError):
+            return Response({'error': 'dia_semana inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        if dia < 1 or dia > 7:
+            return Response({'error': 'dia_semana debe ser 1-7'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = producto.dias_menu.filter(dia_semana=dia).first()
+        if existing:
+            if existing.is_deleted:
+                existing.is_deleted = False
+                existing.deleted_at = None
+                existing.activo = True
+                existing.save(update_fields=['is_deleted', 'deleted_at', 'activo', 'updated_at'])
+            elif not existing.activo:
+                existing.activo = True
+                existing.save(update_fields=['activo', 'updated_at'])
+        else:
+            ProductoDia.objects.create(producto=producto, dia_semana=dia, activo=True)
+
+        return Response(ProductoSerializer(producto).data)
+
+    @action(detail=True, methods=['post'], url_path='toggle-dia')
+    def toggle_dia(self, request, pk=None):
+        """Activa/desactiva el plato para un día (sin desvincular)."""
+        from .models import ProductoDia
+
+        producto = self.get_object()
+        if producto.empresa.admin_id_id != request.user.id:
+            return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
+        if not producto.es_menu_diario:
+            return Response(
+                {'error': 'Solo aplica a platos de menú diario'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            dia = int(request.data.get('dia_semana'))
+        except (TypeError, ValueError):
+            return Response({'error': 'dia_semana inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        if dia < 1 or dia > 7:
+            return Response({'error': 'dia_semana debe ser 1-7'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if 'activo' not in request.data:
+            return Response({'error': 'activo es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        activo = str(request.data.get('activo')).lower() in ('1', 'true', 'yes')
+
+        existing = producto.dias_menu.filter(dia_semana=dia).first()
+        if not existing or existing.is_deleted:
+            if not activo:
+                return Response(
+                    {'error': 'El plato no está vinculado a ese día'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if existing and existing.is_deleted:
+                existing.is_deleted = False
+                existing.deleted_at = None
+                existing.activo = True
+                existing.save(update_fields=['is_deleted', 'deleted_at', 'activo', 'updated_at'])
+            else:
+                ProductoDia.objects.create(producto=producto, dia_semana=dia, activo=True)
+        else:
+            existing.activo = activo
+            existing.save(update_fields=['activo', 'updated_at'])
+
+        return Response(
+            ProductoSerializer(producto, context={'request': request, 'dia_semana': dia}).data
+        )
 
     @action(detail=False, methods=['post'], url_path='analizar-imagen')
     def analizar_imagen(self, request):
@@ -848,6 +966,7 @@ class EmpresaPublicLandingView(APIView):
                 'compartir_ubicacion_mapa': empresa.compartir_ubicacion_mapa,
                 'vende_productos': empresa.vende_productos,
                 'vende_servicios': empresa.vende_servicios,
+                'vende_menu_diario': empresa.vende_menu_diario,
                 'acepta_efectivo': empresa.acepta_efectivo,
                 'acepta_tarjeta': empresa.acepta_tarjeta,
                 'is_mercadopago_vinculado': empresa.is_mercadopago_vinculado,

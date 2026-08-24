@@ -50,6 +50,10 @@ class Empresa(BaseModel):
     unipersonal = models.BooleanField(default=False)
     vende_productos = models.BooleanField(default=False)
     vende_servicios = models.BooleanField(default=False)
+    vende_menu_diario = models.BooleanField(
+        default=False,
+        help_text='Si es True, la empresa ofrece menú diario (carta por día de la semana).',
+    )
     acepta_efectivo = models.BooleanField(default=True)
     acepta_tarjeta = models.BooleanField(default=True)
     is_mercadopago_vinculado = models.BooleanField(default=False)
@@ -181,6 +185,11 @@ class Producto(BaseModel):
     categoria = models.ForeignKey(CategoriaProducto, on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
     acepta_domicilio = models.BooleanField(default=True)
     acepta_retiro = models.BooleanField(default=True)
+    es_menu_diario = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text='Si es True, el producto es un plato de menú diario (no catálogo retail).',
+    )
 
     class Meta:
         db_table = 'producto'
@@ -195,8 +204,51 @@ class Producto(BaseModel):
             ),
             models.Index(fields=['nombre']),
             models.Index(fields=['empresa', 'nombre']),
+            models.Index(fields=['empresa', 'es_menu_diario'], name='idx_producto_empresa_menu'),
         ]
 
     def __str__(self):
         return f"{self.empresa.nombre} - {self.nombre}"
+
+
+class ProductoDia(BaseModel):
+    """Días de la semana (1=Lun … 7=Dom) en los que un plato de menú está disponible."""
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='dias_menu')
+    dia_semana = models.PositiveSmallIntegerField(
+        help_text='1=Lunes … 7=Domingo (mismo convenio que horarios).',
+    )
+    activo = models.BooleanField(
+        default=True,
+        help_text='Si es False, el plato sigue vinculado al día pero no se ofrece al cliente.',
+    )
+
+    class Meta:
+        db_table = 'producto_dia'
+        verbose_name = 'Día de menú'
+        verbose_name_plural = 'Días de menú'
+        unique_together = ['producto', 'dia_semana']
+        indexes = [
+            models.Index(fields=['dia_semana'], name='idx_producto_dia_semana'),
+        ]
+
+    def __str__(self):
+        return f"{self.producto_id} día {self.dia_semana}"
+
+
+class ProductoVariante(BaseModel):
+    """Variante/extra de un plato (ej. +$20 con fritas)."""
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='variantes')
+    nombre = models.CharField(max_length=200)
+    precio_extra = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    activo = models.BooleanField(default=True)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'producto_variante'
+        verbose_name = 'Variante de producto'
+        verbose_name_plural = 'Variantes de producto'
+        ordering = ['orden', 'id']
+
+    def __str__(self):
+        return f"{self.producto.nombre} — {self.nombre} (+{self.precio_extra})"
 

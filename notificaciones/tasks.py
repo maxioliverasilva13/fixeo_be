@@ -143,6 +143,7 @@ WELCOME_PROFESIONAL_CHAT = (
     name='notificaciones.enviar_bienvenida_profesional',
     max_retries=5,
     default_retry_delay=5,
+    ignore_result=True,
 )
 def enviar_bienvenida_profesional(self, usuario_id):
     """

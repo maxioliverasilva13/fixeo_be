@@ -47,6 +47,7 @@ def crear_empresa(
     *,
     vende_productos=False,
     vende_servicios=True,
+    vende_menu_diario=False,
     compartir_ubicacion_mapa=True,
 ):
     if not validar_nombre_empresa_unico(nombre):
@@ -63,6 +64,7 @@ def crear_empresa(
         admin_id=admin_id,
         vende_productos=vende_productos,
         vende_servicios=vende_servicios,
+        vende_menu_diario=vende_menu_diario,
         compartir_ubicacion_mapa=compartir_ubicacion_mapa,
         subdomain=generar_subdomain_unico(nombre),
     )

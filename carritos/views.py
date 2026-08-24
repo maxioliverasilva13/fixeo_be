@@ -30,6 +30,28 @@ TIPO_ENTREGA_TEXTOS = {
     'domicilio': 'Envío a domicilio',
 }
 
+DIA_SEMANA_NOMBRES = {
+    1: 'lunes', 2: 'martes', 3: 'miércoles', 4: 'jueves',
+    5: 'viernes', 6: 'sábado', 7: 'domingo',
+}
+
+
+def _producto_disponible_en_fecha(producto, fecha):
+    """True si el plato de menú tiene ese día de semana activo."""
+    if not getattr(producto, 'es_menu_diario', False):
+        return True
+    dia = fecha.isoweekday()  # 1=lun … 7=dom
+    return producto.dias_menu.filter(
+        dia_semana=dia, activo=True, is_deleted=False,
+    ).exists()
+
+
+def _clear_fecha_menu_si_vacio(carrito):
+    if not carrito.items.filter(is_deleted=False).exists():
+        if carrito.fecha_menu is not None:
+            carrito.fecha_menu = None
+            carrito.save(update_fields=['fecha_menu', 'updated_at'])
+
 
 def _detalle_productos_orden(orden):
     """Ej: '2x Corte de cabello, 1x Shampoo'"""
@@ -136,6 +158,8 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
         producto_id = serializer.validated_data['producto_id']
         cantidad = serializer.validated_data['cantidad']
+        variante_id = serializer.validated_data.get('variante_id')
+        fecha_menu = serializer.validated_data.get('fecha_menu')
 
         try:
             producto = Producto.objects.get(id=producto_id, empresa=carrito.empresa)
@@ -150,6 +174,72 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 {'error': 'Este producto está agotado'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        items_existentes = list(
+            carrito.items.select_related('producto').filter(is_deleted=False)
+        )
+        hay_menu = any(getattr(i.producto, 'es_menu_diario', False) for i in items_existentes)
+        hay_retail = any(not getattr(i.producto, 'es_menu_diario', False) for i in items_existentes)
+
+        if producto.es_menu_diario and hay_retail:
+            return Response(
+                {'error': 'No podés mezclar menú diario con otros productos en el mismo carrito'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not producto.es_menu_diario and (hay_menu or carrito.fecha_menu):
+            return Response(
+                {'error': 'Este carrito es de menú diario. Vacialo para agregar otros productos'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if producto.es_menu_diario:
+            today = timezone.localdate()
+            target_fecha = fecha_menu or carrito.fecha_menu
+            if not target_fecha:
+                return Response(
+                    {'error': 'Elegí la fecha del menú para agregar este plato'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if target_fecha < today:
+                return Response(
+                    {'error': 'La fecha del menú no puede ser en el pasado'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if carrito.fecha_menu and carrito.fecha_menu != target_fecha:
+                return Response(
+                    {
+                        'error': (
+                            f'Este carrito es para el {carrito.fecha_menu.strftime("%d/%m/%Y")}. '
+                            'Vacialo para pedir otro día'
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not _producto_disponible_en_fecha(producto, target_fecha):
+                dia_nombre = DIA_SEMANA_NOMBRES.get(target_fecha.isoweekday(), 'ese día')
+                return Response(
+                    {'error': f'"{producto.nombre}" no está disponible los {dia_nombre}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if carrito.fecha_menu is None:
+                carrito.fecha_menu = target_fecha
+                carrito.save(update_fields=['fecha_menu', 'updated_at'])
+
+        variante = None
+        precio_extra = 0
+        if variante_id:
+            from empresas.models import ProductoVariante
+            variante = ProductoVariante.objects.filter(
+                id=variante_id, producto=producto, activo=True, is_deleted=False,
+            ).first()
+            if not variante:
+                return Response(
+                    {'error': 'Variante no encontrada'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            precio_extra = variante.precio_extra or 0
+
+        precio_unitario = producto.precio + precio_extra
 
         existing_productos = list(
             Producto.objects.filter(carritoitem__carrito=carrito, carritoitem__is_deleted=False)
@@ -166,6 +256,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
         carrito_item = CarritoItem.all_objects.filter(
             carrito=carrito,
             producto=producto,
+            variante=variante,
         ).first()
 
         if carrito_item:
@@ -174,17 +265,20 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 carrito_item.deleted_at = None
                 carrito_item.deleted_by = None
                 carrito_item.cantidad = cantidad
-                carrito_item.precio_unitario = producto.precio
+                carrito_item.precio_unitario = precio_unitario
+                carrito_item.variante = variante
                 carrito_item.save()
             else:
                 carrito_item.cantidad += cantidad
+                carrito_item.precio_unitario = precio_unitario
                 carrito_item.save()
         else:
             carrito_item = CarritoItem.objects.create(
                 carrito=carrito,
                 producto=producto,
+                variante=variante,
                 cantidad=cantidad,
-                precio_unitario=producto.precio,
+                precio_unitario=precio_unitario,
             )
 
         return Response(CarritoItemSerializer(carrito_item).data)
@@ -195,6 +289,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
         carrito = self.get_object()
         producto_id = request.data.get('producto_id')
         cantidad = request.data.get('cantidad')
+        variante_id = request.data.get('variante_id')
 
         if not producto_id or cantidad is None:
             return Response(
@@ -202,9 +297,14 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            carrito_item = CarritoItem.objects.get(carrito=carrito, producto_id=producto_id)
-        except CarritoItem.DoesNotExist:
+        qs = CarritoItem.objects.filter(carrito=carrito, producto_id=producto_id)
+        if variante_id:
+            qs = qs.filter(variante_id=variante_id)
+        else:
+            qs = qs.filter(variante__isnull=True)
+
+        carrito_item = qs.first()
+        if not carrito_item:
             return Response(
                 {'error': 'Item no encontrado en el carrito'},
                 status=status.HTTP_404_NOT_FOUND
@@ -212,6 +312,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
         if cantidad <= 0:
             carrito_item.delete()
+            _clear_fecha_menu_si_vacio(carrito)
             return Response({'message': 'Item eliminado del carrito'})
 
         carrito_item.cantidad = cantidad
@@ -221,24 +322,33 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['delete'], url_path='eliminar-item/(?P<producto_id>[^/.]+)')
     def eliminar_item(self, request, pk=None, producto_id=None):
-        """Elimina un producto del carrito"""
+        """Elimina un producto del carrito. Opcional: ?variante_id= """
         carrito = self.get_object()
+        variante_id = request.query_params.get('variante_id')
 
-        try:
-            carrito_item = CarritoItem.objects.get(carrito=carrito, producto_id=producto_id)
-            carrito_item.delete()
-            return Response({'message': 'Item eliminado del carrito'})
-        except CarritoItem.DoesNotExist:
+        qs = CarritoItem.objects.filter(carrito=carrito, producto_id=producto_id)
+        if variante_id:
+            qs = qs.filter(variante_id=variante_id)
+        else:
+            qs = qs.filter(variante__isnull=True)
+
+        carrito_item = qs.first()
+        if not carrito_item:
             return Response(
                 {'error': 'Item no encontrado en el carrito'},
                 status=status.HTTP_404_NOT_FOUND
             )
+        carrito_item.delete()
+        _clear_fecha_menu_si_vacio(carrito)
+        return Response({'message': 'Item eliminado del carrito'})
 
     @action(detail=True, methods=['delete'], url_path='vaciar')
     def vaciar(self, request, pk=None):
         """Vacía el carrito eliminando todos los items"""
         carrito = self.get_object()
         carrito.items.all().delete()
+        carrito.fecha_menu = None
+        carrito.save(update_fields=['fecha_menu', 'updated_at'])
         return Response({'message': 'Carrito vaciado exitosamente'})
 
     @action(detail=True, methods=['post'], url_path='checkout')
@@ -290,7 +400,39 @@ class CarritoViewSet(viewsets.ModelViewSet):
 
         tipo_entrega = serializer.validated_data['tipo_entrega']
 
-        items_carrito = list(carrito.items.select_related('producto').all())
+        items_carrito = list(carrito.items.select_related('producto', 'variante').all())
+        es_menu_diario = any(getattr(item.producto, 'es_menu_diario', False) for item in items_carrito)
+
+        if es_menu_diario:
+            if not carrito.fecha_menu:
+                return Response(
+                    {'error': 'Este pedido de menú no tiene fecha. Volvé a armar el carrito'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if carrito.fecha_menu < timezone.localdate():
+                return Response(
+                    {'error': 'La fecha del menú ya pasó. Elegí otra fecha'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            for item in items_carrito:
+                if not _producto_disponible_en_fecha(item.producto, carrito.fecha_menu):
+                    return Response(
+                        {
+                            'error': (
+                                f'"{item.producto.nombre}" no está disponible '
+                                f'el {carrito.fecha_menu.strftime("%d/%m/%Y")}'
+                            ),
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        if metodo_pago == 'transferencia':
+            if not es_menu_diario or not empresa.vende_menu_diario:
+                return Response(
+                    {'error': 'Transferencia solo está disponible para pedidos de menú diario'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         entrega_error = validar_tipo_entrega_productos(
             [item.producto for item in items_carrito],
             tipo_entrega,
@@ -319,8 +461,25 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            if (
+                localizacion_entrega.latitud is not None
+                and localizacion_entrega.longitud is not None
+            ):
+                from usuario.zonas_utils import (
+                    mensaje_zona_no_atendida,
+                    ubicacion_bloqueada_por_zonas_profesional,
+                )
+                if ubicacion_bloqueada_por_zonas_profesional(
+                    empresa.admin_id,
+                    localizacion_entrega.latitud,
+                    localizacion_entrega.longitud,
+                ):
+                    return Response(
+                        {'error': mensaje_zona_no_atendida()},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         # Validar stock antes de cualquier cobro
-        items_carrito = list(carrito.items.select_related('producto').all())
         for item in items_carrito:
             if item.producto.agotado:
                 return Response(
@@ -373,13 +532,28 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # ── Pago OK (o efectivo): crear orden + registros en una TX ──
+        # ── Pago OK (o efectivo/transferencia): crear orden + registros en una TX ──
         with transaction.atomic():
             comision_plataforma = None
             pago_status = ''
             if metodo_pago == 'mercadopago':
                 comision_plataforma, _ = calcular_comision(total)
                 pago_status = 'aprobado'
+            elif metodo_pago == 'transferencia':
+                pago_status = 'pendiente'
+            elif metodo_pago == 'efectivo':
+                pago_status = (
+                    'pago_en_domicilio' if tipo_entrega == 'domicilio' else 'pendiente'
+                )
+
+            from datetime import datetime, time as time_cls
+            from django.utils import timezone as dj_tz
+
+            fecha_entrega = None
+            if es_menu_diario and carrito.fecha_menu:
+                # Mediodía local del día elegido (DateTimeField en Orden)
+                naive = datetime.combine(carrito.fecha_menu, time_cls(12, 0))
+                fecha_entrega = dj_tz.make_aware(naive, dj_tz.get_current_timezone())
 
             orden = Orden.objects.create(
                 usuario=request.user,
@@ -392,6 +566,7 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 comision_plataforma=comision_plataforma,
                 pago_status=pago_status,
                 currency=orden_currency,
+                fecha_entrega=fecha_entrega,
             )
 
             for item in items_carrito:
@@ -401,6 +576,10 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     cantidad=item.cantidad,
                     precio_unitario=item.precio_unitario,
                     subtotal=item.subtotal,
+                    variante_nombre=(item.variante.nombre if item.variante_id else ''),
+                    variante_precio_extra=(
+                        item.variante.precio_extra if item.variante_id else 0
+                    ),
                 )
 
             if mp_response:
@@ -476,7 +655,11 @@ class CarritoViewSet(viewsets.ModelViewSet):
                     or request.user.correo
                 )
                 cantidad_items = sum(item.cantidad for item in items_carrito)
-                metodo_display = 'efectivo' if metodo_pago == 'efectivo' else 'MercadoPago'
+                metodo_display = {
+                    'efectivo': 'efectivo',
+                    'transferencia': 'transferencia',
+                    'mercadopago': 'MercadoPago',
+                }.get(metodo_pago, metodo_pago)
                 total_str = f"${total}"
                 productos_txt = (
                     f"{cantidad_items} producto"
@@ -645,6 +828,63 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(OrdenSerializer(orden, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='marcar-pagado')
+    def marcar_pagado(self, request, pk=None):
+        """Marca el pago como recibido (efectivo/transferencia). Foto de comprobante opcional."""
+        orden = self.get_object()
+
+        if orden.empresa.admin_id_id != request.user.id:
+            return Response(
+                {'error': 'No tienes permisos para marcar el pago de esta orden'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if orden.metodo_pago not in ('efectivo', 'transferencia'):
+            return Response(
+                {'error': 'Solo aplica a órdenes en efectivo o transferencia'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if orden.status == 'cancelada':
+            return Response(
+                {'error': 'No se puede marcar el pago de una orden cancelada'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if orden.pago_status == 'pagado':
+            return Response(
+                OrdenSerializer(orden, context={'request': request}).data,
+            )
+
+        comprobante = (request.data.get('comprobante_pago_url') or '').strip()
+        orden.pago_status = 'pagado'
+        update_fields = ['pago_status', 'updated_at']
+        if comprobante:
+            orden.comprobante_pago_url = comprobante[:500]
+            update_fields.append('comprobante_pago_url')
+        orden.save(update_fields=update_fields)
+
+        Notificaciones.objects.create(
+            usuario=orden.usuario,
+            titulo='Pago confirmado',
+            descripcion=(
+                f'Tu pago de la orden #{orden.numero_orden} en {orden.empresa.nombre} '
+                f'fue marcado como recibido.'
+            ),
+            deep_link=f'/historial?ordenId={orden.id}',
+            entity_id=orden.id,
+        )
+
+        enviar_mensaje_orden_chat(
+            orden,
+            texto=f'Tu pago de la orden #{orden.numero_orden} fue confirmado.',
+            sender=request.user,
+            receiver=orden.usuario,
+            tipo='orden_pago',
+        )
+
+        return Response(OrdenSerializer(orden, context={'request': request}).data)
+
     @action(detail=False, methods=['get'], url_path='mis-ordenes-empresa')
     def mis_ordenes_empresa(self, request):
         """Listado de órdenes para empresas que administra el usuario"""
@@ -654,6 +894,13 @@ class OrdenViewSet(viewsets.ReadOnlyModelViewSet):
         status_filter = request.query_params.get('status', None)
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+
+        fecha_desde = request.query_params.get('fecha_desde')
+        fecha_hasta = request.query_params.get('fecha_hasta')
+        if fecha_desde:
+            queryset = queryset.filter(created_at__date__gte=fecha_desde)
+        if fecha_hasta:
+            queryset = queryset.filter(created_at__date__lte=fecha_hasta)
         
         queryset = queryset.select_related('empresa', 'usuario').prefetch_related('items__producto')
         serializer = self.get_serializer(queryset, many=True)

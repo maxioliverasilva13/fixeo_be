@@ -74,6 +74,7 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     horarios_semana = serializers.SerializerMethodField()
     rating_cliente = serializers.SerializerMethodField()
     cant_calif_cliente = serializers.SerializerMethodField()
+    zonas_no_trabajo = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
@@ -81,7 +82,7 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
                   'trabajo_domicilio','esta_abierta','trabajo_local', 'is_owner_empresa',
                   'is_active', 'is_staff', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
                   'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
-                  'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana',
+                  'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana', 'zonas_no_trabajo',
                   'subscripcion_activa', 'rating','cant_calif', 'rating_cliente', 'cant_calif_cliente',
                   'es_visible_en_mapa', 'advertencias_mapa',
                   'recibir_notificaciones', 'recibir_correos']
@@ -323,6 +324,20 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
         return result
 
+    def get_zonas_no_trabajo(self, obj):
+        return [
+            {
+                'id': z.id,
+                'nombre': z.nombre or f'Zona {i + 1}',
+                'latitud': float(z.latitud),
+                'longitud': float(z.longitud),
+                'radio_km': float(z.radio_km),
+            }
+            for i, z in enumerate(
+                obj.zonas_no_trabajo.filter(activa=True).order_by('nombre', 'id')
+            )
+        ]
+
 
 class UsuarioPublicoSerializer(UsuarioSerializer):
     """Perfil público para guest: sin datos de contacto ni tokens."""
@@ -333,7 +348,7 @@ class UsuarioPublicoSerializer(UsuarioSerializer):
             'trabajo_domicilio', 'esta_abierta', 'trabajo_local', 'is_owner_empresa',
             'rango_mapa_km', 'rol', 'rol_detalle', 'empresa',
             'profesiones', 'localizaciones', 'localizacion_principal', 'servicios',
-            'horarios_semana', 'rating', 'cant_calif',
+            'horarios_semana', 'zonas_no_trabajo', 'rating', 'cant_calif',
             'es_visible_en_mapa',
         ]
 
@@ -504,6 +519,7 @@ class RegistroSerializer(serializers.Serializer):
     )
     vende_productos = serializers.BooleanField(required=False, default=False)
     vende_servicios = serializers.BooleanField(required=False, default=True)
+    vende_menu_diario = serializers.BooleanField(required=False, default=False)
     rango_mapa_km = serializers.FloatField(required=False, allow_null=True)
     compartir_ubicacion_mapa = serializers.BooleanField(required=False, allow_null=True)
     # Registro email/password: token emitido tras verificar el código OTP.
@@ -566,9 +582,10 @@ class RegistroSerializer(serializers.Serializer):
         if attrs.get('es_empresa'):
             vende_productos = attrs.get('vende_productos', False)
             vende_servicios = attrs.get('vende_servicios', True)
-            if not vende_productos and not vende_servicios:
+            vende_menu_diario = attrs.get('vende_menu_diario', False)
+            if not vende_productos and not vende_servicios and not vende_menu_diario:
                 raise serializers.ValidationError(
-                    'La empresa debe vender productos y/o servicios.'
+                    'La empresa debe vender productos, servicios y/o menú diario.'
                 )
             if lat is None or lng is None:
                 raise serializers.ValidationError({
@@ -676,13 +693,14 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     esta_abierta = serializers.SerializerMethodField()
     vende_productos = serializers.SerializerMethodField()
     vende_servicios = serializers.SerializerMethodField()
+    vende_menu_diario = serializers.SerializerMethodField()
     plan_rank = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio', 
                   'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta',
-                  'vende_productos', 'vende_servicios', 'plan_rank', 'rating', 'cant_calif']
+                  'vende_productos', 'vende_servicios', 'vende_menu_diario', 'plan_rank', 'rating', 'cant_calif']
         read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 
                             'trabajo_domicilio', 'trabajo_local', 
                             'rango_mapa_km', 'esta_abierta']
@@ -722,6 +740,10 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     def get_vende_servicios(self, obj):
         empresa = self._get_empresa(obj)
         return empresa.vende_servicios if empresa else False
+
+    def get_vende_menu_diario(self, obj):
+        empresa = self._get_empresa(obj)
+        return bool(empresa and empresa.vende_menu_diario)
 
     def get_plan_rank(self, obj):
         from usuario.mapa_helpers import plan_rank_tuple_from_usuario

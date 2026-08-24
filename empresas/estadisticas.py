@@ -47,6 +47,8 @@ def estadisticas_empresa(empresa: Empresa, request) -> dict:
     admin = empresa.admin_id
     vende_servicios = empresa.vende_servicios
     vende_productos = empresa.vende_productos
+    vende_menu_diario = empresa.vende_menu_diario
+    cuenta_ordenes = vende_productos or vende_menu_diario
 
     ingreso_ordenes = Decimal('0')
     ingreso_servicios = Decimal('0')
@@ -58,7 +60,7 @@ def estadisticas_empresa(empresa: Empresa, request) -> dict:
     ordenes_por_estado = {}
     trabajos_por_estado = {}
 
-    if vende_productos:
+    if cuenta_ordenes:
         ordenes_qs = Orden.objects.filter(
             empresa=empresa,
             created_at__gte=start,
@@ -167,6 +169,7 @@ def estadisticas_empresa(empresa: Empresa, request) -> dict:
         },
         'vende_servicios': vende_servicios,
         'vende_productos': vende_productos,
+        'vende_menu_diario': vende_menu_diario,
         'resumen': {
             'ingreso_total': _decimal_str(ingreso_total),
             'ingreso_ordenes': _decimal_str(ingreso_ordenes),
