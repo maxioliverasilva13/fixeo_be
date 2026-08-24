@@ -4,7 +4,7 @@ import requests as req
 from django.conf import settings
 from django.shortcuts import redirect
 from localizacion.utils import calcular_distancia_km
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser, BasePermission
 from usuario.utils import obtener_localizacion_usuario
@@ -19,9 +19,34 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from servicios.models import Servicio
-from servicios.serializers import ServicioSerializer
+from servicios.serializers import ServicioSerializer, ServicioCreateSerializer
+from servicios.views import _filter_servicios_queryset
 
 logger = logging.getLogger(__name__)
+
+
+def _user_can_manage_empresa(user, empresa):
+    """Owner de la empresa o staff del sistema."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if user.is_staff:
+        return True
+    return empresa.admin_id_id == user.id
+
+
+def _get_empresa_for_user(user, empresa_id):
+    if not empresa_id:
+        return None
+    try:
+        empresa_id = int(empresa_id)
+    except (TypeError, ValueError):
+        return None
+    empresa = Empresa.objects.filter(id=empresa_id).first()
+    if not empresa:
+        return None
+    if not _user_can_manage_empresa(user, empresa):
+        return None
+    return empresa
 
 # Mercado Pago OAuth authorization URLs por país
 # Países con dominio propio: los confirmados por MP
@@ -596,6 +621,129 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+    def _require_staff(self, request):
+        if not request.user.is_staff:
+            return Response(
+                {'error': 'Solo el staff puede gestionar el catálogo de otras empresas'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _get_servicio_for_empresa(self, empresa, servicio_id):
+        if not empresa.admin_id_id:
+            return None
+        return (
+            Servicio.objects
+            .filter(id=servicio_id, usuario_id=empresa.admin_id_id)
+            .select_related('profesion')
+            .first()
+        )
+
+    @action(detail=True, methods=['get'], url_path='servicios')
+    def list_servicios_admin(self, request, pk=None):
+        denied = self._require_staff(request)
+        if denied:
+            return denied
+        empresa = self.get_object()
+        if not empresa.admin_id_id:
+            return Response([])
+        qs = (
+            Servicio.objects
+            .filter(usuario_id=empresa.admin_id_id)
+            .select_related('profesion')
+            .order_by('profesion__nombre', 'nombre')
+        )
+        profesion_id = request.query_params.get('profesion_id')
+        if profesion_id:
+            qs = qs.filter(profesion_id=profesion_id)
+        qs = _filter_servicios_queryset(qs, request)
+        return Response(ServicioSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='servicios')
+    def create_servicio_admin(self, request, pk=None):
+        denied = self._require_staff(request)
+        if denied:
+            return denied
+        empresa = self.get_object()
+        owner = empresa.admin_id
+        if not owner:
+            return Response(
+                {'error': 'La empresa no tiene un usuario owner asociado'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ServicioCreateSerializer(
+            data=request.data,
+            context={'request': request, 'empresa': empresa, 'servicio_owner': owner},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        profesion_id = serializer.validated_data['profesion'].id
+        nombre = serializer.validated_data['nombre']
+        if not owner.usuario_profesiones.filter(profesion_id=profesion_id).exists():
+            return Response(
+                {'error': 'El owner no tiene asignada esa profesión'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if Servicio.objects.filter(usuario=owner, profesion_id=profesion_id, nombre=nombre).exists():
+            return Response(
+                {'error': f'Ya existe un servicio con el nombre "{nombre}" para esta profesión'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        servicio = serializer.save(usuario=owner)
+        return Response(ServicioSerializer(servicio).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['patch', 'put', 'delete'], url_path='servicios/(?P<servicio_id>[^/.]+)')
+    def manage_servicio_admin(self, request, pk=None, servicio_id=None):
+        denied = self._require_staff(request)
+        if denied:
+            return denied
+        empresa = self.get_object()
+        servicio = self._get_servicio_for_empresa(empresa, servicio_id)
+        if not servicio:
+            return Response({'error': 'Servicio no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'DELETE':
+            profesion_nombre = servicio.profesion.nombre
+            servicio.delete()
+            return Response(
+                {'message': f'Servicio de {profesion_nombre} eliminado exitosamente'},
+                status=status.HTTP_200_OK,
+            )
+
+        partial = request.method == 'PATCH'
+        owner = empresa.admin_id
+        serializer = ServicioCreateSerializer(
+            servicio,
+            data=request.data,
+            partial=partial,
+            context={'request': request, 'empresa': empresa, 'servicio_owner': owner},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        profesion_id = serializer.validated_data.get('profesion', servicio.profesion).id
+        nombre = serializer.validated_data.get('nombre', servicio.nombre)
+        if 'profesion' in serializer.validated_data and profesion_id != servicio.profesion_id:
+            if not owner.usuario_profesiones.filter(profesion_id=profesion_id).exists():
+                return Response(
+                    {'error': 'El owner no tiene asignada esa profesión'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if Servicio.objects.filter(
+            usuario=owner,
+            profesion_id=profesion_id,
+            nombre=nombre,
+        ).exclude(id=servicio.id).exists():
+            return Response(
+                {'error': f'Ya existe un servicio con el nombre "{nombre}" para esta profesión'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        servicio = serializer.save()
+        return Response(ServicioSerializer(servicio).data)
+
+
 class CategoriaProductoViewSet(viewsets.ModelViewSet):
     queryset = CategoriaProducto.objects.all()
     serializer_class = CategoriaProductoSerializer
@@ -623,26 +771,19 @@ class CategoriaProductoViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        empresa_id = self.request.data.get('empresa')
-        empresa = Empresa.objects.filter(id=empresa_id, admin_id=self.request.user).first()
-        
+        empresa = _get_empresa_for_user(self.request.user, self.request.data.get('empresa'))
         if not empresa:
             raise serializers.ValidationError({'error': 'No tienes permisos para crear categorías en esta empresa'})
-        
         serializer.save()
 
     def perform_update(self, serializer):
-        empresa = serializer.instance.empresa
-        
-        if empresa.admin_id != self.request.user:
+        if not _user_can_manage_empresa(self.request.user, serializer.instance.empresa):
             raise serializers.ValidationError({'error': 'No tienes permisos para modificar esta categoría'})
-        
         serializer.save()
 
     def perform_destroy(self, instance):
-        if instance.empresa.admin_id != self.request.user:
+        if not _user_can_manage_empresa(self.request.user, instance.empresa):
             raise serializers.ValidationError({'error': 'No tienes permisos para eliminar esta categoría'})
-        
         instance.delete()
 
 
@@ -730,26 +871,19 @@ class ProductoViewSet(viewsets.ModelViewSet):
         return queryset.select_related('empresa', 'categoria').prefetch_related('dias_menu', 'variantes')
 
     def perform_create(self, serializer):
-        empresa_id = self.request.data.get('empresa')
-        empresa = Empresa.objects.filter(id=empresa_id, admin_id=self.request.user).first()
-
+        empresa = _get_empresa_for_user(self.request.user, self.request.data.get('empresa'))
         if not empresa:
             raise serializers.ValidationError({'error': 'No tienes permisos para crear productos en esta empresa'})
-
         serializer.save()
 
     def perform_update(self, serializer):
-        empresa = serializer.instance.empresa
-
-        if empresa.admin_id != self.request.user:
+        if not _user_can_manage_empresa(self.request.user, serializer.instance.empresa):
             raise serializers.ValidationError({'error': 'No tienes permisos para modificar este producto'})
-
         serializer.save()
 
     def perform_destroy(self, instance):
-        if instance.empresa.admin_id != self.request.user:
+        if not _user_can_manage_empresa(self.request.user, instance.empresa):
             raise serializers.ValidationError({'error': 'No tienes permisos para eliminar este producto'})
-
         instance.delete()
 
     @action(detail=True, methods=['post'], url_path='vincular-dia')
@@ -758,7 +892,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
         from .models import ProductoDia
 
         producto = self.get_object()
-        if producto.empresa.admin_id_id != request.user.id:
+        if not _user_can_manage_empresa(request.user, producto.empresa):
             return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
         if not producto.es_menu_diario:
             return Response(
@@ -793,7 +927,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
         from .models import ProductoDia
 
         producto = self.get_object()
-        if producto.empresa.admin_id_id != request.user.id:
+        if not _user_can_manage_empresa(request.user, producto.empresa):
             return Response({'error': 'Sin permisos'}, status=status.HTTP_403_FORBIDDEN)
         if not producto.es_menu_diario:
             return Response(
@@ -839,8 +973,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
         devuelve los productos detectados para que el usuario los revise/edite
         y confirme el alta desde el frontend.
         """
-        empresa_id = request.data.get('empresa')
-        empresa = Empresa.objects.filter(id=empresa_id, admin_id=request.user).first()
+        empresa = _get_empresa_for_user(request.user, request.data.get('empresa'))
         if not empresa:
             return Response(
                 {'ok': False, 'error': 'No tienes permisos sobre esta empresa'},

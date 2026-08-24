@@ -32,10 +32,13 @@ class ServicioCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context.get('request')
-        usuario = getattr(request, 'user', None) if request else None
+        empresa = self.context.get('empresa')
+        servicio_owner = self.context.get('servicio_owner')
+        usuario = servicio_owner or (getattr(request, 'user', None) if request else None)
         if not usuario:
             return attrs
-        empresa = usuario.empresas_administradas.first()
+        if empresa is None:
+            empresa = usuario.empresas_administradas.first()
         divisa = attrs.get('divisa')
         if divisa is None and self.instance:
             divisa = self.instance.divisa
