@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from django.db.models import Q, Max
+from django.db.models import Q, Max, Count
 from django.shortcuts import get_object_or_404
 from usuario.models import Usuario
 from trabajos.models import Trabajo
@@ -74,6 +74,10 @@ class ChatViewSet(viewsets.ModelViewSet):
         ).select_related('sender', 'receiver', 'trabajo').prefetch_related(
             'mensajes',
             'mensajes__recursos'
+        ).annotate(
+            num_mensajes=Count('mensajes')
+        ).filter(
+            num_mensajes__gt=0
         ).order_by('-ultimo_mensaje_at')
         if blocked_ids:
             qs = qs.exclude(sender_id__in=blocked_ids).exclude(receiver_id__in=blocked_ids)
@@ -363,18 +367,9 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         async_to_sync(channel_layer.group_send)(f'user_{received_user.id}', payload)
 
-        userNameToReceive = None
-        userIdToReceive = None
-        if (request.user.id == chat.sender.id):
-            userIdToReceive = chat.receiver.id
-            userNameToReceive = chat.receiver.nombre
-        else:
-            userIdToReceive = chat.sender.id
-            userNameToReceive = chat.sender.nombre
-
         notificar_usuario.delay(
-            usuario_id=userIdToReceive,
-            titulo=f"Nuevo mensaje de {userNameToReceive}",
+            usuario_id=received_user.id,
+            titulo=f"Nuevo mensaje de {request.user.nombre}",
             mensaje=mensaje.texto,
             data={
                 'deep_link': f'/chats/{chat.id}',
