@@ -83,6 +83,15 @@ class ChatViewSet(viewsets.ModelViewSet):
             qs = qs.exclude(sender_id__in=blocked_ids).exclude(receiver_id__in=blocked_ids)
         return qs
 
+    def get_object(self):
+        user = self.request.user
+        queryset = Chat.objects.filter(
+            Q(sender=user) | Q(receiver=user)
+        ).select_related('sender', 'receiver', 'trabajo')
+        obj = get_object_or_404(queryset, pk=self.kwargs.get('pk'))
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
