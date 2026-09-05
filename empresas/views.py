@@ -588,8 +588,10 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         )
 
     def get_queryset(self):
+        from fixeo_project.admin_filters import apply_created_at_filters, apply_ordering
+
         queryset = Empresa.objects.all().select_related('admin_id', 'localizacion')
-        
+
         # Filtros opcionales
         admin_id = self.request.query_params.get('admin_id')
         pais = self.request.query_params.get('pais')
@@ -598,7 +600,7 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         vende_productos = self.request.query_params.get('vende_productos')
         vende_servicios = self.request.query_params.get('vende_servicios')
         is_mercadopago_vinculado = self.request.query_params.get('is_mercadopago_vinculado')
-        
+
         if admin_id:
             queryset = queryset.filter(admin_id=admin_id)
         if pais:
@@ -607,7 +609,7 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(nombre__icontains=nombre)
         if search:
             queryset = queryset.filter(
-                Q(nombre__icontains=search) | 
+                Q(nombre__icontains=search) |
                 Q(descripcion__icontains=search) |
                 Q(ubicacion__icontains=search)
             )
@@ -617,7 +619,14 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(vende_servicios=vende_servicios.lower() == 'true')
         if is_mercadopago_vinculado is not None:
             queryset = queryset.filter(is_mercadopago_vinculado=is_mercadopago_vinculado.lower() == 'true')
-        
+
+        queryset = apply_created_at_filters(queryset, self.request.query_params)
+        queryset = apply_ordering(
+            queryset,
+            self.request.query_params,
+            allowed={'created_at', '-created_at', 'nombre', '-nombre', 'id', '-id'},
+            default='-created_at',
+        )
         return queryset
 
 

@@ -1357,6 +1357,8 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminUser]
 
     def get_queryset(self):
+        from fixeo_project.admin_filters import apply_created_at_filters, apply_ordering
+
         queryset = Usuario.objects.all().select_related('rol').prefetch_related('empresas_administradas')
 
         is_active = self.request.query_params.get('is_active')
@@ -1386,6 +1388,16 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
                 Q(id__iexact=search)
             )
 
+        queryset = apply_created_at_filters(queryset, self.request.query_params)
+        queryset = apply_ordering(
+            queryset,
+            self.request.query_params,
+            allowed={
+                'created_at', '-created_at', 'nombre', '-nombre',
+                'apellido', '-apellido', 'correo', '-correo', 'id', '-id',
+            },
+            default='-created_at',
+        )
         return queryset
 
     def get_serializer_class(self):

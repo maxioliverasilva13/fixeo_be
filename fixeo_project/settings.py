@@ -27,7 +27,7 @@ INSTALLED_APPS = [
     'usuario_profesion',
     'usuario_localizacion',
     'localizacion',
-    'empresas',
+    'empresas.apps.EmpresasConfig',
     'carritos',
     'trabajos',
     'mensajeria',

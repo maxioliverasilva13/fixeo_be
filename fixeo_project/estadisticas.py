@@ -569,3 +569,83 @@ def estadisticas_globales(request) -> dict:
         'encuestas': estadisticas_survey(),
         'mensajeria': estadisticas_mensajeria(start, end),
     }
+
+
+def detalle_trabajos_periodo(request) -> dict:
+    """
+    Lista trabajos del período agrupados por empresa del profesional.
+    Usado al tocar la card de Trabajos en el panel admin.
+    """
+    year, month, last_day, start, end = _parse_period(request)
+    meses_es = [
+        '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+    ]
+
+    trabajos = (
+        Trabajo.objects
+        .filter(created_at__gte=start, created_at__lt=end)
+        .select_related('usuario', 'profesional')
+        .prefetch_related('profesional__empresas_administradas')
+        .order_by('-created_at')[:500]
+    )
+
+    grupos: dict[str, dict] = {}
+    sin_empresa = []
+
+    for t in trabajos:
+        trabajo_row = {
+            'id': t.id,
+            'status': t.status,
+            'descripcion': (t.descripcion or '')[:160],
+            'es_urgente': t.esUrgente,
+            'precio_final': _decimal_str(t.precio_final) if t.precio_final is not None else None,
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+            'cliente': {
+                'id': t.usuario_id,
+                'nombre': f'{(t.usuario.nombre or "")} {(t.usuario.apellido or "")}'.strip() if t.usuario_id else '',
+            },
+            'profesional': {
+                'id': t.profesional_id,
+                'nombre': (
+                    f'{(t.profesional.nombre or "")} {(t.profesional.apellido or "")}'.strip()
+                    if t.profesional_id else ''
+                ),
+            },
+        }
+
+        empresa = None
+        if t.profesional_id:
+            empresa = next(iter(t.profesional.empresas_administradas.all()), None)
+
+        if empresa:
+            key = f'empresa-{empresa.id}'
+            if key not in grupos:
+                grupos[key] = {
+                    'empresa_id': empresa.id,
+                    'empresa_nombre': empresa.nombre,
+                    'pais': empresa.pais or '',
+                    'profesional_id': t.profesional_id,
+                    'profesional_nombre': trabajo_row['profesional']['nombre'],
+                    'cantidad_trabajos': 0,
+                    'trabajos': [],
+                }
+            grupos[key]['cantidad_trabajos'] += 1
+            grupos[key]['trabajos'].append(trabajo_row)
+        else:
+            sin_empresa.append(trabajo_row)
+
+    empresas_list = sorted(grupos.values(), key=lambda g: g['cantidad_trabajos'], reverse=True)
+
+    return {
+        'periodo': {
+            'year': year,
+            'month': month,
+            'label': f'{meses_es[month]} {year}',
+            'dias_en_mes': last_day,
+        },
+        'total_trabajos': sum(g['cantidad_trabajos'] for g in empresas_list) + len(sin_empresa),
+        'total_empresas': len(empresas_list),
+        'empresas': empresas_list,
+        'sin_empresa': sin_empresa,
+    }

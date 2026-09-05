@@ -130,11 +130,23 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
     return result
 
 
-WELCOME_PROFESIONAL_CHAT = (
+WELCOME_PROFESIONAL_CHAT_PROMO = (
     '¡Hola {nombre}! 👋 Gracias por sumarte a ALaVuelta.\n\n'
-    'Estamos por salir al público y necesitamos profesionales como vos para lograrlo. '
-    'Para agradecerte por acompañarnos desde el inicio, te regalamos 3 meses gratis 🎁\n\n'
+    'Por ser de los primeros en registrarte, durante los primeros 3 meses '
+    'vas a tener una página web propia para tu negocio.\n\n'
+    'Podés configurarla desde Perfil → Landing page. '
+    'Si no la ves en tu perfil, escribinos desde Mensajes '
+    '(chat con el administrador) y te habilitamos el acceso.\n\n'
+    'Conocé más en {web_url}\n\n'
     '¡Bienvenido/a! Estamos para ayudarte en lo que necesites.'
+)
+
+WELCOME_PROFESIONAL_CHAT_STANDARD = (
+    '¡Hola {nombre}! 👋 Gracias por sumarte a ALaVuelta.\n\n'
+    'Ya podés empezar a recibir clientes, gestionar pedidos y hacer crecer '
+    'tu negocio desde la app.\n\n'
+    'Conocé más sobre ALaVuelta en {web_url}\n\n'
+    '¡Bienvenido/a! Cualquier duda, escribinos desde Mensajes.'
 )
 
 
@@ -149,7 +161,7 @@ def enviar_bienvenida_profesional(self, usuario_id):
     """
     Da la bienvenida a un profesional recién registrado:
     - Crea (o reutiliza) el chat de soporte con el admin y envía un mensaje.
-    - Envía el email de bienvenida con la promo de meses gratis.
+    - Envía el email de bienvenida (promo landing o estándar según empresas activas).
     """
     from django.db.models import Q
     from channels.layers import get_channel_layer
@@ -158,6 +170,11 @@ def enviar_bienvenida_profesional(self, usuario_id):
     from usuario.models import Usuario
     from mensajeria.models import Chat, Mensajes
     from notificaciones.email_service import send_welcome_professional_email
+    from empresas.promo import (
+        WELCOME_WEB_URL,
+        count_empresas_activas,
+        welcome_usa_promo_landing,
+    )
 
     try:
         usuario = Usuario.objects.get(id=usuario_id)
@@ -172,7 +189,21 @@ def enviar_bienvenida_profesional(self, usuario_id):
             raise self.retry(exc=exc)
         return {'error': f'Usuario {usuario_id} no encontrado'}
 
-    result = {'success': True, 'usuario_id': usuario_id, 'chat': None, 'email': None}
+    empresas_activas = count_empresas_activas()
+    # Alinear el mensaje con el flag seteado al crear la empresa (antes del insert).
+    empresa = usuario.empresas_administradas.first()
+    if empresa is not None:
+        usa_promo = bool(empresa.tiene_landing_page)
+    else:
+        usa_promo = welcome_usa_promo_landing(empresas_activas)
+    result = {
+        'success': True,
+        'usuario_id': usuario_id,
+        'promo_landing': usa_promo,
+        'empresas_activas': empresas_activas,
+        'chat': None,
+        'email': None,
+    }
 
     # --- Mensaje de chat desde la cuenta admin (mismo patrón que el chat de soporte) ---
     admin = Usuario.objects.filter(rol__nombre='admin').order_by('id').first()
@@ -187,7 +218,11 @@ def enviar_bienvenida_profesional(self, usuario_id):
         if not chat:
             chat = Chat.objects.create(sender=admin, receiver=usuario)
 
-        texto = WELCOME_PROFESIONAL_CHAT.format(nombre=usuario.nombre or '')
+        plantilla = WELCOME_PROFESIONAL_CHAT_PROMO if usa_promo else WELCOME_PROFESIONAL_CHAT_STANDARD
+        texto = plantilla.format(
+            nombre=usuario.nombre or '',
+            web_url=WELCOME_WEB_URL,
+        )
         mensaje = Mensajes.objects.create(
             texto=texto,
             sender=admin,
@@ -216,17 +251,25 @@ def enviar_bienvenida_profesional(self, usuario_id):
 
         result['chat'] = {'chat_id': chat.id, 'mensaje_id': mensaje.mensaje_id}
 
-    # --- Email de bienvenida con la promo ---
+    # --- Email de bienvenida ---
     if getattr(usuario, 'recibir_correos', True):
         nombre = f'{usuario.nombre or ""} {usuario.apellido or ""}'.strip()
         result['email'] = send_welcome_professional_email(
             to_email=usuario.correo,
             usuario_nombre=nombre,
+            promo_landing=usa_promo,
+            web_url=WELCOME_WEB_URL,
         )
     else:
         result['email'] = {'email_skipped': True, 'reason': 'recibir_correos=False'}
 
     return result
+
+
+# Compat: por si algún import antiguo referencia la constante anterior
+WELCOME_PROFESIONAL_CHAT = WELCOME_PROFESIONAL_CHAT_PROMO
+WELCOME_WEB_URL = 'https://alavueltaapp.pro'
+EMPRESAS_ACTIVAS_PROMO_THRESHOLD = 100
 
 
 @shared_task(name='notificaciones.notificar_usuarios_multiple')

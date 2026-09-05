@@ -5,3 +5,5 @@ class EmpresasConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'empresas'
 
+    def ready(self):
+        import empresas.signals  # noqa: F401

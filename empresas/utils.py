@@ -49,9 +49,16 @@ def crear_empresa(
     vende_servicios=True,
     vende_menu_diario=False,
     compartir_ubicacion_mapa=True,
+    tiene_landing_page=None,
 ):
     if not validar_nombre_empresa_unico(nombre):
         raise ValueError(f"Ya existe una empresa con el nombre '{nombre}'")
+
+    from empresas.promo import welcome_usa_promo_landing
+
+    if tiene_landing_page is None:
+        # Antes de crear: si aún hay cupo de promo (< 100 activas), habilitar landing.
+        tiene_landing_page = welcome_usa_promo_landing()
 
     empresa = Empresa.objects.create(
         nombre=nombre,
@@ -66,9 +73,10 @@ def crear_empresa(
         vende_servicios=vende_servicios,
         vende_menu_diario=vende_menu_diario,
         compartir_ubicacion_mapa=compartir_ubicacion_mapa,
+        tiene_landing_page=bool(tiene_landing_page),
         subdomain=generar_subdomain_unico(nombre),
     )
-    
+
     return empresa
 
 

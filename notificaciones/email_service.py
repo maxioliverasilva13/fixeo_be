@@ -336,41 +336,81 @@ def send_welcome_professional_email(
     to_email: str,
     usuario_nombre: str = '',
     meses_gratis: int = 3,
+    promo_landing: bool = True,
+    web_url: str = 'https://alavueltaapp.pro',
 ) -> dict[str, Any]:
     """
     Email de bienvenida para profesionales recién registrados.
-    Anuncia el lanzamiento y el regalo de meses gratis.
+
+    - promo_landing=True (< 100 empresas activas): anuncia página web propia por 3 meses.
+    - promo_landing=False: bienvenida estándar con link a la web.
     """
     if not to_email:
         return {'success': False, 'error': 'sin correo'}
 
     greeting = f'Hola {_escape(usuario_nombre)},' if usuario_nombre else 'Hola,'
-    content = EmailContent(
-        subject=f'¡Bienvenido/a a ALaVuelta! Te regalamos {meses_gratis} meses gratis 🎉',
-        badge='Bienvenida',
-        headline=f'¡Gracias por sumarte a ALaVuelta!',
-        body_html=f"""
+    web_href = _escape(web_url.rstrip('/'))
+
+    if promo_landing:
+        content = EmailContent(
+            subject=f'¡Bienvenido/a a ALaVuelta! Página web propia por {meses_gratis} meses 🎉',
+            badge='Bienvenida',
+            headline='¡Gracias por sumarte a ALaVuelta!',
+            body_html=f"""
           <p style="margin:0 0 12px;font-size:15px;color:{TEXT};line-height:1.5;">
             {greeting}
           </p>
           <p style="margin:0 0 16px;font-size:14px;color:{MUTED};line-height:1.65;">
-            Estamos a punto de salir al público y, para lograrlo, necesitamos contar con
-            profesionales como vos. Tu colaboración en esta etapa es clave para nosotros.
+            Por registrarte en esta etapa, durante los primeros
+            <strong>{meses_gratis} meses</strong> vas a tener una
+            <strong>página web propia</strong> para tu negocio.
           </p>
           <div style="background:{PRIMARY_LIGHTER};border:1px solid {BORDER};border-radius:14px;padding:16px 18px;margin:0 0 16px;">
-            <p style="margin:0;font-size:14px;color:{TEXT};line-height:1.65;">
-              Como forma de agradecerte por confiar y acompañarnos desde el inicio, queremos
-              regalarte <strong>{meses_gratis} meses de uso totalmente gratis</strong>.
+            <p style="margin:0 0 8px;font-size:14px;color:{TEXT};line-height:1.65;">
+              Configurala desde la app en <strong>Perfil → Landing page</strong>.
+            </p>
+            <p style="margin:0;font-size:14px;color:{MUTED};line-height:1.65;">
+              Si no ves esa opción, escribinos desde <strong>Mensajes</strong>
+              (chat con el administrador) y te ayudamos a habilitarla.
             </p>
           </div>
           <p style="margin:0;font-size:14px;color:{MUTED};line-height:1.65;">
-            Cualquier duda o sugerencia, estamos a tu disposición. ¡Nos entusiasma mucho
-            construir esto junto a vos!
+            Conocé más en
+            <a href="{web_href}" style="color:{PRIMARY};font-weight:600;text-decoration:none;">{web_href}</a>.
+            ¡Nos entusiasma construir esto junto a vos!
           </p>
         """,
-        cta_label='Abrir ALaVuelta',
-        cta_url=_frontend_url(),
-    )
+            cta_label='Visitar ALaVuelta',
+            cta_url=web_url.rstrip('/'),
+        )
+    else:
+        content = EmailContent(
+            subject='¡Bienvenido/a a ALaVuelta! 🎉',
+            badge='Bienvenida',
+            headline='¡Gracias por sumarte a ALaVuelta!',
+            body_html=f"""
+          <p style="margin:0 0 12px;font-size:15px;color:{TEXT};line-height:1.5;">
+            {greeting}
+          </p>
+          <p style="margin:0 0 16px;font-size:14px;color:{MUTED};line-height:1.65;">
+            Ya podés empezar a recibir clientes, gestionar pedidos y hacer crecer
+            tu negocio desde la app.
+          </p>
+          <div style="background:{PRIMARY_LIGHTER};border:1px solid {BORDER};border-radius:14px;padding:16px 18px;margin:0 0 16px;">
+            <p style="margin:0;font-size:14px;color:{TEXT};line-height:1.65;">
+              Conocé más sobre ALaVuelta en
+              <a href="{web_href}" style="color:{PRIMARY};font-weight:600;text-decoration:none;">{web_href}</a>.
+            </p>
+          </div>
+          <p style="margin:0;font-size:14px;color:{MUTED};line-height:1.65;">
+            Cualquier duda, escribinos desde <strong>Mensajes</strong> en la app.
+            ¡Bienvenido/a!
+          </p>
+        """,
+            cta_label='Visitar ALaVuelta',
+            cta_url=web_url.rstrip('/'),
+        )
+
     html = render_email_html(
         content,
         footer_text='Recibiste este correo porque creaste una cuenta de profesional en ALaVuelta.',

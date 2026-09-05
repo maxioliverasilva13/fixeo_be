@@ -4,7 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from usuario.jwt_views import SlidingTokenRefreshView
 from suscripciones.urls import planes_urlpatterns, suscripciones_urlpatterns
-from fixeo_project.admin_views import AdminEstadisticasView
+from fixeo_project.admin_views import AdminEstadisticasView, AdminEstadisticasTrabajosView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -35,6 +35,11 @@ urlpatterns = [
     path('api/survey/', include('survey.urls')),
     path('api/moderacion/', include('moderacion.urls')),
     path('api/admin/estadisticas/', AdminEstadisticasView.as_view(), name='admin-estadisticas'),
+    path(
+        'api/admin/estadisticas/trabajos/',
+        AdminEstadisticasTrabajosView.as_view(),
+        name='admin-estadisticas-trabajos',
+    ),
 ]
 
 
