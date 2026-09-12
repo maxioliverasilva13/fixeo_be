@@ -26,7 +26,7 @@ class LocalizacionViewSet(ViewSet):
         if not query:
             return Response({'error': 'El parámetro "q" es requerido'}, status=400)
 
-        mapbox_token = config('MAPBOX_ACCESS_TOKEN', default=None)
+        mapbox_token = config('MAPBOX_ACCESS_TOKEN')
 
         has_number = any(char.isdigit() for char in query)
         

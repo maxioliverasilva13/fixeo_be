@@ -385,10 +385,10 @@ FRONTEND_CONFIRMAR_TRABAJO_PATH = config('FRONTEND_CONFIRMAR_TRABAJO_PATH', defa
 # ---------------------------------------------------------------------------
 # DeepSeek (agente conversacional de WhatsApp) — API compatible con OpenAI
 # ---------------------------------------------------------------------------
-# Con default='' a propósito: si falta la variable, el agente falla al usarse,
-# pero el sitio entero NO se cae al importar settings (antes tiraba
-# UndefinedValueError y Daphne nunca llegaba a levantar → 502 en Railway).
-DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY', default='')
+# DEEPSEEK_API_KEY NO se define acá: es una API key y se resuelve directo del
+# entorno, sin default, en whatsapp/agent/llm.py::_get_client. Así una variable
+# faltante no rompe el import de settings (que dejaba a Daphne sin levantar y
+# devolvía 502 en TODAS las rutas) y la key sigue viniendo solo del entorno.
 DEEPSEEK_BASE_URL = config('DEEPSEEK_BASE_URL', default='https://api.deepseek.com')
 DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
 # Máximo de vueltas del loop de function-calling antes de forzar respuesta final.

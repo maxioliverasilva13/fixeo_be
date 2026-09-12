@@ -7,6 +7,7 @@ import json
 import logging
 
 from django.conf import settings
+from decouple import UndefinedValueError, config
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +24,12 @@ def _get_client():
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError('El paquete openai no está instalado') from exc
 
-    api_key = getattr(settings, 'DEEPSEEK_API_KEY', '')
-    if not api_key:
-        raise RuntimeError('DEEPSEEK_API_KEY no está configurada')
+    # Sin default: la key viene únicamente del entorno. Si falta, falla acá (al
+    # usar el agente) y no al importar settings, que dejaba a Daphne sin levantar.
+    try:
+        api_key = config('DEEPSEEK_API_KEY')
+    except UndefinedValueError as exc:
+        raise RuntimeError('DEEPSEEK_API_KEY no está configurada') from exc
 
     _client = OpenAI(
         api_key=api_key,
