@@ -116,6 +116,12 @@ else:
     print("✓ schema ensure: columnas críticas OK")
 EOF
 
+# Red de seguridad: tablas que una migración registrada nunca creó (caso
+# whatsapp.0002 → "relation whatsapp_conversacionwhatsapp does not exist").
+# El DDL lo genera Django (tipos, FK, unique), no SQL a mano.
+echo "🧩 Reparando tablas faltantes..."
+python manage.py ensure_schema --apply || echo "⚠️  ensure_schema no pudo ejecutarse"
+
 # Diagnóstico (solo lectura): si algo falta, queda en el log en vez de aparecer
 # como 500 "column ... does not exist" en cada request.
 echo "🔎 Verificando esquema contra el estado final de migraciones..."
