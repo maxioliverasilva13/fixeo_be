@@ -4,7 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from usuario.jwt_views import SlidingTokenRefreshView
 from suscripciones.urls import planes_urlpatterns, suscripciones_urlpatterns
-from fixeo_project.admin_views import AdminEstadisticasView
+from fixeo_project.admin_views import AdminEstadisticasView, AdminEstadisticasTrabajosView
 from whatsapp.chat_test_views import chat_test_page, chat_test_api
 
 
