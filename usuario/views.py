@@ -42,6 +42,7 @@ from firebase_admin import credentials, auth as firebase_auth
 from django.conf import settings
 from django.db import connection
 from django.db.models import Min
+from usuario.search_service import buscar_unificado, recomendados_cercanos
 
 def _precio_para_filtro(r: dict) -> float | None:
     if r.get('tipo') == 'producto':
@@ -1033,75 +1034,18 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         q = request.query_params.get("q", "").strip()
         if not q:
             return Response({"error": "Parámetro q es requerido"}, status=400)
-        
-        limit = int(request.query_params.get("limit", 50))
-        lim = max(1, min(limit, 100))
-        fetch_limit = min(500, max(lim * 10, 300))
 
-        profesion_id = request.query_params.get('profesion_id')
-        sort_by      = request.query_params.get('sort_by')
-        max_price    = request.query_params.get('max_price')
-        is_urgent    = request.query_params.get('is_urgent')
-
-        like_q  = f"%{q}%"
         user_id = request.user.id if request.user and request.user.is_authenticated else 0
-
-        with connection.cursor() as cursor:
-            cursor.execute(SQL_QUERY, [
-                # usuario: rank (nombre/apellido usuario + empresa si tiene + profesión)
-                q, q, q, q, q, q, q,
-                # usuario: where
-                user_id,
-                q, like_q, q, like_q,
-                q, like_q,
-                q, like_q, q, like_q, q, like_q,
-                q, like_q,
-                # producto: rank + where
-                q, q,
-                user_id,
-                q, q, q,
-                like_q, like_q, like_q,
-                fetch_limit,
-            ])
-            columns = [col[0] for col in cursor.description]
-            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-        for r in results:
-            if 'foto_url' in r:
-                r['foto_url'] = foto_usuario_api(r.get('foto_url'))
-            if 'rounded_foto_url' in r:
-                r['rounded_foto_url'] = foto_usuario_api(r.get('rounded_foto_url'))
-
-        usuario_ids = [r['id'] for r in results if r.get('tipo') == 'usuario']
-        all_owner_ids = list({r['id'] for r in results if r.get('id') is not None})
-        subs_map, efectivo_counts = ({}, {})
-        if all_owner_ids:
-            subs_map, efectivo_counts = _batch_visibility_data(all_owner_ids)
-
-        if usuario_ids:
-            usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
-            visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
-            results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
-
-        for r in results:
-            plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
-            r['plan_rank'] = plan_rank
-            r['plan_nombre'] = plan_nombre
-
-        if profesion_id:
-            pid = int(profesion_id)
-            results = [r for r in results if pid in (r.get('profesion_ids') or [])]
-
-        if max_price:
-            mp = float(max_price)
-            results = [r for r in results if _precio_para_filtro(r) is None or _precio_para_filtro(r) <= mp]
-
-        if is_urgent == 'true':
-            results = [r for r in results if r.get('es_urgente')]
-
-        _sort_search_results(results, sort_by)
-
-        return Response(results[:lim])
+        results = buscar_unificado(
+            q,
+            exclude_id=user_id,
+            profesion_id=request.query_params.get('profesion_id'),
+            max_price=request.query_params.get('max_price'),
+            is_urgent=request.query_params.get('is_urgent'),
+            sort_by=request.query_params.get('sort_by'),
+            limit=int(request.query_params.get("limit", 50)),
+        )
+        return Response(results)
 
     @action(detail=False, methods=['get'], url_path='recomendados')
     def recomendados(self, request):
@@ -1115,95 +1059,22 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             limit = int(request.query_params.get("limit", 10))
         except (TypeError, ValueError):
             limit = 10
-        lim = max(1, min(limit, 50))
-
         try:
             offset = int(request.query_params.get("offset", 0))
         except (TypeError, ValueError):
             offset = 0
-        offset = max(0, offset)
-
-        # Traemos un pool amplio (para que el orden por cercanía sea bueno) y paginamos
-        # en Python; el pool debe cubrir la ventana pedida (offset + lim).
-        fetch_limit = min(500, max(lim * 10, 300, offset + lim))
-
-        profesion_id = request.query_params.get('profesion_id')
-        tipo = (request.query_params.get('tipo') or 'profesional').strip().lower()
-        sql = SQL_REC_POR_TIPO.get(tipo, SQL_REC_PROFESIONALES)
-
-        def _to_float(v):
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                return None
-
-        mi_lat = _to_float(request.query_params.get('lat'))
-        mi_lng = _to_float(request.query_params.get('lng'))
 
         user_id = request.user.id if request.user and request.user.is_authenticated else 0
-
-        with connection.cursor() as cursor:
-            cursor.execute(sql, [user_id, fetch_limit])
-            columns = [col[0] for col in cursor.description]
-            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-        for r in results:
-            if 'foto_url' in r:
-                r['foto_url'] = foto_usuario_api(r.get('foto_url'))
-            if 'rounded_foto_url' in r:
-                r['rounded_foto_url'] = foto_usuario_api(r.get('rounded_foto_url'))
-
-        usuario_ids = [r['id'] for r in results if r.get('tipo') == 'usuario']
-        all_owner_ids = list({r['id'] for r in results if r.get('id') is not None})
-        subs_map, efectivo_counts = ({}, {})
-        if all_owner_ids:
-            subs_map, efectivo_counts = _batch_visibility_data(all_owner_ids)
-
-        # Misma elegibilidad que /search: sólo profesionales con medio de pago válido.
-        if usuario_ids:
-            usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
-            visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
-            results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
-
-        # Servicios: sólo de usuarios con suscripción activa (subs_map = suscripción vigente,
-        # cancelada=False y expiracion > now según _batch_visibility_data).
-        results = [
-            r for r in results
-            if r.get('tipo') != 'servicio' or subs_map.get(r.get('id')) is not None
-        ]
-
-        for r in results:
-            plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
-            r['plan_rank'] = plan_rank
-            r['plan_nombre'] = plan_nombre
-
-        if profesion_id:
-            pid = int(profesion_id)
-            results = [r for r in results if pid in (r.get('profesion_ids') or [])]
-
-        # Orden final: (1) mejor plan, (2) más cercano si tenemos lat/lng, si no, mejor rating.
-        if mi_lat is not None and mi_lng is not None:
-            for r in results:
-                lat, lng = r.get('latitud'), r.get('longitud')
-                if lat is not None and lng is not None:
-                    r['_dist'] = calcular_distancia_km(mi_lat, mi_lng, float(lat), float(lng))
-                else:
-                    r['_dist'] = None
-            results.sort(key=lambda x: (
-                -(int(x.get('plan_rank') or 0)),
-                x.get('_dist') is None,
-                x.get('_dist') if x.get('_dist') is not None else 0.0,
-            ))
-            for r in results:
-                r.pop('_dist', None)
-        else:
-            results.sort(key=lambda x: (
-                -(int(x.get('plan_rank') or 0)),
-                -float(x.get('rating') or 0),
-            ))
-
-        # Paginación: se devuelve la ventana [offset, offset+lim) del pool ya ordenado.
-        return Response(results[offset:offset + lim])
+        results = recomendados_cercanos(
+            tipo=request.query_params.get('tipo') or 'profesional',
+            exclude_id=user_id,
+            profesion_id=request.query_params.get('profesion_id'),
+            limit=limit,
+            offset=offset,
+            lat=request.query_params.get('lat'),
+            lng=request.query_params.get('lng'),
+        )
+        return Response(results)
 
     @action(detail=True, methods=['get'], url_path='from-me')
     def from_me(self, request, pk=None):

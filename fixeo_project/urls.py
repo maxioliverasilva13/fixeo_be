@@ -5,9 +5,14 @@ from django.conf.urls.static import static
 from usuario.jwt_views import SlidingTokenRefreshView
 from suscripciones.urls import planes_urlpatterns, suscripciones_urlpatterns
 from fixeo_project.admin_views import AdminEstadisticasView
+from whatsapp.chat_test_views import chat_test_page, chat_test_api
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # TEMPORAL: chat web para probar el agente de DeepSeek (fuera de /api/ a
+    # propósito, para que el StandardizedResponseMiddleware no envuelva el JSON).
+    path('chat-test/', chat_test_page, name='chat-test'),
+    path('chat-test/mensaje/', chat_test_api, name='chat-test-mensaje'),
     path('api/usuarios/', include('usuario.urls')),
     path('api/roles/', include('rol.urls')),
     path('api/profesiones/', include('profesion.urls')),

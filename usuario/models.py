@@ -59,6 +59,10 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
         default=True,
         help_text='Si es True, el usuario recibe emails de notificación.',
     )
+    activar_agente = models.BooleanField(
+        default=False,
+        help_text='Si es True, el agente de WhatsApp responde automáticamente los mensajes entrantes de este profesional.',
+    )
 
     objects = UsuarioManager()
 

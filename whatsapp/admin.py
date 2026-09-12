@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import WhatsAppMessage
+from .models import ConversacionWhatsApp, WhatsAppMessage
 
 
 @admin.register(WhatsAppMessage)
@@ -9,3 +9,11 @@ class WhatsAppMessageAdmin(admin.ModelAdmin):
     list_filter = ('direccion', 'tipo', 'estado')
     search_fields = ('wa_id', 'wa_message_id', 'texto')
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(ConversacionWhatsApp)
+class ConversacionWhatsAppAdmin(admin.ModelAdmin):
+    list_display = ('wa_id', 'usuario', 'flujo', 'estado', 'ciudad', 'ultima_actividad')
+    list_filter = ('flujo', 'estado')
+    search_fields = ('wa_id', 'ciudad')
+    readonly_fields = ('created_at', 'ultima_actividad')

@@ -1,7 +1,103 @@
 from disponibilidad.models import Disponibilidad, Tipo
 from datetime import datetime, timedelta
+from calendar import monthrange
 from django.utils.timezone import make_aware
+from django.utils import timezone
 from empresas.models import Horarios
+
+
+def _bloques_del_dia(usuario, inicio_dia, fin_dia, inicio_empresa, fin_empresa):
+    """Bloques 'disponible' explícitos del día; si no hay, todo el horario de empresa.
+
+    Semántica del producto: si NO hay filas de disponibilidad para el día, el
+    profesional está libre en todo el horario de su empresa.
+    """
+    bloques_qs = Disponibilidad.objects.filter(
+        usuario=usuario, tipo='disponible',
+        fecha_inicio__lt=fin_dia, fecha_fin__gt=inicio_dia,
+    )
+    if bloques_qs.exists():
+        return list(bloques_qs)
+    return [{'fecha_inicio': inicio_empresa, 'fecha_fin': fin_empresa}]
+
+
+def horas_disponibles(usuario, fecha, duracion_min, step_minutes=15):
+    """Slots [{hora, disponible}] para un día ('YYYY-MM-DD').
+
+    Horario de empresa menos conflictos (OCUPADO/BLOQUEADO/trabajos aceptados).
+    Misma lógica que el endpoint horas_disponibles_dia (que el frontend consume).
+    """
+    inicio_dia = make_aware(datetime.fromisoformat(f"{fecha}T00:00:00"))
+    fin_dia = make_aware(datetime.fromisoformat(f"{fecha}T23:59:59"))
+    now = timezone.now()
+    if fin_dia < now:
+        return []
+
+    rango_empresa = rango_horario_empresa(usuario, inicio_dia)
+    if not rango_empresa:
+        return []
+    inicio_empresa, fin_empresa = rango_empresa
+
+    bloques = _bloques_del_dia(usuario, inicio_dia, fin_dia, inicio_empresa, fin_empresa)
+    slots = []
+    for bloque in bloques:
+        bloque_inicio = bloque.fecha_inicio if hasattr(bloque, 'fecha_inicio') else bloque['fecha_inicio']
+        bloque_fin = bloque.fecha_fin if hasattr(bloque, 'fecha_fin') else bloque['fecha_fin']
+
+        if inicio_dia.date() == now.date():
+            current = max(bloque_inicio, inicio_empresa, now)
+        else:
+            current = max(bloque_inicio, inicio_empresa)
+        fin_real = min(bloque_fin, fin_empresa)
+
+        while True:
+            fin_slot = current + timedelta(minutes=duracion_min)
+            if fin_slot > fin_real:
+                break
+            disponible = not hay_conflicto(usuario_id=usuario.id, inicio=current, fin=fin_slot)
+            slots.append({
+                'hora': timezone.localtime(current).strftime('%H:%M'),
+                'disponible': disponible,
+            })
+            current += timedelta(minutes=step_minutes)
+    return slots
+
+
+def dias_disponibles(usuario, year, month, duracion_min):
+    """Lista de días del mes con al menos un hueco para un servicio de `duracion_min`."""
+    _, last_day = monthrange(year, month)
+    dias = []
+    now = timezone.now()
+
+    for day in range(1, last_day + 1):
+        inicio_dia = make_aware(datetime(year, month, day, 0, 0))
+        fin_dia = make_aware(datetime(year, month, day, 23, 59, 59))
+        if fin_dia < now:
+            continue
+
+        rango_empresa = rango_horario_empresa(usuario, inicio_dia)
+        if not rango_empresa:
+            continue
+        inicio_empresa, fin_empresa = rango_empresa
+
+        bloques = _bloques_del_dia(usuario, inicio_dia, fin_dia, inicio_empresa, fin_empresa)
+        for bloque in bloques:
+            bloque_inicio = bloque.fecha_inicio if hasattr(bloque, 'fecha_inicio') else bloque['fecha_inicio']
+            bloque_fin = bloque.fecha_fin if hasattr(bloque, 'fecha_fin') else bloque['fecha_fin']
+
+            if inicio_dia.date() == now.date():
+                inicio_real = max(bloque_inicio, inicio_empresa, now)
+            else:
+                inicio_real = max(bloque_inicio, inicio_empresa)
+            fin_real = min(bloque_fin, fin_empresa)
+            if inicio_real >= fin_real:
+                continue
+
+            minutos_libres = int((fin_real - inicio_real).total_seconds() / 60)
+            if minutos_libres >= duracion_min:
+                dias.append(day)
+                break
+    return dias
 
 
 def hay_conflicto(usuario_id, inicio, fin):

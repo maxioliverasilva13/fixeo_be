@@ -85,7 +85,7 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
                   'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana', 'zonas_no_trabajo',
                   'subscripcion_activa', 'rating','cant_calif', 'rating_cliente', 'cant_calif_cliente',
                   'es_visible_en_mapa', 'advertencias_mapa',
-                  'recibir_notificaciones', 'recibir_correos']
+                  'recibir_notificaciones', 'recibir_correos', 'activar_agente']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def _puede_ver_rating_cliente(self):
@@ -676,8 +676,9 @@ class UpdateUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             'defaultMessageReservation',
             'recibir_notificaciones',
             'recibir_correos',
+            'activar_agente',
         ]
-    
+
     def validate_rango_mapa_km(self, value):
         if (value is None or value == ''):
             return None

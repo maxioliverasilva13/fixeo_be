@@ -9,6 +9,25 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task
+def procesar_mensaje_entrante_task(conversacion_id, texto):
+    """Corre el agente para un mensaje entrante y envía la respuesta por WhatsApp."""
+    from .models import ConversacionWhatsApp
+    from .agent.orchestrator import responder_mensaje
+
+    conv = ConversacionWhatsApp.objects.filter(id=conversacion_id).select_related('usuario').first()
+    if not conv:
+        logger.warning("procesar_mensaje_entrante_task: conversacion %s no existe", conversacion_id)
+        return
+
+    logger.info("Agente WhatsApp procesando conv=%s wa_id=%s", conv.id, conv.wa_id)
+    respuesta = responder_mensaje(conv, texto)
+    try:
+        services.enviar_mensaje_texto(conv.wa_id, respuesta, usuario=conv.usuario)
+    except Exception:
+        logger.exception("Error enviando respuesta del agente a %s", conv.wa_id)
+
+
+@shared_task
 def enviar_mensaje_whatsapp_task(usuario_id, body, profesional_id=None):
     logger.info("enviar_mensaje_whatsapp_task: iniciado para usuario_id=%s", usuario_id)
 

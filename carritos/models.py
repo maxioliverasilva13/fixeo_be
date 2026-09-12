@@ -108,6 +108,9 @@ class Orden(BaseModel):
     total = models.DecimalField(max_digits=10, decimal_places=2)
     comision_plataforma = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     notas = models.TextField(blank=True, default='')
+    # Teléfono del cliente cuando la orden es de un invitado por WhatsApp (sin cuenta propia),
+    # para poder enviarle recordatorios.
+    phoneNumberInvitedUser = models.CharField(max_length=32, blank=True, default='')
     fecha_entrega = models.DateTimeField(null=True, blank=True)
     motivo_cancelacion = models.TextField(blank=True, default='')
     pago_status = models.CharField(
