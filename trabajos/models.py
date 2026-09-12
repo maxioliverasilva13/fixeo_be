@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from disponibilidad.models import Disponibilidad
 from localizacion.models import Localizacion
@@ -31,7 +33,17 @@ class Trabajo(BaseModel):
     descripcion = models.TextField()
     precio_final = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     comentario_cliente = models.TextField(blank=True, null=True)
+    # Teléfono del cliente cuando la reserva es de un invitado por WhatsApp (sin cuenta propia),
+    # para poder enviarle recordatorios.
+    phoneNumberInvitedUser = models.CharField(max_length=32, blank=True, default='')
     cancelado_cliente = models.BooleanField(default=False)
+    # Recordatorios de WhatsApp al cliente (12 h y 1 h antes). Guardan cuándo se
+    # envió cada tramo para no reenviar (idempotencia del daemon de recordatorios).
+    recordatorio_12h_enviado_at = models.DateTimeField(null=True, blank=True)
+    recordatorio_1h_enviado_at = models.DateTimeField(null=True, blank=True)
+    # Token opaco para que el profesional confirme/rechace el trabajo desde una
+    # web (link del template de WhatsApp), sin necesidad de estar autenticado.
+    token_confirmacion = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='trabajos_solicitados')
     profesional = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos_asignados')
     disponibilidad = models.ForeignKey(Disponibilidad, on_delete=models.SET_NULL, null=True, blank=True, related_name='trabajos')

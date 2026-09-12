@@ -169,27 +169,15 @@ def es_elegible_en_busqueda(usuario, subs_map: dict, efectivo_counts: dict) -> b
     return False
 
 
-def es_visible_en_mapa(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
+def es_visible_en_mapa(usuario, subs_map: dict = None, efectivo_counts: dict = None) -> bool:
+    # Visible en el mapa si administra una empresa que comparte su ubicación.
+    # (El requisito de MP vinculado / suscripción activa quedó deprecado; la
+    # suscripción solo se usa para PRIORIZAR el orden, no para ocultar.)
     emps = getattr(usuario, '_prefetched_objects_cache', {}).get('empresas_administradas')
     empresa = emps[0] if emps else usuario.empresas_administradas.first()
     if not empresa:
         return False
-
-    if not empresa.compartir_ubicacion_mapa:
-        return False
-
-    if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
-        return True
-
-    if empresa.acepta_efectivo:
-        sub = subs_map.get(usuario.id)
-        if sub:
-            usados = efectivo_counts.get(usuario.id, 0)
-            jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
-            if jobs_restantes > 0:
-                return True
-
-    return False
+    return bool(empresa.compartir_ubicacion_mapa)
 
 
 def _prefetch_empresas():

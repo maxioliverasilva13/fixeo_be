@@ -1,0 +1,7 @@
+# Override local (no commitear si no querés): mueve el puerto host de Postgres a
+# 5433 para no chocar con otro contenedor que ya usa el 5432 del host.
+# El backend igual habla con la DB por la red interna de compose (DB_HOST=db).
+services:
+  db:
+    ports: !override
+      - "5433:5432"
