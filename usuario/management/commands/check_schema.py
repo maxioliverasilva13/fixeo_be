@@ -26,8 +26,10 @@ class Command(BaseCommand):
         state = loader.project_state()
 
         # (tabla, columna o None, origen) tal como lo define el estado de migraciones.
+        # include_swapped=False: el modelo swappable descartado (auth.User cuando
+        # AUTH_USER_MODEL=usuario.Usuario) nunca se crea en la base, no es drift.
         expected = []
-        for model in state.apps.get_models(include_auto_created=True, include_swapped=True):
+        for model in state.apps.get_models(include_auto_created=True):
             meta = model._meta
             if meta.proxy or not meta.managed:
                 continue
