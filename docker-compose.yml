@@ -27,7 +27,9 @@ services:
 
   web:
     build: .
-    command: python -m watchfiles --filter python "daphne -b 0.0.0.0 -p 8000 fixeo_project.asgi:application" .
+    # Aplica migraciones antes de levantar: sin esto, un pull con migraciones
+    # nuevas deja la DB atrás y la API responde 500 ("column ... does not exist").
+    command: sh -c 'python manage.py migrate --noinput && exec python -m watchfiles --filter python "daphne -b 0.0.0.0 -p 8000 fixeo_project.asgi:application" .'
     volumes:
       - .:/app
     ports:

@@ -183,6 +183,23 @@ def migration_schema_matches(loader: MigrationLoader, app: str, name: str, cur) 
     return saw_schema_op
 
 
+def migration_schema_status(loader: MigrationLoader, app: str, name: str, cur):
+    """(todas_satisfechas, cantidad_de_ops_verificables) para una migración."""
+    nodes = loader.graph.forwards_plan((app, name))
+    state_before = loader.project_state(nodes[:-1], at_end=True) if len(nodes) > 1 else loader.project_state([], at_end=True)
+    migration = loader.get_migration(app, name)
+
+    checkable = 0
+    for op in migration.operations:
+        result = operation_satisfied(op, app, state_before, cur)
+        if result is False:
+            return False, checkable
+        if result is True:
+            checkable += 1
+
+    return True, checkable
+
+
 def fix_inconsistent_history(stdout, style) -> int:
     """Registra dependencias faltantes cuando una migración aplicada las requiere."""
     fixed = 0
@@ -275,6 +292,16 @@ class Command(BaseCommand):
             help="Registra una migración como aplicada vía SQL (sin checks de Django).",
         )
         parser.add_argument(
+            "--record-if-satisfied",
+            nargs=2,
+            metavar=("APP", "MIGRATION"),
+            help=(
+                "Registra la migración sólo si TODAS sus operaciones de esquema ya "
+                "existen en la base. Sale con código 1 si el esquema no coincide "
+                "(caso AddField cuyo column no existe: registrarla dejaría la base rota)."
+            ),
+        )
+        parser.add_argument(
             "--fix-history",
             action="store_true",
             help="Registra dependencias faltantes detectadas por InconsistentMigrationHistory.",
@@ -291,6 +318,38 @@ class Command(BaseCommand):
             app, name = record
             if record_migration(app, name):
                 self.stdout.write(self.style.SUCCESS(f"✓ recorded {app}.{name}"))
+            else:
+                self.stdout.write(f"  {app}.{name} already recorded")
+            return
+
+        record_if_satisfied = options.get("record_if_satisfied")
+        if record_if_satisfied:
+            app, name = record_if_satisfied
+            loader = MigrationLoader(connection)
+            if (app, name) not in loader.disk_migrations:
+                self.stderr.write(
+                    self.style.ERROR(f"✗ {app}.{name} no existe en disco; no se registra")
+                )
+                raise SystemExit(1)
+            with connection.cursor() as cur:
+                satisfied, checkable = migration_schema_status(loader, app, name, cur)
+            if not satisfied:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"✗ {app}.{name} NO se registra: su esquema todavía no existe "
+                        "(registrarla dejaría la base inconsistente)"
+                    )
+                )
+                raise SystemExit(1)
+            if checkable == 0:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"  {app}.{name} no tiene operaciones de esquema verificables; "
+                        "se registra como antes"
+                    )
+                )
+            if record_migration(app, name):
+                self.stdout.write(self.style.SUCCESS(f"✓ recorded {app}.{name} (schema ok)"))
             else:
                 self.stdout.write(f"  {app}.{name} already recorded")
             return

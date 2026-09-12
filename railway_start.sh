@@ -55,8 +55,11 @@ while [ "$round" -lt "$max_rounds" ]; do
     if [ -n "$failing" ]; then
       app="${failing%%.*}"
       mig="${failing#*.}"
-      echo "    → Esquema ya alineado: registrando ${app}.${mig} en django_migrations..."
-      python manage.py reconcile_migrations --record "$app" "$mig" || break
+      # Sólo se registra si el esquema de esa migración YA existe.
+      # Un "column ... does not exist" de un AddField NO se puede registrar:
+      # quedaba como aplicada sin crear la columna y la API devolvía 500 para siempre.
+      echo "    → Verificando si ${app}.${mig} ya está aplicada en el esquema..."
+      python manage.py reconcile_migrations --record-if-satisfied "$app" "$mig" || break
       continue
     fi
   fi
@@ -68,22 +71,55 @@ if [ "$migrate_ok" -ne 1 ]; then
   echo "⚠️  migrate sigue fallando; continúo con schema ensure + seeds"
 fi
 
-# Safety net: columnas críticas que el código ya referencia.
+# Safety net: columnas críticas que el código ya referencia y que pueden faltar
+# si `migrate` quedó a medias (migración registrada sin ejecutar su DDL).
+# Los ALTER son idempotentes (ADD COLUMN IF NOT EXISTS).
 python - <<'EOF'
 import os
 import psycopg2
 
+# (tabla, columna, definición SQL)
+EXPECTED_COLUMNS = [
+    ("empresa", "tiene_landing_page", "boolean NOT NULL DEFAULT false"),
+    ("usuario", "activar_agente", "boolean NOT NULL DEFAULT false"),
+    ("orden", '"phoneNumberInvitedUser"', "varchar(32) NOT NULL DEFAULT ''"),
+    ("trabajo", '"phoneNumberInvitedUser"', "varchar(32) NOT NULL DEFAULT ''"),
+]
+
 conn = psycopg2.connect(os.environ["DATABASE_URL"])
 conn.autocommit = True
 cur = conn.cursor()
-cur.execute("""
-ALTER TABLE empresa
-    ADD COLUMN IF NOT EXISTS tiene_landing_page boolean NOT NULL DEFAULT false;
-""")
+
+repaired = []
+for table, column, ddl in EXPECTED_COLUMNS:
+    cur.execute(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+        """,
+        [table, column.strip('"')],
+    )
+    if cur.fetchone():
+        continue
+    try:
+        cur.execute(f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS {column} {ddl};')
+        repaired.append(f"{table}.{column}")
+    except Exception as exc:
+        print(f"  ✗ no se pudo crear {table}.{column}: {exc}")
+
 cur.close()
 conn.close()
-print("✓ schema ensure: empresa.tiene_landing_page")
+
+if repaired:
+    print(f"✓ schema ensure: reparadas columnas {', '.join(repaired)}")
+else:
+    print("✓ schema ensure: columnas críticas OK")
 EOF
+
+# Diagnóstico (solo lectura): si algo falta, queda en el log en vez de aparecer
+# como 500 "column ... does not exist" en cada request.
+echo "🔎 Verificando esquema contra el estado final de migraciones..."
+python manage.py check_schema || echo "⚠️  check_schema no pudo ejecutarse"
 
 echo "📦 Recolectando archivos estáticos..."
 python manage.py collectstatic --noinput
