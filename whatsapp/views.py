@@ -55,6 +55,13 @@ def whatsapp_webhook(request):
             return HttpResponse(challenge, content_type='text/plain', status=200)
         return HttpResponse('Verification failed', status=403)
 
+    # 360dialog no firma los requests (no manda X-Hub-Signature-256). Si se
+    # configuró un token de URL, se exige en el query string como capa de protección.
+    url_token = settings.WHATSAPP_WEBHOOK_URL_TOKEN
+    if url_token and request.query_params.get('token') != url_token:
+        logger.warning("Webhook WhatsApp con token de URL inválido rechazado")
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
     if not _verificar_firma_meta(request):
         logger.warning("Webhook WhatsApp con firma inválida rechazado")
         return Response(status=status.HTTP_403_FORBIDDEN)

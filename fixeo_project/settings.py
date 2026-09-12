@@ -270,10 +270,19 @@ CELERY_FINALIZAR_TRABAJOS_INTERVAL_SECONDS = config(
     default=60,
     cast=float,
 )
+CELERY_RECORDATORIO_RESERVA_INTERVAL_SECONDS = config(
+    'CELERY_RECORDATORIO_RESERVA_INTERVAL_SECONDS',
+    default=300,
+    cast=float,
+)
 CELERY_BEAT_SCHEDULE = {
     'finalizar-trabajos-vencidos': {
         'task': 'trabajos.finalizar_trabajos_vencidos',
         'schedule': CELERY_FINALIZAR_TRABAJOS_INTERVAL_SECONDS,
+    },
+    'recordatorios-reservas': {
+        'task': 'trabajos.enviar_recordatorios_reservas',
+        'schedule': CELERY_RECORDATORIO_RESERVA_INTERVAL_SECONDS,
     },
 }
 
@@ -327,17 +336,58 @@ APP_STORE_API_KEY = config('APP_STORE_API_KEY', default='')
 
 
 # ---------------------------------------------------------------------------
-# WhatsApp (Meta Cloud API)
+# WhatsApp (proveedor: '360dialog' o 'meta')
 # ---------------------------------------------------------------------------
+# '360dialog' usa el endpoint Cloud API hosteado por 360dialog (waba-v2.360dialog.io)
+# con el header D360-API-KEY. 'meta' usa la Graph API directa de Meta (Bearer token).
+WHATSAPP_PROVIDER = config('WHATSAPP_PROVIDER', default='meta')
+
+# --- 360dialog Cloud API ---
+WHATSAPP_360_API_KEY = config('WHATSAPP_360_API_KEY', default='')
+WHATSAPP_360_BASE_URL = config('WHATSAPP_360_BASE_URL', default='https://waba-v2.360dialog.io')
+
+# --- Meta Cloud API (Graph) ---
 WHATSAPP_ACCESS_TOKEN = config('WHATSAPP_ACCESS_TOKEN', default='')
 WHATSAPP_PHONE_NUMBER_ID = config('WHATSAPP_PHONE_NUMBER_ID', default='')
 WHATSAPP_BUSINESS_ACCOUNT_ID = config('WHATSAPP_BUSINESS_ACCOUNT_ID', default='')
 WHATSAPP_API_VERSION = config('WHATSAPP_API_VERSION', default='v20.0')
 WHATSAPP_GRAPH_BASE_URL = config('WHATSAPP_GRAPH_BASE_URL', default='https://graph.facebook.com')
+
+# Token del handshake GET del webhook (solo lo usa Meta; 360dialog registra el
+# webhook por API y no hace verificación GET).
 WHATSAPP_WEBHOOK_TOKEN = config('WHATSAPP_WEBHOOK_TOKEN', default='')
+# App Secret para validar la firma X-Hub-Signature-256 (solo Meta la envía).
 WHATSAPP_APP_SECRET = config('WHATSAPP_APP_SECRET', default='')
+# Token opcional en la ruta del webhook para proteger el endpoint con 360dialog
+# (que no firma los requests). Si se setea, el webhook exige ?token=... en la URL.
+WHATSAPP_WEBHOOK_URL_TOKEN = config('WHATSAPP_WEBHOOK_URL_TOKEN', default='')
 # Usuario.telefono se guarda sin código de país (el matching de mensajes entrantes
 # usa los últimos 8 dígitos). Al enviar, si el número no trae código de país se le
 # antepone este default.
 WHATSAPP_DEFAULT_COUNTRY_CODE = config('WHATSAPP_DEFAULT_COUNTRY_CODE', default='598')
+
+# Si es False, el webhook solo loguea/auto-responde y NO ejecuta el agente IA.
+WHATSAPP_AGENTE_ACTIVO = config('WHATSAPP_AGENTE_ACTIVO', default=True, cast=bool)
+
+# --- Templates de WhatsApp (mensajes proactivos, deben estar aprobados en Meta) ---
+# Idioma de los templates (debe coincidir EXACTO con el aprobado en Meta).
+WHATSAPP_TEMPLATE_LANG = config('WHATSAPP_TEMPLATE_LANG', default='es')
+# Recordatorio de reserva al cliente (12 h / 1 h antes).
+WHATSAPP_TEMPLATE_RECORDATORIO = config('WHATSAPP_TEMPLATE_RECORDATORIO', default='recordatorio_reserva')
+# Aviso al profesional al crearse una reserva (con botón para confirmar/rechazar).
+WHATSAPP_TEMPLATE_CONFIRMACION_TRABAJO = config(
+    'WHATSAPP_TEMPLATE_CONFIRMACION_TRABAJO', default='confirmacion_trabajo_profesional'
+)
+# Ruta del frontend a la que apunta el botón del template (se le agrega /<token>).
+FRONTEND_CONFIRMAR_TRABAJO_PATH = config('FRONTEND_CONFIRMAR_TRABAJO_PATH', default='/confirmar-trabajo')
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek (agente conversacional de WhatsApp) — API compatible con OpenAI
+# ---------------------------------------------------------------------------
+DEEPSEEK_API_KEY = config('DEEPSEEK_API_KEY')
+DEEPSEEK_BASE_URL = config('DEEPSEEK_BASE_URL', default='https://api.deepseek.com')
+DEEPSEEK_MODEL = config('DEEPSEEK_MODEL', default='deepseek-chat')
+# Máximo de vueltas del loop de function-calling antes de forzar respuesta final.
+DEEPSEEK_MAX_TOOL_ROUNDS = config('DEEPSEEK_MAX_TOOL_ROUNDS', default=6, cast=int)
 

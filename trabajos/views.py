@@ -20,7 +20,8 @@ from usuario_profesion.models import UsuarioProfesion
 from .models import Calificacion, CalificacionDireccion, OfertaTrabajo, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
 from .whatsapp_helpers import mensaje_whatsapp_trabajo
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone as django_timezone
@@ -32,6 +33,175 @@ from asgiref.sync import async_to_sync
 from mensajeria.models import Recurso, Mensajes
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Aprobación / rechazo de un trabajo (efectos compartidos entre la acción
+# autenticada del profesional y el link por token del template de WhatsApp).
+# ---------------------------------------------------------------------------
+def aplicar_aprobacion_trabajo(trabajo):
+    """status→aceptado, notifica al cliente (push + WhatsApp), crea chat + mensaje
+    default del profesional y emite por websocket. El caller valida el estado."""
+    profesional = trabajo.profesional
+    trabajo.status = 'aceptado'
+    trabajo.save()
+
+    notificar_usuario.delay(
+        usuario_id=trabajo.usuario.id,
+        titulo="¡Trabajo aceptado!",
+        mensaje=f"{profesional.nombre} aceptó tu solicitud de trabajo",
+        data={
+            'deep_link': f'/trabajos/{trabajo.id}',
+            'entity_id': trabajo.id,
+            'tipo': 'trabajo_aceptado'
+        }
+    )
+
+    enviar_mensaje_whatsapp_task.delay(
+        usuario_id=trabajo.usuario.id,
+        body=mensaje_whatsapp_trabajo(
+            trabajo,
+            encabezado=f"Tu trabajo con *{profesional.nombre} {profesional.apellido}* *ha sido aceptado*.",
+        ),
+        profesional_id=trabajo.profesional_id,
+    )
+
+    chat = Chat.objects.filter(
+        Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
+        Q(sender=trabajo.profesional, receiver=trabajo.usuario)
+    ).first()
+
+    if not chat:
+        chat = Chat.objects.create(
+            sender=trabajo.profesional,
+            receiver=trabajo.usuario,
+            trabajo=trabajo
+        )
+
+    mensaje = Mensajes.objects.create(
+        texto=trabajo.profesional.defaultMessageReservation,
+        sender=trabajo.profesional,
+        chat=chat,
+        trabajo=trabajo
+    )
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(f'user_{trabajo.usuario.id}', {
+        'type': 'chat_message',
+        'message': mensaje.texto,
+        'user_id': trabajo.profesional.id,
+        'leido': False,
+        'chat_id': chat.id,
+        'trabajo': TrabajoDetailSerializer(trabajo).data,
+        'chat': {
+            'id': chat.id,
+            'sender_id': chat.sender.id,
+            'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+            'receiver_id': chat.receiver.id,
+            'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+            'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+            'ultimo_mensaje_at': mensaje.created_at.isoformat(),
+        }
+    })
+    return trabajo
+
+
+def aplicar_rechazo_trabajo(trabajo, motivo=None):
+    """status→cancelado, libera la disponibilidad y notifica al cliente."""
+    profesional = trabajo.profesional
+    trabajo.status = 'cancelado'
+    if motivo:
+        trabajo.comentario_cliente = f"Rechazado por profesional: {motivo}"
+    trabajo.save()
+
+    if trabajo.disponibilidad:
+        trabajo.disponibilidad.delete()
+
+    notificar_usuario.delay(
+        usuario_id=trabajo.usuario.id,
+        titulo="¡Trabajo rechazado!",
+        mensaje=f"{profesional.nombre} ha rechazado tu solicitud de trabajo",
+        data={
+            'deep_link': f'/trabajos/{trabajo.id}',
+            'entity_id': trabajo.id,
+            'tipo': 'trabajo_rechazado'
+        }
+    )
+
+    enviar_mensaje_whatsapp_task.delay(
+        usuario_id=trabajo.usuario.id,
+        body=mensaje_whatsapp_trabajo(
+            trabajo,
+            encabezado=f"Tu trabajo con *{profesional.nombre} {profesional.apellido}* *fue rechazado*.",
+            motivo=motivo or None,
+        ),
+        profesional_id=trabajo.profesional_id,
+    )
+    return trabajo
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def confirmar_trabajo_por_token(request, token):
+    """Link del template de WhatsApp al profesional. GET devuelve el detalle para
+    mostrarlo en la web; POST confirma (aprueba) el trabajo. Idempotente."""
+    trabajo = get_object_or_404(
+        Trabajo.objects.select_related('usuario', 'profesional', 'disponibilidad'),
+        token_confirmacion=token,
+    )
+
+    if request.method == 'GET':
+        return Response(TrabajoDetailSerializer(trabajo).data, status=status.HTTP_200_OK)
+
+    if trabajo.status == 'aceptado':
+        return Response(
+            {'message': 'El trabajo ya estaba confirmado', 'status': trabajo.status,
+             'trabajo': TrabajoDetailSerializer(trabajo).data},
+            status=status.HTTP_200_OK,
+        )
+    if trabajo.status != 'pendiente':
+        return Response(
+            {'error': f'No se puede confirmar un trabajo en estado "{trabajo.status}"',
+             'status': trabajo.status},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    aplicar_aprobacion_trabajo(trabajo)
+    return Response(
+        {'message': 'Trabajo confirmado', 'status': trabajo.status,
+         'trabajo': TrabajoDetailSerializer(trabajo).data},
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def rechazar_trabajo_por_token(request, token):
+    """Rechaza (cancela) el trabajo desde el link del template. Idempotente."""
+    trabajo = get_object_or_404(
+        Trabajo.objects.select_related('usuario', 'profesional', 'disponibilidad'),
+        token_confirmacion=token,
+    )
+
+    if trabajo.status == 'cancelado':
+        return Response(
+            {'message': 'El trabajo ya estaba rechazado', 'status': trabajo.status},
+            status=status.HTTP_200_OK,
+        )
+    if trabajo.status != 'pendiente':
+        return Response(
+            {'error': f'No se puede rechazar un trabajo en estado "{trabajo.status}"',
+             'status': trabajo.status},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    motivo = request.data.get('motivo', '') or ''
+    aplicar_rechazo_trabajo(trabajo, motivo=motivo)
+    return Response(
+        {'message': 'Trabajo rechazado', 'status': trabajo.status},
+        status=status.HTTP_200_OK,
+    )
+
 
 class TrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -147,66 +317,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        trabajo.status = 'aceptado'
-        trabajo.save()
-
-        notificar_usuario.delay(
-            usuario_id=trabajo.usuario.id,
-            titulo="¡Trabajo aceptado!",
-            mensaje=f"{request.user.nombre} aceptó tu solicitud de trabajo",
-            data={
-                'deep_link': f'/trabajos/{trabajo.id}',
-                'entity_id': trabajo.id,
-                'tipo': 'trabajo_aceptado'
-            }
-        )
-
-        enviar_mensaje_whatsapp_task.delay(
-            usuario_id=trabajo.usuario.id,
-            body=mensaje_whatsapp_trabajo(
-                trabajo,
-                encabezado=f"Tu trabajo con *{request.user.nombre} {request.user.apellido}* *ha sido aceptado*.",
-            ),
-            profesional_id=trabajo.profesional_id,
-        )
-
-        chat = Chat.objects.filter(
-            Q(sender=trabajo.usuario, receiver=trabajo.profesional) |
-            Q(sender=trabajo.profesional, receiver=trabajo.usuario)
-        ).first()
-        
-        if not chat:
-            chat = Chat.objects.create(
-                sender=trabajo.profesional,
-                receiver=trabajo.usuario,
-                trabajo=trabajo
-            )
-
-        mensaje = Mensajes.objects.create(
-            texto=trabajo.profesional.defaultMessageReservation,
-            sender=trabajo.profesional,
-            chat=chat,
-            trabajo=trabajo
-        )
-
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(f'user_{trabajo.usuario.id}', {
-            'type': 'chat_message',
-            'message': mensaje.texto,
-            'user_id': trabajo.profesional.id,
-            'leido': False,
-            'chat_id': chat.id,
-            'trabajo': TrabajoDetailSerializer(trabajo).data,
-            'chat': {
-                'id': chat.id,
-                'sender_id': chat.sender.id,
-                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
-                'receiver_id': chat.receiver.id,
-                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
-                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
-                'ultimo_mensaje_at': mensaje.created_at.isoformat(),
-            }
-        })
+        aplicar_aprobacion_trabajo(trabajo)
         return Response({
             'message': 'Trabajo aprobado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
@@ -572,42 +683,8 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 {'error': f'No se puede rechazar un trabajo en estado "{trabajo.status}"'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Cambiar estado a cancelado
-        trabajo.status = 'cancelado'
-        
-        # Opcional: guardar el motivo en comentario_cliente si lo enviaron
-        if motivo:
-            trabajo.comentario_cliente = f"Rechazado por profesional: {motivo}"
-        
-        trabajo.save()
-        
-        # Opcional: liberar la disponibilidad ocupada
-        if trabajo.disponibilidad:
-            trabajo.disponibilidad.delete()
 
-        
-        notificar_usuario.delay(
-            usuario_id=trabajo.usuario.id,
-            titulo="¡Trabajo rechazado!",
-            mensaje=f"{request.user.nombre} ha rechazado tu solicitud de trabajo",
-            data={
-                'deep_link': f'/trabajos/{trabajo.id}',
-                'entity_id': trabajo.id,
-                'tipo': 'trabajo_rechazado'
-            }
-        )
-
-        enviar_mensaje_whatsapp_task.delay(
-            usuario_id=trabajo.usuario.id,
-            body=mensaje_whatsapp_trabajo(
-                trabajo,
-                encabezado=f"Tu trabajo con *{request.user.nombre} {request.user.apellido}* *fue rechazado*.",
-                motivo=motivo or None,
-            ),
-            profesional_id=trabajo.profesional_id,
-        )
-
+        aplicar_rechazo_trabajo(trabajo, motivo=motivo)
         return Response({
             'message': 'Trabajo rechazado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
@@ -756,6 +833,12 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             body=mensaje_whatsapp_trabajo(trabajo, encabezado=encabezado_whatsapp),
             profesional_id=profesional.id,
         )
+
+        # Reserva que requiere confirmación → avisar al profesional con el template
+        # de botón (confirmar/rechazar por link).
+        if newStatus == 'pendiente':
+            from trabajos.tasks import enviar_template_confirmacion_trabajo_task
+            enviar_template_confirmacion_trabajo_task.delay(trabajo.id)
 
         if profesional.auto_aprobacion_trabajos:
             chat = Chat.objects.filter(
