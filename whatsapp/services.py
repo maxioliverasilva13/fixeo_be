@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 
@@ -10,6 +11,16 @@ from usuario.models import Usuario
 from .models import ConversacionWhatsApp, WhatsAppMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _mask(valor) -> str:
+    """Muestra sólo el inicio/fin de un secreto, para poder loguearlo."""
+    texto = str(valor or '')
+    if not texto:
+        return '(vacío)'
+    if len(texto) <= 12:
+        return texto
+    return f'{texto[:6]}…{texto[-4:]} ({len(texto)} chars)'
 
 
 def normalizar_numero_whatsapp(telefono: str) -> str:
@@ -50,6 +61,15 @@ class WhatsAppClient:
             self.access_token = settings.WHATSAPP_ACCESS_TOKEN
             self.messages_url = f"{self.base_url}/{self.api_version}/{self.phone_number_id}/messages"
 
+        logger.info(
+            "WA client init: provider=%s | url=%s | credencial=%s | phone_number_id=%s | app_secret=%s",
+            self.provider,
+            self.messages_url,
+            _mask(getattr(self, 'api_key', None) or getattr(self, 'access_token', '')),
+            getattr(self, 'phone_number_id', '') or '(no aplica)',
+            'configurado' if getattr(settings, 'WHATSAPP_APP_SECRET', '') else '(vacío)',
+        )
+
     def _headers(self):
         if self.provider == '360dialog':
             return {
@@ -64,15 +84,18 @@ class WhatsAppClient:
     def _post(self, payload: dict) -> dict:
         url = self.messages_url
         logger.info(
-            "WhatsApp API request [%s]: url=%s to=%r (len=%s)",
-            self.provider, url, payload.get('to'), len(payload.get('to') or ''),
+            "WA API request [%s]: POST %s | credencial=%s | payload=%s",
+            self.provider,
+            url,
+            _mask(getattr(self, 'api_key', None) or getattr(self, 'access_token', '')),
+            json.dumps(payload, ensure_ascii=False)[:400],
         )
         response = requests.post(url, json=payload, headers=self._headers(), timeout=15)
-        if not response.ok:
-            logger.error(
-                "WhatsApp API [%s] respondió %s: %s",
-                self.provider, response.status_code, response.text,
-            )
+        cuerpo = (response.text or '')[:900]
+        if response.ok:
+            logger.info("WA API response [%s]: HTTP %s | %s", self.provider, response.status_code, cuerpo)
+        else:
+            logger.error("WA API response [%s]: HTTP %s | %s", self.provider, response.status_code, cuerpo)
         response.raise_for_status()
         return response.json()
 
@@ -130,6 +153,10 @@ def enviar_mensaje_texto(to: str, body: str, usuario: Usuario = None) -> WhatsAp
             except ValueError:
                 mensaje.payload = {'error': response.text}
     mensaje.save(update_fields=['wa_message_id', 'estado', 'payload', 'updated_at'])
+    logger.info(
+        "WA envío (texto) a %s: estado=%s wa_message_id=%s payload=%s",
+        to, mensaje.estado, mensaje.wa_message_id, str(mensaje.payload)[:400],
+    )
     return mensaje
 
 
@@ -170,6 +197,10 @@ def enviar_template_mensaje(to: str, template_name: str, components: list = None
             except ValueError:
                 mensaje.payload = {'error': response.text}
     mensaje.save(update_fields=['wa_message_id', 'estado', 'payload', 'updated_at'])
+    logger.info(
+        "WA envío (template %s) a %s: estado=%s wa_message_id=%s payload=%s",
+        template_name, to, mensaje.estado, mensaje.wa_message_id, str(mensaje.payload)[:400],
+    )
     return mensaje
 
 
@@ -183,10 +214,22 @@ def _es_profesional(usuario) -> bool:
 
 def _agente_habilitado(conv) -> bool:
     if not getattr(settings, 'WHATSAPP_AGENTE_ACTIVO', True):
+        logger.info(
+            "Agente NO habilitado para wa_id=%s: WHATSAPP_AGENTE_ACTIVO=False", conv.wa_id
+        )
         return False
     usuario = conv.usuario
     if _es_profesional(usuario):
-        return usuario.activar_agente
+        if not usuario.activar_agente:
+            logger.info(
+                "Agente NO habilitado para wa_id=%s: el profesional %s tiene activar_agente=False",
+                conv.wa_id, getattr(usuario, 'correo', None),
+            )
+            return False
+    logger.info(
+        "Agente habilitado para wa_id=%s (conv=%s, usuario=%s, profesional=%s)",
+        conv.wa_id, conv.id, getattr(usuario, 'correo', None) or '(sin usuario)', _es_profesional(usuario),
+    )
     return True
 
 
@@ -261,6 +304,10 @@ def _procesar_mensajes_entrantes(value: dict):
 
         conv = obtener_o_crear_conversacion(wa_id)
         trae_ubicacion = _guardar_ubicacion_de_mensaje(conv, mensaje)
+        logger.info(
+            "WA entrante: wa_id=%s tipo=%s texto=%r conv=%s ubicacion=%s historial=%s",
+            wa_id, tipo, (texto or '')[:150], conv.id, trae_ubicacion, len(conv.historial or []),
+        )
 
         if not _agente_habilitado(conv):
             continue
@@ -270,6 +317,7 @@ def _procesar_mensajes_entrantes(value: dict):
         if texto is None:
             # Tipos no soportados (audio/imagen/etc.): respuesta rápida guía.
             try:
+                logger.info("WA entrante sin texto (%s) de %s: respondo guía fija", tipo, wa_id)
                 enviar_mensaje_texto(wa_id, 'Por ahora solo puedo leer mensajes de texto y ubicación. '
                                             'Contame qué negocio o servicio buscás. 🙂', usuario=conv.usuario)
             except Exception:
@@ -277,7 +325,11 @@ def _procesar_mensajes_entrantes(value: dict):
             continue
 
         try:
-            procesar_mensaje_entrante_task.delay(conv.id, texto)
+            tarea = procesar_mensaje_entrante_task.delay(conv.id, texto)
+            logger.info(
+                "WA agente encolado: conv=%s wa_id=%s task_id=%s",
+                conv.id, wa_id, getattr(tarea, 'id', None),
+            )
         except Exception:
             logger.exception("No se pudo encolar el agente; procesando en línea para %s", wa_id)
             procesar_mensaje_entrante_task(conv.id, texto)

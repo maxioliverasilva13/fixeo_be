@@ -19,10 +19,21 @@ def procesar_mensaje_entrante_task(conversacion_id, texto):
         logger.warning("procesar_mensaje_entrante_task: conversacion %s no existe", conversacion_id)
         return
 
-    logger.info("Agente WhatsApp procesando conv=%s wa_id=%s", conv.id, conv.wa_id)
+    logger.info(
+        "Agente WhatsApp procesando conv=%s wa_id=%s usuario=%s texto=%r",
+        conv.id, conv.wa_id, getattr(conv.usuario, 'correo', None) or '(sin usuario)', (texto or '')[:150],
+    )
     respuesta = responder_mensaje(conv, texto)
+    logger.info(
+        "Agente WhatsApp respondió conv=%s wa_id=%s len=%s respuesta=%r",
+        conv.id, conv.wa_id, len(respuesta or ''), (respuesta or '')[:300],
+    )
     try:
-        services.enviar_mensaje_texto(conv.wa_id, respuesta, usuario=conv.usuario)
+        mensaje = services.enviar_mensaje_texto(conv.wa_id, respuesta, usuario=conv.usuario)
+        logger.info(
+            "Agente WhatsApp envío conv=%s wa_id=%s estado=%s wa_message_id=%s",
+            conv.id, conv.wa_id, mensaje.estado, mensaje.wa_message_id,
+        )
     except Exception:
         logger.exception("Error enviando respuesta del agente a %s", conv.wa_id)
 

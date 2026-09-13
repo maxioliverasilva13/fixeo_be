@@ -14,6 +14,15 @@ logger = logging.getLogger(__name__)
 _client = None
 
 
+def _mask(valor) -> str:
+    texto = str(valor or '')
+    if not texto:
+        return '(vacío)'
+    if len(texto) <= 12:
+        return texto
+    return f'{texto[:6]}…{texto[-4:]} ({len(texto)} chars)'
+
+
 def _get_client():
     """Devuelve un cliente OpenAI apuntado a DeepSeek (cacheado)."""
     global _client
@@ -29,12 +38,15 @@ def _get_client():
     try:
         api_key = config('DEEPSEEK_API_KEY')
     except UndefinedValueError as exc:
+        logger.error("DEEPSEEK_API_KEY no está configurada en el entorno: el agente no puede responder")
         raise RuntimeError('DEEPSEEK_API_KEY no está configurada') from exc
 
-    _client = OpenAI(
-        api_key=api_key,
-        base_url=getattr(settings, 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
+    base_url = getattr(settings, 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
+    logger.info(
+        "DeepSeek client creado: base_url=%s | model=%s | api_key=%s",
+        base_url, getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat'), _mask(api_key),
     )
+    _client = OpenAI(api_key=api_key, base_url=base_url)
     return _client
 
 
@@ -52,6 +64,10 @@ def run_conversation(system_prompt, mensajes, tool_specs, tool_dispatch, on_tool
     client = _get_client()
     model = getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat')
     max_rounds = getattr(settings, 'DEEPSEEK_MAX_TOOL_ROUNDS', 6)
+    logger.info(
+        "DeepSeek run_conversation: model=%s | mensajes=%s | tools=%s | max_rounds=%s",
+        model, len(mensajes), len(tool_specs or []), max_rounds,
+    )
 
     conversacion = [{'role': 'system', 'content': system_prompt}] + list(mensajes)
     kwargs_tools = {'tools': tool_specs, 'tool_choice': 'auto'} if tool_specs else {}
@@ -67,7 +83,9 @@ def run_conversation(system_prompt, mensajes, tool_specs, tool_dispatch, on_tool
         tool_calls = getattr(mensaje, 'tool_calls', None)
 
         if not tool_calls:
+            logger.info("DeepSeek respuesta final en ronda %s (len=%s)", ronda + 1, len(mensaje.content or ''))
             return (mensaje.content or '').strip()
+        logger.info("DeepSeek ronda %s: %s tool_call(s)", ronda + 1, len(tool_calls))
 
         # Reinyectar el turno del asistente (con sus tool_calls) antes de responderlas.
         conversacion.append({
