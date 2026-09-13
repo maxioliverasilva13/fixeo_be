@@ -68,7 +68,39 @@ while [ "$round" -lt "$max_rounds" ]; do
 done
 
 if [ "$migrate_ok" -ne 1 ]; then
-  echo "⚠️  migrate sigue fallando; continúo con schema ensure + seeds"
+  # Un error en una migración (p. ej. un RunPython que revienta) aborta el plan
+  # completo y deja SIN aplicar todo lo que viene después alfabéticamente
+  # (caso real: token_blacklist.0003 rompía y bloqueaba trabajos/usuario/whatsapp).
+  # Se reintenta app por app para que un problema no arrastre al resto.
+  echo "⚠️  migrate global falló; reintentando app por app..."
+  python manage.py reconcile_migrations --auto || true
+
+  pending_apps=$(python - <<'PY'
+import os
+
+import django
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'fixeo_project.settings')
+django.setup()
+
+from django.db import connection  # noqa: E402
+from django.db.migrations.loader import MigrationLoader  # noqa: E402
+
+loader = MigrationLoader(connection)
+print(' '.join(sorted({app for app, _ in loader.disk_migrations})))
+PY
+)
+
+  for app in $pending_apps; do
+    if app_out=$(python manage.py migrate "$app" --noinput 2>&1); then
+      if echo "$app_out" | grep -q "Applying "; then
+        echo "  ✓ ${app}: $(echo "$app_out" | grep -c "Applying ") migración(es) aplicadas"
+      fi
+    else
+      echo "  ✗ ${app} (queda pendiente, revisar el error de abajo)"
+      echo "$app_out" | tail -4
+    fi
+  done
 fi
 
 # Safety net: columnas críticas que el código ya referencia y que pueden faltar

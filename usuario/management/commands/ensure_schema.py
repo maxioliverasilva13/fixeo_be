@@ -1,35 +1,42 @@
 from django.core.management.base import BaseCommand
 from django.db import connection
 from django.db.migrations.loader import MigrationLoader
-from django.db.migrations.operations.models import CreateModel
+from django.db.migrations.operations.models import (
+    AlterModelTable,
+    CreateModel,
+    RenameModel,
+)
 from django.db.migrations.operations.special import SeparateDatabaseAndState
 
 
 def _create_model_tables(loader):
-    """Tablas que crearían las migraciones TODAVÍA no registradas como aplicadas.
+    """Tablas que crearían (o renombrarían) las migraciones TODAVÍA no aplicadas.
 
-    Si una tabla falta y una migración pendiente la crea, no hay que tocarla:
-    `migrate` la va a crear (con sus índices y datos). Este comando sólo repara
-    el caso de migraciones que quedaron registradas en django_migrations sin
-    ejecutar su DDL.
+    Si una tabla falta y una migración pendiente la crea o la renombra, no hay
+    que tocarla: `migrate` la va a dejar como corresponde. Este comando sólo
+    repara el caso de migraciones que quedaron registradas en django_migrations
+    sin ejecutar su DDL.
     """
     tables = set()
     for (app_label, name), migration in loader.disk_migrations.items():
         if (app_label, name) in loader.applied_migrations:
             continue
         create_ops = []
+        alter_table_ops = []
         for op in migration.operations:
-            if isinstance(op, CreateModel):
-                create_ops.append(op)
-            elif isinstance(op, SeparateDatabaseAndState):
-                create_ops.extend(
-                    sub for sub in op.state_operations if isinstance(sub, CreateModel)
-                )
-                create_ops.extend(
-                    sub for sub in op.database_operations if isinstance(sub, CreateModel)
-                )
+            candidates = [op]
+            if isinstance(op, SeparateDatabaseAndState):
+                candidates = list(op.state_operations) + list(op.database_operations)
+            for candidate in candidates:
+                if isinstance(candidate, CreateModel):
+                    create_ops.append(candidate)
+                elif isinstance(candidate, AlterModelTable):
+                    alter_table_ops.append(candidate)
         for op in create_ops:
             tables.add(op.options.get("db_table") or f"{app_label}_{op.name.lower()}")
+        for op in alter_table_ops:
+            # table=None significa "volver al nombre por defecto" (db_table del modelo).
+            tables.add(op.table or f"{app_label}_{op.name.lower()}")
     return tables
 
 
@@ -60,6 +67,7 @@ class Command(BaseCommand):
             db_tables = {info.name for info in connection.introspection.get_table_list(cur)}
 
         missing = []
+        skipped_pending = []
         for model in state.apps.get_models():
             meta = model._meta
             if meta.proxy or not meta.managed or meta.auto_created:
@@ -67,6 +75,7 @@ class Command(BaseCommand):
             if meta.db_table in db_tables:
                 continue
             if meta.db_table in pending_tables:
+                skipped_pending.append(meta.db_table)
                 self.stdout.write(
                     f"  · {meta.db_table}: falta, la crea una migración pendiente (no se toca)"
                 )
@@ -74,7 +83,18 @@ class Command(BaseCommand):
             missing.append(model)
 
         if not missing:
-            self.stdout.write(self.style.SUCCESS("✓ no falta ninguna tabla"))
+            if skipped_pending:
+                muestra = ", ".join(skipped_pending[:5])
+                if len(skipped_pending) > 5:
+                    muestra += f" ... (+{len(skipped_pending) - 5})"
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"  {len(skipped_pending)} tabla(s) faltante(s) las tiene que crear "
+                        f"`migrate` (hay migraciones pendientes): {muestra}"
+                    )
+                )
+            else:
+                self.stdout.write(self.style.SUCCESS("✓ no falta ninguna tabla"))
             return
 
         for model in missing:
