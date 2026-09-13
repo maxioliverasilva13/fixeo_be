@@ -99,10 +99,25 @@ def state_field_column(model_state, field_name: str) -> str:
     return field_name
 
 
-def operation_satisfied(op, app_label: str, state_before, cur):
+def _resolve_model_state(op, app_label: str, state_before, state_after):
+    """Estado del modelo de la op, buscando también en el estado POSTERIOR.
+
+    Hace falta para migraciones que crean un modelo y le agregan un índice /
+    columna en el mismo archivo (p. ej. usuario.0009 o empresas.0013): ahí el
+    modelo no existe en state_before y antes se devolvía False para siempre,
+    así que la migración nunca se podía reconciliar.
+    """
+    model_key = (app_label, op.model_name.lower())
+    model_state = state_before.models.get(model_key)
+    if model_state is None and state_after is not None:
+        model_state = state_after.models.get(model_key)
+    return model_state
+
+
+def operation_satisfied(op, app_label: str, state_before, cur, state_after=None):
     if isinstance(op, SeparateDatabaseAndState):
         results = [
-            operation_satisfied(db_op, app_label, state_before, cur)
+            operation_satisfied(db_op, app_label, state_before, cur, state_after)
             for db_op in op.database_operations
         ]
         if any(r is False for r in results):
@@ -112,15 +127,15 @@ def operation_satisfied(op, app_label: str, state_before, cur):
         return None
 
     if isinstance(op, AddField):
-        model_key = (app_label, op.model_name.lower())
-        if model_key not in state_before.models:
+        model_state = _resolve_model_state(op, app_label, state_before, state_after)
+        if model_state is None:
             return False
-        model_state = state_before.models[model_key]
         table = model_table(app_label, model_state)
         column = field_column_name(op.field, op.name)
         return column_exists(cur, table, column)
 
     if isinstance(op, RemoveField):
+        # Sólo con el estado previo: en el posterior el campo ya no está.
         model_key = (app_label, op.model_name.lower())
         if model_key not in state_before.models:
             return False
@@ -130,10 +145,9 @@ def operation_satisfied(op, app_label: str, state_before, cur):
         return not column_exists(cur, table, column)
 
     if isinstance(op, AlterField):
-        model_key = (app_label, op.model_name.lower())
-        if model_key not in state_before.models:
+        model_state = _resolve_model_state(op, app_label, state_before, state_after)
+        if model_state is None:
             return False
-        model_state = state_before.models[model_key]
         table = model_table(app_label, model_state)
         column = field_column_name(op.field, op.name)
         return column_exists(cur, table, column)
@@ -147,10 +161,9 @@ def operation_satisfied(op, app_label: str, state_before, cur):
         return not table_exists(cur, table)
 
     if isinstance(op, AddIndex):
-        model_key = (app_label, op.model_name.lower())
-        if model_key not in state_before.models:
+        model_state = _resolve_model_state(op, app_label, state_before, state_after)
+        if model_state is None:
             return False
-        model_state = state_before.models[model_key]
         table = model_table(app_label, model_state)
         index_name = op.index.name or f"{table}_{'_'.join(op.index.fields)}_{'_'.join(op.index.fields)}_idx"
         if index_exists(cur, index_name):
@@ -171,10 +184,11 @@ def migration_schema_matches(loader: MigrationLoader, app: str, name: str, cur) 
     nodes = loader.graph.forwards_plan((app, name))
     state_before = loader.project_state(nodes[:-1], at_end=True) if len(nodes) > 1 else loader.project_state([], at_end=True)
     migration = loader.get_migration(app, name)
+    state_after = loader.project_state(nodes, at_end=True)
 
     saw_schema_op = False
     for op in migration.operations:
-        result = operation_satisfied(op, app, state_before, cur)
+        result = operation_satisfied(op, app, state_before, cur, state_after)
         if result is False:
             return False
         if result is True:
@@ -187,11 +201,12 @@ def migration_schema_status(loader: MigrationLoader, app: str, name: str, cur):
     """(todas_satisfechas, cantidad_de_ops_verificables) para una migración."""
     nodes = loader.graph.forwards_plan((app, name))
     state_before = loader.project_state(nodes[:-1], at_end=True) if len(nodes) > 1 else loader.project_state([], at_end=True)
+    state_after = loader.project_state(nodes, at_end=True)
     migration = loader.get_migration(app, name)
 
     checkable = 0
     for op in migration.operations:
-        result = operation_satisfied(op, app, state_before, cur)
+        result = operation_satisfied(op, app, state_before, cur, state_after)
         if result is False:
             return False, checkable
         if result is True:
