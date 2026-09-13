@@ -92,13 +92,24 @@ PY
 )
 
   for app in $pending_apps; do
-    if app_out=$(python manage.py migrate "$app" --noinput 2>&1); then
-      if echo "$app_out" | grep -q "Applying "; then
-        echo "  ✓ ${app}: $(echo "$app_out" | grep -c "Applying ") migración(es) aplicadas"
+    applied=0
+    # Hasta 5 vueltas por app: si falla con "ya existe", el DDL está aplicado
+    # pero falta la fila en django_migrations → se registra y se sigue.
+    for _ in 1 2 3 4 5; do
+      if app_out=$(python manage.py migrate "$app" --noinput 2>&1); then
+        applied=$(echo "$app_out" | grep -c "Applying ")
+        break
       fi
-    else
-      echo "  ✗ ${app} (queda pendiente, revisar el error de abajo)"
-      echo "$app_out" | tail -4
+      echo "$app_out" | grep -qiE 'DuplicateColumn|DuplicateTable|already exists' || break
+      failing=$(echo "$app_out" | grep -oE 'Applying [a-z_]+\.[0-9]+_[a-zA-Z0-9_]+' | tail -1 | sed 's/Applying //')
+      [ -n "$failing" ] || break
+      failing_app="${failing%%.*}"
+      failing_mig="${failing#*.}"
+      echo "    → ${failing_app}.${failing_mig}: el DDL ya existe, registrando en django_migrations"
+      python manage.py reconcile_migrations --record-if-satisfied "$failing_app" "$failing_mig" || break
+    done
+    if [ "$applied" -gt 0 ]; then
+      echo "  ✓ ${app}: ${applied} migración(es) aplicadas"
     fi
   done
 fi
