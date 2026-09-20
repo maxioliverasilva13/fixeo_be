@@ -1,10 +1,10 @@
 """
 Notifica a todos los admins (is_staff) cuando se crea una empresa nueva.
 """
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
-from empresas.models import Empresa
+from empresas.models import Empresa, ProductoImagen
 
 
 @receiver(post_save, sender=Empresa)
@@ -49,3 +49,27 @@ def notificar_admins_empresa_nueva(sender, instance, created, **kwargs):
                 notificar_usuario(uid, titulo, mensaje, data)
             except Exception:
                 pass
+
+
+def _sync_producto_foto(producto_id):
+    """Mantiene `Producto.foto` como la URL de la imagen de menor `orden`."""
+    from empresas.models import Producto
+
+    primary = (
+        ProductoImagen.objects.filter(producto_id=producto_id, is_deleted=False)
+        .order_by('orden', 'id')
+        .first()
+    )
+    Producto.objects.filter(pk=producto_id).update(foto=primary.url if primary else '')
+
+
+@receiver(post_save, sender=ProductoImagen)
+def on_producto_imagen_saved(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
+    _sync_producto_foto(instance.producto_id)
+
+
+@receiver(post_delete, sender=ProductoImagen)
+def on_producto_imagen_deleted(sender, instance, **kwargs):
+    _sync_producto_foto(instance.producto_id)

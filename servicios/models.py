@@ -24,3 +24,22 @@ class Servicio(BaseModel):
 
     def __str__(self):
         return f"{self.usuario} - {self.profesion} - {self.nombre}"
+
+
+class ServicioImagen(BaseModel):
+    """Foto adicional de un servicio. La de menor `orden` es la principal."""
+    servicio = models.ForeignKey(Servicio, on_delete=models.CASCADE, related_name='imagenes')
+    url = models.URLField(max_length=500)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'servicio_imagen'
+        verbose_name = 'Imagen de servicio'
+        verbose_name_plural = 'Imágenes de servicio'
+        ordering = ['orden', 'id']
+        indexes = [
+            models.Index(fields=['servicio', 'orden'], name='idx_servicio_imagen_orden'),
+        ]
+
+    def __str__(self):
+        return f"{self.servicio_id} - imagen {self.orden}"

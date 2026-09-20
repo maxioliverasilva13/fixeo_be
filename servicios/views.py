@@ -38,7 +38,7 @@ class ServicioViewSet(viewsets.ModelViewSet):
         return [IsAuthenticated()]
     
     def get_queryset(self):
-        return Servicio.objects.filter(usuario=self.request.user)
+        return Servicio.objects.filter(usuario=self.request.user).prefetch_related('imagenes')
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -51,6 +51,7 @@ class ServicioViewSet(viewsets.ModelViewSet):
             Servicio.objects
             .filter(usuario_id=pk)
             .select_related('profesion')
+            .prefetch_related('imagenes')
             .order_by('profesion__nombre', 'nombre')
         )
         servicios = _filter_servicios_queryset(servicios, request)
@@ -157,6 +158,7 @@ class ServicioViewSet(viewsets.ModelViewSet):
             Servicio.objects
             .filter(usuario=request.user, profesion_id=profesion_id)
             .select_related('profesion')
+            .prefetch_related('imagenes')
             .order_by('nombre')
         )
         servicios = _filter_servicios_queryset(servicios, request)

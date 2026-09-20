@@ -252,3 +252,22 @@ class ProductoVariante(BaseModel):
     def __str__(self):
         return f"{self.producto.nombre} — {self.nombre} (+{self.precio_extra})"
 
+
+class ProductoImagen(BaseModel):
+    """Foto adicional de un producto. La de menor `orden` es la principal."""
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='imagenes')
+    url = models.URLField(max_length=500)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'producto_imagen'
+        verbose_name = 'Imagen de producto'
+        verbose_name_plural = 'Imágenes de producto'
+        ordering = ['orden', 'id']
+        indexes = [
+            models.Index(fields=['producto', 'orden'], name='idx_producto_imagen_orden'),
+        ]
+
+    def __str__(self):
+        return f"{self.producto_id} - imagen {self.orden}"
+

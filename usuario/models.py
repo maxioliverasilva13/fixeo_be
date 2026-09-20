@@ -93,6 +93,15 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return f"{self.nombre} {self.apellido} ({self.correo})"
 
+    def save(self, *args, **kwargs):
+        # `rounded_foto_url` es una columna independiente (no derivada): si queda
+        # vacía mientras `foto_url` tiene valor (ej. se editó solo `foto_url` desde
+        # el admin de Django, que no expone `rounded_foto_url`), el mapa termina
+        # mostrando el ícono genérico. Se sincroniza acá para que no se desalineen.
+        if self.foto_url and not self.rounded_foto_url:
+            self.rounded_foto_url = self.foto_url
+        super().save(*args, **kwargs)
+
 
 class ZonaNoTrabajo(BaseModel):
     usuario = models.ForeignKey(

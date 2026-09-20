@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from servicios.serializers import ServicioSerializer
-from .models import Empresa, CategoriaProducto, Producto, ProductoDia, ProductoVariante
+from .models import Empresa, CategoriaProducto, Producto, ProductoDia, ProductoVariante, ProductoImagen
 from localizacion.serializers import LocalizacionSerializer
 from .currency_validation import validar_divisa_empresa
 from .delivery_utils import aplicar_limites_modalidad, modalidad_desde_usuario
@@ -167,6 +167,13 @@ class ProductoVarianteSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
+class ProductoImagenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductoImagen
+        fields = ['id', 'url', 'orden']
+        read_only_fields = ['id']
+
+
 class ProductoSerializer(serializers.ModelSerializer):
     categoria_nombre = serializers.CharField(source='categoria.nombre', read_only=True)
     # write_only: en el modelo `variantes` es RelatedManager; no se puede
@@ -183,13 +190,19 @@ class ProductoSerializer(serializers.ModelSerializer):
         allow_empty=True,
         write_only=True,
     )
+    imagenes = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
 
     class Meta:
         model = Producto
         fields = [
             'id', 'nombre', 'descripcion', 'precio', 'divisa', 'codigo', 'agotado', 'foto',
             'empresa', 'categoria', 'categoria_nombre', 'acepta_domicilio', 'acepta_retiro',
-            'es_menu_diario', 'dias_semana', 'variantes',
+            'es_menu_diario', 'dias_semana', 'variantes', 'imagenes',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -203,6 +216,10 @@ class ProductoSerializer(serializers.ModelSerializer):
         ]
         data['variantes'] = ProductoVarianteSerializer(
             instance.variantes.filter(is_deleted=False, activo=True).order_by('orden', 'id'),
+            many=True,
+        ).data
+        data['imagenes'] = ProductoImagenSerializer(
+            instance.imagenes.filter(is_deleted=False).order_by('orden', 'id'),
             many=True,
         ).data
         # Contexto de listado filtrado por día (worker toggle)
@@ -304,18 +321,49 @@ class ProductoSerializer(serializers.ModelSerializer):
             keep_ids.append(var.id)
         producto.variantes.exclude(id__in=keep_ids).filter(is_deleted=False).update(is_deleted=True)
 
+    def _sync_imagenes(self, producto, imagenes_data):
+        if imagenes_data is None:
+            return
+        keep_ids = []
+        for i, raw in enumerate(imagenes_data):
+            img_id = raw.get('id')
+            url = (raw.get('url') or '').strip()
+            if not url:
+                continue
+            orden = raw.get('orden', i)
+            if img_id:
+                img = producto.imagenes.filter(id=img_id).first()
+                if img:
+                    img.url = url
+                    img.orden = orden
+                    img.is_deleted = False
+                    img.deleted_at = None
+                    img.save()
+                    keep_ids.append(img.id)
+                    continue
+            img = ProductoImagen.objects.create(
+                producto=producto,
+                url=url,
+                orden=orden,
+            )
+            keep_ids.append(img.id)
+        producto.imagenes.exclude(id__in=keep_ids).filter(is_deleted=False).update(is_deleted=True)
+
     def create(self, validated_data):
         dias = validated_data.pop('dias_semana', None)
         variantes = validated_data.pop('variantes', None)
+        imagenes = validated_data.pop('imagenes', None)
         producto = Producto.objects.create(**validated_data)
         if producto.es_menu_diario:
             self._sync_dias(producto, dias if dias is not None else [])
             self._sync_variantes(producto, variantes or [])
+        self._sync_imagenes(producto, imagenes)
         return producto
 
     def update(self, instance, validated_data):
         dias = validated_data.pop('dias_semana', None)
         variantes = validated_data.pop('variantes', None)
+        imagenes = validated_data.pop('imagenes', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -324,4 +372,5 @@ class ProductoSerializer(serializers.ModelSerializer):
                 self._sync_dias(instance, dias)
             if variantes is not None:
                 self._sync_variantes(instance, variantes)
+        self._sync_imagenes(instance, imagenes)
         return instance

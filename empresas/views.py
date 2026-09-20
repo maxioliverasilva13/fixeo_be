@@ -879,7 +879,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
 
             queryset = queryset.filter(q_filter)
 
-        return queryset.select_related('empresa', 'categoria').prefetch_related('dias_menu', 'variantes')
+        return queryset.select_related('empresa', 'categoria').prefetch_related('dias_menu', 'variantes', 'imagenes')
 
     def perform_create(self, serializer):
         empresa = _get_empresa_for_user(self.request.user, self.request.data.get('empresa'))
@@ -1065,11 +1065,13 @@ class EmpresaPublicLandingView(APIView):
             )
         )
         servicios = ServicioSerializer(
-            Servicio.objects.filter(usuario=admin).select_related('profesion'),
+            Servicio.objects.filter(usuario=admin).select_related('profesion').prefetch_related('imagenes'),
             many=True,
         ).data
         productos = ProductoSerializer(
-            Producto.objects.filter(empresa=empresa, agotado=False).select_related('categoria'),
+            Producto.objects.filter(empresa=empresa, agotado=False)
+            .select_related('categoria')
+            .prefetch_related('dias_menu', 'variantes', 'imagenes'),
             many=True,
         ).data
 
