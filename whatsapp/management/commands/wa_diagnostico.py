@@ -30,7 +30,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--enviar', metavar='NUMERO', help='Envía un mensaje de prueba a ese número.')
-        parser.add_argument('--texto', default='Prueba de diagnóstico desde fixeo_be 👋')
+        parser.add_argument('--texto', default='Prueba de diagnóstico desde ALaVuelta 👋')
         parser.add_argument('--agente', metavar='WA_ID', help='Corre el agente (sin Celery) para ese wa_id.')
         parser.add_argument('--webhook', action='store_true', help='Consulta el webhook registrado en 360dialog.')
         parser.add_argument('--ultimos', type=int, default=6, help='Cuántos mensajes recientes mostrar.')

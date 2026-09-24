@@ -3,7 +3,7 @@ from django.db import models
 
 
 class ConversacionWhatsApp(models.Model):
-    """Estado de la conversación de un número de WhatsApp con el agente Fixeo.
+    """Estado de la conversación de un número de WhatsApp con el agente ALaVuelta.
 
     Guarda a qué usuario está asociado el número (si se conoce/creó), la
     ubicación estimada del cliente, en qué flujo/estado va la conversación y el

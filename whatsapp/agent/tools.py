@@ -1,6 +1,6 @@
 """Herramientas (function-calling) del agente de WhatsApp.
 
-Cada tool consulta/escribe sobre los modelos reales de Fixeo. Reciben la
+Cada tool consulta/escribe sobre los modelos reales de ALaVuelta. Reciben la
 ``ConversacionWhatsApp`` activa (para conocer ubicación y usuario) más los
 argumentos que decide el modelo, y devuelven dicts serializables a JSON.
 """
@@ -456,11 +456,16 @@ def listar_servicios_profesional(conv, profesional_id):
     profesional_id, err = _resolver_profesional_id(conv, profesional_id)
     if err:
         return err
+    # Los servicios con precio personalizado (rango) quedan fuera del flujo de
+    # WhatsApp: no hay dónde estimar el precio, así que el agente no los ofrece.
     servicios = [
         {'servicio_id': s.id, 'nombre': s.nombre, 'profesion': s.profesion.nombre,
          'precio': str(s.precio), 'divisa': s.divisa, 'tiempo_min': s.tiempo,
          'acepta_domicilio': s.acepta_domicilio}
-        for s in Servicio.objects.select_related('profesion').filter(usuario_id=profesional_id)
+        for s in Servicio.objects.select_related('profesion').filter(
+            usuario_id=profesional_id,
+            precio_min__isnull=True,
+        )
     ]
     return {'total': len(servicios), 'servicios': servicios}
 
@@ -546,6 +551,15 @@ def crear_reserva(conv, profesional_id, fecha_inicio, descripcion=None, servicio
     # El servicio debe ser uno de los que creó ESE profesional. Si el id no corresponde
     # (el modelo suele alucinarlo), se intenta resolver por nombre contra la descripción.
     servicio = _resolver_servicio(profesional_id, servicio_id, descripcion)
+
+    # Los servicios con precio personalizado (rango) no se reservan por WhatsApp:
+    # el precio lo define el profesional dentro del rango y acá no hay dónde
+    # pedirlo, así que derivamos a la app.
+    if servicio is not None and servicio.usa_precio_rango:
+        return {'ok': False, 'precio_personalizado': True,
+                'mensaje': ('Ese servicio tiene precio personalizado: el profesional lo define '
+                            'dentro de un rango al aceptar. Pedile al cliente que lo solicite '
+                            'desde la app para que pueda ver y aceptar el presupuesto.')}
 
     # Validar SIEMPRE la agenda: el horario pedido debe estar libre en la disponibilidad real.
     from empresas.models import Horarios

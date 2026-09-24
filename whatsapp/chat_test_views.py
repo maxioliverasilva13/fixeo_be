@@ -91,7 +91,7 @@ _PAGE_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fixeo · Chat de prueba (DeepSeek)</title>
+<title>ALaVuelta · Chat de prueba (DeepSeek)</title>
 <style>
   :root { --bg:#0b141a; --panel:#111b21; --in:#202c33; --out:#005c4b; --txt:#e9edef; --muted:#8696a0; --accent:#00a884; }
   * { box-sizing:border-box; }
@@ -131,9 +131,9 @@ _PAGE_HTML = """<!doctype html>
 </head>
 <body>
 <header>
-  <div class="dot">F</div>
+  <div class="dot">A</div>
   <div>
-    <h1>Asistente Fixeo</h1>
+    <h1>Asistente ALaVuelta</h1>
     <small id="waid"></small>
   </div>
   <div class="spacer"></div>

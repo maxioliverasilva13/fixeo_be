@@ -16,6 +16,7 @@ from usuario.utils import foto_usuario_api
 from usuario.mapa_helpers import (
     batch_visibility_data as _batch_visibility_data,
     es_elegible_en_busqueda as _es_elegible_en_busqueda,
+    flag_mal_calificado as _flag_mal_calificado,
 )
 
 
@@ -190,8 +191,11 @@ def recomendados_cercanos(*, tipo='profesional', exclude_id=0, profesion_id=None
             x.get('distancia_km') if x.get('distancia_km') is not None else 0.0,
         ))
     else:
+        # Sin ubicación: mejor plan, y dentro del plan mejor calificación, con los
+        # mal calificados (3+ reseñas y promedio < 2.5) al final de su grupo.
         results.sort(key=lambda x: (
             -(int(x.get('plan_rank') or 0)),
+            _flag_mal_calificado(x.get('rating'), x.get('cant_calif')),
             -float(x.get('rating') or 0),
         ))
 

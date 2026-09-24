@@ -56,6 +56,7 @@ from usuario.mapa_helpers import (
     batch_visibility_data as _batch_visibility_data,
     es_elegible_en_busqueda as _es_elegible_en_busqueda,
     es_visible_en_mapa as _es_visible_en_mapa,
+    flag_mal_calificado as _flag_mal_calificado,
     plan_rank_tuple_from_sub as _plan_rank_tuple_from_sub,
     resolve_map_users_from_bounds,
     resolve_map_users_national,
@@ -75,20 +76,31 @@ def _search_plan_fields(sub) -> tuple[int, str | None]:
 
 
 def _sort_search_results(results: list, sort_by: str | None) -> None:
-    """Siempre prioriza mejor plan; luego sort_by / relevancia de texto."""
+    """Orden del buscador.
+
+    Primero el mejor plan (el que no paga queda al final). Dentro de cada grupo
+    de plan manda la calificación, y un profesional mal calificado (3+ reseñas y
+    promedio < 2.5) queda último de su propio grupo; la relevancia del texto se
+    usa como desempate. Con `mas_cercanos` o `mejor_precio` manda lo que pidió el
+    cliente y la calificación no interviene.
+    """
 
     def key(x: dict) -> tuple:
         plan = -(int(x.get('plan_rank') or 0))
         text_rank = -float(x.get('rank') or 0)
-        if sort_by == 'mejor_valorados':
-            return (plan, -float(x.get('rating') or 0), text_rank)
         if sort_by == 'mas_cercanos':
             # Distancia real se calcula en FE; acá plan + relevancia de texto.
             return (plan, text_rank)
         if sort_by == 'mejor_precio':
             p = _precio_para_filtro(x)
             return (plan, p is None, p if p is not None else 0, text_rank)
-        return (plan, text_rank)
+        # Por defecto y "mejor valorados": calificación primero, texto como desempate.
+        return (
+            plan,
+            _flag_mal_calificado(x.get('rating'), x.get('cant_calif')),
+            -float(x.get('rating') or 0),
+            text_rank,
+        )
 
     results.sort(key=key)
 

@@ -75,13 +75,16 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     rating_cliente = serializers.SerializerMethodField()
     cant_calif_cliente = serializers.SerializerMethodField()
     zonas_no_trabajo = serializers.SerializerMethodField()
+    cantidad_servicios = serializers.SerializerMethodField()
+    cantidad_productos = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
         fields = ['id', 'correo', 'nombre', 'apellido', 'telefono', 'foto_url', 'rounded_foto_url', 'foto_map_url',
                   'trabajo_domicilio','esta_abierta','trabajo_local', 'is_owner_empresa',
                   'is_active', 'is_staff', 'defaultMessageReservation', 'rango_mapa_km', 'created_at', 'updated_at', 'rol', 'rol_detalle', 'empresa',
-                  'profesiones', 'localizaciones', 'localizacion_principal', 'servicios', 'is_configured',
+                  'profesiones', 'localizaciones', 'localizacion_principal', 'servicios',
+                  'cantidad_servicios', 'cantidad_productos', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana', 'zonas_no_trabajo',
                   'subscripcion_activa', 'rating','cant_calif', 'rating_cliente', 'cant_calif_cliente',
                   'es_visible_en_mapa', 'advertencias_mapa',
@@ -244,6 +247,27 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
             return ServicioSerializer(servicios, many=True).data
         return []
 
+    def get_cantidad_servicios(self, obj):
+        """Cantidad de servicios publicados. Coincide con len(get_servicios)."""
+        if not obj.is_owner_empresa:
+            return 0
+        return obj.servicios.count()
+
+    def get_cantidad_productos(self, obj):
+        """Cantidad de productos de la empresa del profesional.
+
+        Cuenta todos los productos vigentes, incluso los agotados: para decidir si
+        el profesional "tiene catálogo" alcanza con que exista alguno. El frontend
+        filtra los agotados aparte al listar.
+        """
+        if not obj.is_owner_empresa:
+            return 0
+        from empresas.models import Producto
+        empresa = obj.empresas_administradas.first()
+        if not empresa:
+            return 0
+        return Producto.objects.filter(empresa=empresa).count()
+
     def get_empresa(self, obj):
         if not obj.is_owner_empresa:
             return None
@@ -348,6 +372,7 @@ class UsuarioPublicoSerializer(UsuarioSerializer):
             'trabajo_domicilio', 'esta_abierta', 'trabajo_local', 'is_owner_empresa',
             'rango_mapa_km', 'rol', 'rol_detalle', 'empresa',
             'profesiones', 'localizaciones', 'localizacion_principal', 'servicios',
+            'cantidad_servicios', 'cantidad_productos',
             'horarios_semana', 'zonas_no_trabajo', 'rating', 'cant_calif',
             'es_visible_en_mapa',
         ]
@@ -727,7 +752,42 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         if usuario_localizacion:
             return UsuarioLocalizacionSerializer(usuario_localizacion).data
 
-        return None
+        # Fallback: el candidato puede haber entrado al mapa por las coordenadas de
+        # su EMPRESA (ver collect_bounds_map_candidates). Sin esto el pin llega al
+        # frontend con `localizacion` en null y no se puede dibujar.
+        empresa = self._get_empresa(obj)
+        if empresa is None or empresa.latitud is None or empresa.longitud is None:
+            return None
+
+        detalle = None
+        if empresa.localizacion_id:
+            from localizacion.serializers import LocalizacionSerializer
+            detalle = LocalizacionSerializer(empresa.localizacion).data
+
+        if detalle is None:
+            ubicacion = empresa.ubicacion or ''
+            detalle = {
+                'id': None,
+                'ubicacion': ubicacion,
+                'latitud': str(empresa.latitud),
+                'longitud': str(empresa.longitud),
+                'address': ubicacion,
+                'notas': None,
+                'interior_door': None,
+                'city': ubicacion,
+                'country': '',
+                'county': '',
+                'state': '',
+                'isPrimary': True,
+            }
+
+        return {
+            'id': None,
+            'usuario': obj.id,
+            'localizacion': None,
+            'localizacion_detalle': detalle,
+            'es_principal': True,
+        }
 
     def _get_empresa(self, obj):
         if not hasattr(obj, '_cached_empresa_mapa'):

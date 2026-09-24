@@ -1,3 +1,5 @@
+import logging
+
 from notificaciones.tasks import notificar_usuario
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -17,6 +19,45 @@ from .serializers import (
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.db.models import OuterRef, Subquery
+
+logger = logging.getLogger(__name__)
+
+
+def _notificar_mensaje_chat(chat, mensaje, sender):
+    """Push + email + inbox al receptor de un mensaje del chat.
+
+    Envueltos en try/except a propósito: si Redis/Celery está caído no queremos
+    devolver un 500 después de haber guardado el mensaje. Mismo patrón que
+    empresas/signals.py (fallback sincrónico).
+    """
+    receptor = chat.receiver if sender.id == chat.sender_id else chat.sender
+    data = {
+        'deep_link': f'/chats/{chat.id}',
+        'entity_id': chat.id,
+        'tipo': 'mensaje',
+    }
+    titulo = f"Nuevo mensaje de {sender.nombre}"
+    try:
+        notificar_usuario.delay(
+            usuario_id=receptor.id,
+            titulo=titulo,
+            mensaje=mensaje.texto,
+            data=data,
+        )
+    except Exception:
+        logger.exception(
+            "No se pudo encolar la notificación del mensaje %s", mensaje.mensaje_id
+        )
+        try:
+            notificar_usuario(
+                usuario_id=receptor.id,
+                titulo=titulo,
+                mensaje=mensaje.texto,
+                data=data,
+            )
+        except Exception:
+            logger.exception("Falló también el envío sincrónico de la notificación")
+
 
 class ChatPagination(PageNumberPagination):
     page_size = 20
@@ -151,43 +192,45 @@ class ChatViewSet(viewsets.ModelViewSet):
             Q(sender=request.user, receiver=receiver) |
             Q(sender=receiver, receiver=request.user)
         ).first()
-        
-        if chat:
-            return Response(
-                ChatSerializer(chat, context={'request': request}).data,
-                status=status.HTTP_200_OK
-            )
-        
-        chat = Chat.objects.create(
-            sender=request.user,
-            receiver=receiver,
-            trabajo=trabajo
-        )
-        
+
+        # El filtro de moderación corre antes de crear nada: si rechaza el
+        # mensaje inicial no queremos dejar un chat vacío colgado ni notificar
+        # al receptor por un mensaje que nunca se guardó.
         if mensaje_inicial:
             from moderacion.content_filter import filter_or_reject_message
             reject_msg = filter_or_reject_message(mensaje_inicial)
             if reject_msg:
                 return Response({'error': reject_msg}, status=status.HTTP_400_BAD_REQUEST)
-            Mensajes.objects.create(
+
+        ya_existia = chat is not None
+
+        if not ya_existia:
+            chat = Chat.objects.create(
+                sender=request.user,
+                receiver=receiver,
+                trabajo=trabajo
+            )
+
+        mensaje = None
+        if mensaje_inicial:
+            # Antes, cuando el chat ya existía se devolvía un 200 temprano y el
+            # mensaje inicial se descartaba en silencio: el botón "Consultar"
+            # sobre un profesional con el que ya había charla no hacía nada.
+            mensaje = Mensajes.objects.create(
                 texto=mensaje_inicial,
                 sender=request.user,
                 chat=chat,
-                tipo=Mensajes.TipoMensaje.TEXTO, 
-
+                tipo=Mensajes.TipoMensaje.TEXTO,
             )
-            chat.ultimo_mensaje_at = chat.created_at
-            chat.save()
-
-        room_name = f"usuario_channel_{chat.receiver.id}"
-
-        print(f"[CHAT CREATED] chat_id={chat.id} room_name={room_name} sender_id={request.user.id} receiver_id={receiver.id}")
+            chat.ultimo_mensaje_at = mensaje.created_at
+            chat.save(update_fields=['ultimo_mensaje_at'])
 
         channel_layer = get_channel_layer()
 
         payload = {
             'type': 'chat_message',
             'message': mensaje_inicial if mensaje_inicial else '',
+            'mensaje_id': mensaje.mensaje_id if mensaje else None,
             'user_id': request.user.id,
             'leido': False,
             'chat_id': chat.id,
@@ -203,11 +246,13 @@ class ChatViewSet(viewsets.ModelViewSet):
         }
 
         async_to_sync(channel_layer.group_send)(f'user_{chat.receiver.id}', payload)
-        
-        print('10')
+
+        if mensaje:
+            _notificar_mensaje_chat(chat, mensaje, request.user)
+
         return Response(
             ChatSerializer(chat, context={'request': request}).data,
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_200_OK if ya_existia else status.HTTP_201_CREATED
         )
 
     @action(detail=False, methods=['post'], url_path='soporte')
@@ -376,15 +421,7 @@ class ChatViewSet(viewsets.ModelViewSet):
 
         async_to_sync(channel_layer.group_send)(f'user_{received_user.id}', payload)
 
-        notificar_usuario.delay(
-            usuario_id=received_user.id,
-            titulo=f"Nuevo mensaje de {request.user.nombre}",
-            mensaje=mensaje.texto,
-            data={
-                'deep_link': f'/chats/{chat.id}',
-                'entity_id': chat.id
-            }
-        )
+        _notificar_mensaje_chat(chat, mensaje, request.user)
         
         if recurso:
             recurso.mensaje = mensaje

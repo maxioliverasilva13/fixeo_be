@@ -12,7 +12,7 @@ import math
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery
+from django.db.models import Case, Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery, When
 from django.utils import timezone
 
 from empresas.models import Empresa, Horarios
@@ -25,6 +25,27 @@ MAP_BOUNDS_MAX_SCAN_DEFAULT = 400
 MAP_BOUNDS_MAX_SCAN_WIDE = 220
 MAP_NATIONAL_MAX_SCAN = 1200
 MAP_NATIONAL_BATCH_SIZE = 150
+
+# Un promedio bajo sólo se tiene en cuenta con historial suficiente: con 1 o 2
+# reseñas el número todavía no es representativo, y un profesional recién
+# registrado (0 reseñas) no tiene que quedar castigado por su promedio en 0.
+CALIFICACIONES_MINIMAS_PARA_JUZGAR = 3
+RATING_MINIMO_ACEPTABLE = 2.5
+
+
+def es_mal_calificado(rating, cant_calif) -> bool:
+    """True si el promedio manda al profesional al final de su grupo de plan."""
+    try:
+        cantidad = int(cant_calif or 0)
+        promedio = float(rating or 0)
+    except (TypeError, ValueError):
+        return False
+    return cantidad >= CALIFICACIONES_MINIMAS_PARA_JUZGAR and promedio < RATING_MINIMO_ACEPTABLE
+
+
+def flag_mal_calificado(rating, cant_calif) -> int:
+    """Mismo criterio que `es_mal_calificado`, como 0/1 para usar en un sort key."""
+    return 1 if es_mal_calificado(rating, cant_calif) else 0
 
 
 def _active_plan_precio_subquery():
@@ -88,7 +109,11 @@ def plan_rank_tuple_from_usuario(usuario) -> tuple[float, int]:
 def sort_map_result_rows(results: list[dict], sort_by: str, subs_map: dict) -> None:
     """
     Orden de pins: (1) mejor plan, (2) sort_by del cliente.
-    mejor_valorados → rating; mas_cercanos → distancia; mejor_precio → precio mínimo.
+
+    Por defecto y en `mejor_valorados` manda la calificación dentro del grupo de
+    plan, y un profesional mal calificado (3+ reseñas y promedio < 2.5) queda
+    último dentro de su propio plan. Con `mas_cercanos` o `mejor_precio` manda lo
+    que pidió el cliente y la calificación no interviene.
     """
 
     def sort_key(row: dict) -> tuple:
@@ -104,7 +129,12 @@ def sort_map_result_rows(results: list[dict], sort_by: str, subs_map: dict) -> N
             mp = row.get('min_price')
             return (-plan_p, -plan_j, mp is None, mp if mp is not None else 0)
         # mejor_valorados (default)
-        return (-plan_p, -plan_j, -row.get('avg_rating', 0.0))
+        return (
+            -plan_p,
+            -plan_j,
+            flag_mal_calificado(usuario.rating, usuario.cant_calif),
+            -row.get('avg_rating', 0.0),
+        )
 
     results.sort(key=sort_key)
 
@@ -183,7 +213,8 @@ def es_visible_en_mapa(usuario, subs_map: dict = None, efectivo_counts: dict = N
 def _prefetch_empresas():
     return Prefetch(
         'empresas_administradas',
-        queryset=Empresa.objects.all(),
+        # `localizacion` se usa como respaldo de coordenadas para el pin.
+        queryset=Empresa.objects.select_related('localizacion'),
     )
 
 
@@ -446,7 +477,22 @@ def _national_scan_order(sort_by: str):
         return (*plan_first, F('min_precio_servicio').asc(nulls_last=True), 'id')
     if sort_by == 'mas_cercanos':
         return (*plan_first, F('avg_rating').desc(nulls_last=True), 'id')
-    return (*plan_first, F('avg_rating').desc(nulls_last=True), 'id')
+    # Mismo criterio que `sort_map_result_rows`: los mal calificados al final de
+    # su grupo de plan, para no llenar el cupo del escaneo con ellos.
+    return (
+        *plan_first,
+        Case(
+            When(
+                cant_calif__gte=CALIFICACIONES_MINIMAS_PARA_JUZGAR,
+                rating__lt=RATING_MINIMO_ACEPTABLE,
+                then=1,
+            ),
+            default=0,
+            output_field=IntegerField(),
+        ).asc(),
+        F('avg_rating').desc(nulls_last=True),
+        'id',
+    )
 
 
 def resolve_map_users_from_bounds(

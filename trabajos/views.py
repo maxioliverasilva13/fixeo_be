@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from localizacion.models import Localizacion
@@ -39,17 +40,59 @@ logger = logging.getLogger(__name__)
 # Aprobación / rechazo de un trabajo (efectos compartidos entre la acción
 # autenticada del profesional y el link por token del template de WhatsApp).
 # ---------------------------------------------------------------------------
-def aplicar_aprobacion_trabajo(trabajo):
+def _validar_precio_en_rango(trabajo, precio_estimado):
+    """Valida el precio estimado contra el rango congelado del trabajo y lo
+    devuelve como Decimal. Lanza ValueError con un mensaje mostrable."""
+    if precio_estimado is None or str(precio_estimado).strip() == '':
+        raise ValueError('Definí el precio dentro del rango antes de aceptar el trabajo.')
+
+    try:
+        precio = Decimal(str(precio_estimado))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError('El precio indicado no es válido.')
+
+    if trabajo.precio_min is not None and precio < trabajo.precio_min:
+        raise ValueError(f'El precio no puede ser menor a {trabajo.precio_min}.')
+    if trabajo.precio_max is not None and precio > trabajo.precio_max:
+        raise ValueError(f'El precio no puede ser mayor a {trabajo.precio_max}.')
+
+    return precio
+
+
+def aplicar_aprobacion_trabajo(trabajo, precio_estimado=None, permitir_precio_pendiente=False):
     """status→aceptado, notifica al cliente (push + WhatsApp), crea chat + mensaje
-    default del profesional y emite por websocket. El caller valida el estado."""
+    default del profesional y emite por websocket. El caller valida el estado.
+
+    Si el trabajo viene con precio personalizado (`requiere_estimacion_precio`),
+    `precio_estimado` es obligatorio, tiene que caer dentro del rango congelado y
+    pasa a ser el `precio_final`.
+
+    `permitir_precio_pendiente` existe para el link de WhatsApp: ahí no hay dónde
+    tipear el precio, así que en vez de bloquear la confirmación el trabajo queda
+    aceptado con el precio pendiente (se completa después con `estimar_precio`).
+    """
     profesional = trabajo.profesional
+
+    if trabajo.requiere_estimacion_precio:
+        if precio_estimado is None and permitir_precio_pendiente:
+            pass
+        else:
+            precio = _validar_precio_en_rango(trabajo, precio_estimado)
+            trabajo.precio_estimado = precio
+            trabajo.precio_final = precio
+            trabajo.requiere_estimacion_precio = False
+
     trabajo.status = 'aceptado'
     trabajo.save()
+
+    mensaje_aceptado = f"{profesional.nombre} aceptó tu solicitud de trabajo"
+    if trabajo.precio_final is not None:
+        mensaje_aceptado += f" por ${trabajo.precio_final}"
 
     notificar_usuario.delay(
         usuario_id=trabajo.usuario.id,
         titulo="¡Trabajo aceptado!",
-        mensaje=f"{profesional.nombre} aceptó tu solicitud de trabajo",
+        mensaje=mensaje_aceptado,
         data={
             'deep_link': f'/trabajos/{trabajo.id}',
             'entity_id': trabajo.id,
@@ -166,9 +209,18 @@ def confirmar_trabajo_por_token(request, token):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    aplicar_aprobacion_trabajo(trabajo)
+    # El link de WhatsApp no tiene dónde tipear el precio: si el trabajo es de
+    # precio personalizado se confirma igual y el precio queda pendiente de
+    # definirse desde la app, en vez de bloquear la confirmación.
+    aplicar_aprobacion_trabajo(trabajo, permitir_precio_pendiente=True)
+
+    if trabajo.requiere_estimacion_precio:
+        mensaje = 'Trabajo confirmado. Definí el precio dentro del rango desde la app.'
+    else:
+        mensaje = 'Trabajo confirmado'
+
     return Response(
-        {'message': 'Trabajo confirmado', 'status': trabajo.status,
+        {'message': mensaje, 'status': trabajo.status,
          'trabajo': TrabajoDetailSerializer(trabajo).data},
         status=status.HTTP_200_OK,
     )
@@ -302,6 +354,9 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         Aprueba un trabajo pendiente.
         Solo el profesional asignado puede aprobar.
         Crea un chat entre el cliente y el profesional.
+
+        Si el servicio tenía precio personalizado, hay que mandar
+        `precio_estimado` y tiene que caer dentro del rango solicitado.
         """
         trabajo = self.get_object()
 
@@ -317,12 +372,66 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        aplicar_aprobacion_trabajo(trabajo)
+        try:
+            aplicar_aprobacion_trabajo(trabajo, precio_estimado=request.data.get('precio_estimado'))
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             'message': 'Trabajo aprobado exitosamente',
             'trabajo': TrabajoDetailSerializer(trabajo).data
         }, status=status.HTTP_200_OK)
-        
+
+    @action(detail=True, methods=['post'], url_path='estimar-precio')
+    def estimar_precio(self, request, pk=None):
+        """Define el precio de un trabajo que quedó aceptado sin precio.
+
+        Pasa cuando el profesional confirma desde el link de WhatsApp un trabajo
+        con precio personalizado: ahí no hay dónde tipear el precio, así que se
+        acepta y se completa después desde acá.
+        """
+        trabajo = self.get_object()
+
+        if trabajo.profesional != request.user:
+            return Response(
+                {'error': 'Solo el profesional asignado puede definir el precio'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if not trabajo.requiere_estimacion_precio:
+            return Response(
+                {'error': 'Este trabajo ya tiene el precio definido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            precio = _validar_precio_en_rango(trabajo, request.data.get('precio_estimado'))
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        trabajo.precio_estimado = precio
+        trabajo.precio_final = precio
+        trabajo.requiere_estimacion_precio = False
+        trabajo.save(update_fields=[
+            'precio_estimado', 'precio_final', 'requiere_estimacion_precio', 'updated_at',
+        ])
+
+        notificar_usuario.delay(
+            usuario_id=trabajo.usuario.id,
+            titulo="Precio definido",
+            mensaje=f"{trabajo.profesional.nombre} definió el precio de tu trabajo: ${precio}",
+            data={
+                'deep_link': f'/trabajos/{trabajo.id}',
+                'entity_id': trabajo.id,
+                'tipo': 'trabajo_aceptado',
+            }
+        )
+
+        return Response({
+            'message': 'Precio definido',
+            'trabajo': TrabajoDetailSerializer(trabajo).data
+        }, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'], url_path='contador-urgentes')
     def contador_urgentes(self, request):
         logged_user = request.user
@@ -775,8 +884,31 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             origen='trabajo'
         )
 
-        newStatus = 'aceptado' if profesional.auto_aprobacion_trabajos else 'pendiente'
-        precio_final = sum([s.precio for s in servicios])
+        # Precio personalizado: si alguno de los servicios pedidos se ofrece como
+        # rango, el trabajo entero queda a estimar. El precio no se conoce todavía
+        # (lo define el profesional al aceptar), así que no se fija `precio_final`
+        # y se congela el rango sumando los extremos de cada servicio.
+        servicios_con_rango = [s for s in servicios if s.usa_precio_rango]
+        requiere_estimacion_precio = bool(servicios_con_rango)
+
+        if requiere_estimacion_precio:
+            precio_final = None
+            # Un servicio de precio fijo aporta su precio a los dos extremos del
+            # rango; sólo los que tienen rango aportan su mínimo/máximo.
+            precio_min = sum([
+                s.precio_min if s.usa_precio_rango else s.precio for s in servicios
+            ])
+            precio_max = sum([
+                s.precio_max if s.usa_precio_rango else s.precio for s in servicios
+            ])
+            # Sin precio no hay nada que aceptar de una: el profesional tiene que
+            # pasar por la card pendiente para estimarlo.
+            newStatus = 'pendiente'
+        else:
+            precio_final = sum([s.precio for s in servicios])
+            precio_min = None
+            precio_max = None
+            newStatus = 'aceptado' if profesional.auto_aprobacion_trabajos else 'pendiente'
 
         trabajo = Trabajo.objects.create(
             usuario=usuario,
@@ -788,6 +920,9 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             fecha_fin=fin,
             es_domicilio_profesional=es_domicilio_profesional,
             precio_final=precio_final,
+            precio_min=precio_min,
+            precio_max=precio_max,
+            requiere_estimacion_precio=requiere_estimacion_precio,
             localizacion=localizacion,
             status=newStatus,
             metodo_pago=metodo_pago,

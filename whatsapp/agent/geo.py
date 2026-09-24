@@ -130,7 +130,7 @@ def _nominatim_lookup(texto: str, pais: str = 'UY'):
         resp = requests.get(
             'https://nominatim.openstreetmap.org/search',
             params=params,
-            headers={'User-Agent': 'Fixeo-WhatsApp-Agent/1.0 (soporte@fixeo.app)'},
+            headers={'User-Agent': 'ALaVuelta-WhatsApp-Agent/1.0 (soporte@fixeo.app)'},
             timeout=10,
         )
         resp.raise_for_status()

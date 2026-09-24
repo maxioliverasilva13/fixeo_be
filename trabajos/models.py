@@ -32,6 +32,18 @@ class Trabajo(BaseModel):
     fecha_fin = models.DateTimeField(null=True, blank=True)
     descripcion = models.TextField()
     precio_final = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    # Precio personalizado: rango congelado al momento de solicitar (la suma de
+    # los mínimos y de los máximos de los servicios pedidos, para que editar el
+    # servicio después no lo altere) y el precio que estima el profesional.
+    # Mientras `requiere_estimacion_precio` sea True el trabajo sigue pendiente
+    # de que el profesional defina el precio dentro del rango.
+    precio_min = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    precio_max = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    precio_estimado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    requiere_estimacion_precio = models.BooleanField(
+        default=False,
+        help_text='Si es True, el profesional debe estimar el precio dentro del rango al aceptar.',
+    )
     comentario_cliente = models.TextField(blank=True, null=True)
     # Teléfono del cliente cuando la reserva es de un invitado por WhatsApp (sin cuenta propia),
     # para poder enviarle recordatorios.

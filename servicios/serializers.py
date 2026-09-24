@@ -14,10 +14,12 @@ class ServicioImagenSerializer(serializers.ModelSerializer):
 
 class ServicioSerializer(serializers.ModelSerializer):
     profesion_detalle = ProfesionSerializer(source='profesion', read_only=True)
+    usa_precio_rango = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Servicio
-        fields = ['id', 'usuario', 'profesion', 'profesion_detalle', 'nombre', 'precio', 'divisa', 'tiempo', 'notas', 'foto',
+        fields = ['id', 'usuario', 'profesion', 'profesion_detalle', 'nombre', 'precio', 'precio_min', 'precio_max',
+                  'usa_precio_rango', 'divisa', 'tiempo', 'notas', 'foto',
                   'acepta_domicilio', 'acepta_retiro', 'created_at', 'updated_at']
         read_only_fields = ['id', 'usuario', 'created_at', 'updated_at']
 
@@ -60,6 +62,9 @@ def _sync_servicio_imagenes(servicio, imagenes_data):
 
 
 class ServicioCreateSerializer(serializers.ModelSerializer):
+    # En modo rango el precio de referencia lo deriva el backend (precio = precio_min),
+    # así que el cliente puede omitirlo.
+    precio = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
     imagenes = serializers.ListField(
         child=serializers.DictField(),
         required=False,
@@ -69,7 +74,8 @@ class ServicioCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Servicio
-        fields = ['profesion', 'nombre', 'precio', 'divisa', 'tiempo', 'notas', 'foto', 'acepta_domicilio', 'acepta_retiro', 'imagenes']
+        fields = ['profesion', 'nombre', 'precio', 'precio_min', 'precio_max', 'divisa', 'tiempo', 'notas', 'foto',
+                  'acepta_domicilio', 'acepta_retiro', 'imagenes']
 
     def create(self, validated_data):
         imagenes = validated_data.pop('imagenes', None)
@@ -95,7 +101,35 @@ class ServicioCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El tiempo debe ser mayor a 0")
         return value
 
+    def _validar_precio(self, attrs):
+        """Un servicio tiene precio fijo O un rango de precios, nunca los dos ni ninguno.
+
+        En modo rango `precio` queda como valor de referencia (se sincera a
+        `precio_min`) para no romper listados, búsquedas ni sumas de trabajos.
+        """
+        precio_min = attrs.get('precio_min', getattr(self.instance, 'precio_min', None))
+        precio_max = attrs.get('precio_max', getattr(self.instance, 'precio_max', None))
+        precio = attrs.get('precio', getattr(self.instance, 'precio', None))
+
+        if (precio_min is None) != (precio_max is None):
+            raise serializers.ValidationError({
+                'precio_min': 'Completá el precio mínimo y el máximo, o ninguno de los dos.',
+            })
+
+        if precio_min is not None:
+            if precio_min <= 0:
+                raise serializers.ValidationError({'precio_min': 'El precio mínimo debe ser mayor a 0'})
+            if precio_max < precio_min:
+                raise serializers.ValidationError({'precio_max': 'El precio máximo no puede ser menor al mínimo'})
+            attrs['precio'] = precio_min
+            return
+
+        if precio is None:
+            raise serializers.ValidationError({'precio': 'Indicá un precio fijo o un rango de precios'})
+
     def validate(self, attrs):
+        self._validar_precio(attrs)
+
         request = self.context.get('request')
         empresa = self.context.get('empresa')
         servicio_owner = self.context.get('servicio_owner')
