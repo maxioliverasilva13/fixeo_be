@@ -14,7 +14,8 @@ from .models import Chat, Mensajes, Recurso
 from .serializers import (
     ChatSerializer, ChatCreateSerializer,
     MensajesSerializer, MensajeCreateSerializer,
-    RecursoSerializer, RecursoCreateSerializer
+    RecursoSerializer, RecursoCreateSerializer,
+    _nombre_para_chat,
 )
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -36,7 +37,7 @@ def _notificar_mensaje_chat(chat, mensaje, sender):
         'entity_id': chat.id,
         'tipo': 'mensaje',
     }
-    titulo = f"Nuevo mensaje de {sender.nombre}"
+    titulo = f"Nuevo mensaje de {_nombre_para_chat(sender)}"
     try:
         notificar_usuario.delay(
             usuario_id=receptor.id,
@@ -237,9 +238,9 @@ class ChatViewSet(viewsets.ModelViewSet):
             'chat': {
                 'id': chat.id,
                 'sender_id': chat.sender.id,
-                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'sender_nombre': _nombre_para_chat(chat.sender),
                 'receiver_id': chat.receiver.id,
-                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'receiver_nombre': _nombre_para_chat(chat.receiver),
                 'trabajo_id': chat.trabajo.id if chat.trabajo else None,
                 'ultimo_mensaje_at': chat.ultimo_mensaje_at.isoformat(),
             }
@@ -305,9 +306,9 @@ class ChatViewSet(viewsets.ModelViewSet):
             'chat': {
                 'id': chat.id,
                 'sender_id': chat.sender.id,
-                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'sender_nombre': _nombre_para_chat(chat.sender),
                 'receiver_id': chat.receiver.id,
-                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'receiver_nombre': _nombre_para_chat(chat.receiver),
                 'trabajo_id': chat.trabajo.id if chat.trabajo else None,
                 'ultimo_mensaje_at': chat.ultimo_mensaje_at.isoformat(),
             }

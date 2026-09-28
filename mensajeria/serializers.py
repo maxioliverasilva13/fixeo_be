@@ -3,6 +3,16 @@ from usuario.utils import foto_usuario_api
 from .models import Chat, Mensajes, Recurso
 
 
+def _nombre_para_chat(usuario) -> str:
+    """Nombre de la empresa si el usuario es dueño de una (así se ve con quién
+    se está hablando de verdad), o su nombre y apellido personal si no."""
+    if usuario.is_owner_empresa:
+        empresa = usuario.empresas_administradas.first()
+        if empresa:
+            return empresa.nombre
+    return f"{usuario.nombre} {usuario.apellido}".strip()
+
+
 class RecursoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Recurso
@@ -32,7 +42,7 @@ class MensajesSerializer(serializers.ModelSerializer):
         read_only_fields = ['mensaje_id', 'sender', 'created_at', 'updated_at']
 
     def get_sender_nombre(self, obj):
-        return f"{obj.sender.nombre} {obj.sender.apellido}"
+        return _nombre_para_chat(obj.sender)
 
     def get_trabajo(self, obj):
         if not obj.trabajo_id:
@@ -80,14 +90,14 @@ class ChatSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_sender_nombre(self, obj):
-        return f"{obj.sender.nombre} {obj.sender.apellido}"
-    
+        return _nombre_para_chat(obj.sender)
+
     def get_sender_photo_rounded(self, obj):
         u = obj.sender
         return foto_usuario_api(u.rounded_foto_url or u.foto_url)
 
     def get_receiver_nombre(self, obj):
-        return f"{obj.receiver.nombre} {obj.receiver.apellido}"
+        return _nombre_para_chat(obj.receiver)
 
     def get_receiver_photo_rounded(self, obj):
         u = obj.receiver
