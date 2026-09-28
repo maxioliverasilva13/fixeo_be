@@ -35,6 +35,11 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     trabajo_domicilio = models.BooleanField(default=False)
     trabajo_local = models.BooleanField(default=False)
     is_owner_empresa = models.BooleanField(default=False)
+    invitado_por = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='invitados',
+        help_text='Usuario profesional cuyo link de invitación se usó al registrarse.',
+    )
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False, db_index=True, verbose_name='Eliminado')
@@ -92,6 +97,29 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.nombre} {self.apellido} ({self.correo})"
+
+    # Ofuscación reversible del id, sin persistir una columna dedicada:
+    # solo evita que el código de invitación sea un id incremental adivinable.
+    _INVITE_XOR_KEY = 0x5A5A5A5A
+
+    @property
+    def codigo_invitacion(self) -> str:
+        import base64
+        obfuscated = self.id ^ self._INVITE_XOR_KEY
+        return base64.urlsafe_b64encode(str(obfuscated).encode()).decode().rstrip('=')
+
+    @staticmethod
+    def resolver_invitador(codigo: str):
+        import base64
+        if not codigo:
+            return None
+        try:
+            padded = codigo + '=' * (-len(codigo) % 4)
+            obfuscated = int(base64.urlsafe_b64decode(padded.encode()).decode())
+            user_id = obfuscated ^ Usuario._INVITE_XOR_KEY
+        except (ValueError, TypeError):
+            return None
+        return Usuario.objects.filter(pk=user_id, is_owner_empresa=True).first()
 
     def save(self, *args, **kwargs):
         # `rounded_foto_url` es una columna independiente (no derivada): si queda
@@ -186,3 +214,47 @@ class EmailVerificationChallenge(models.Model):
 
     def __str__(self):
         return f"Email verify {self.email} ({'verified' if self.verified_at else 'pending'})"
+
+
+class HistorialBusqueda(models.Model):
+    """Registro de cada búsqueda hecha desde /usuarios/search/ (logueado o anónimo)."""
+    query = models.CharField(max_length=255, db_index=True)
+    usuario = models.ForeignKey(
+        'usuario.Usuario', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='busquedas_realizadas',
+    )
+    resultados_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'historial_busqueda'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['query'], name='idx_historial_busqueda_query'),
+        ]
+
+    def __str__(self):
+        return f"Búsqueda '{self.query}' ({'anónimo' if self.usuario_id is None else self.usuario_id})"
+
+
+class VisitaPerfil(models.Model):
+    """
+    Registro de cada vez que alguien (que no es el dueño) intenta ver el
+    perfil/servicios/productos de un profesional sin suscripción activa.
+    Se usa para el resumen semanal de push/email y el contador del admin.
+    """
+    profesional = models.ForeignKey(
+        'usuario.Usuario', on_delete=models.CASCADE,
+        related_name='visitas_perfil',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'visita_perfil'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['profesional', 'created_at'], name='idx_visita_perfil_prof_fecha'),
+        ]
+
+    def __str__(self):
+        return f"Visita a perfil {self.profesional_id} ({self.created_at})"

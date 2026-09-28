@@ -431,7 +431,6 @@ class Command(BaseCommand):
                 plan_id=plan,
                 expiracion=expiracion_sub,
                 cancelada=False,
-                jobs_restantes=plan.cantidad_jobs,
                 source=SubscripcionSource.MANUAL,
                 status=SubscripcionStatus.ACTIVE,
             )

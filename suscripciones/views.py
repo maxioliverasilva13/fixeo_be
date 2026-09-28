@@ -3,21 +3,27 @@ import json
 import logging
 
 from django.utils import timezone
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Plan, Subscripcion, SubscripcionStatus
+from datetime import timedelta
+
+from .models import Plan, Subscripcion, SubscripcionStatus, CampanaMarketing
 from .serializers import (
     PlanSerializer,
+    PlanAdminSerializer,
     SubscripcionSerializer,
     SubscripcionCreateSerializer,
     UsuarioSubscripcionActivaSerializer,
+    CampanaMarketingSerializer,
+    CampanaUsuarioInscriptoSerializer,
 )
 from .services.app_store_service import get_app_store_service
 from .services.google_play_service import get_google_play_service
+from .services.campanas_service import campana_vigente, usuario_elegible_plan_gratis
 
 
 logger = logging.getLogger(__name__)
@@ -26,13 +32,22 @@ logger = logging.getLogger(__name__)
 class PlanListView(APIView):
     """
     GET /planes/
-    Devuelve todos los planes activos. No requiere autenticación
-    (la pantalla de listado de planes es pública).
+    Devuelve los planes activos. No requiere autenticación (pública), pero si
+    viene un JWT válido se usa para decidir si el plan gratis es elegible.
+    El plan gratis solo se incluye si hay una campaña de marketing vigente y
+    el usuario (o un visitante anónimo) es elegible para recibirlo.
     """
 
     def get(self, request):
         planes = Plan.objects.filter(activo=True).order_by('precio')
-        serializer = PlanSerializer(planes, many=True)
+        campana = campana_vigente()
+
+        user = request.user if request.user and request.user.is_authenticated else None
+        if not campana or not usuario_elegible_plan_gratis(user):
+            planes = planes.exclude(precio=0)
+            campana = None
+
+        serializer = PlanSerializer(planes, many=True, context={'campana_activa': campana})
         return Response(serializer.data)
 
 
@@ -64,9 +79,32 @@ class SubscripcionCreateView(APIView):
         data = request.data.copy()
         data['user_id'] = request.user.pk
 
+        plan_id = data.get('plan_id')
+        plan = Plan.objects.filter(pk=plan_id).first() if plan_id else None
+        campana_actual = campana_vigente()
+        es_plan_promocionado = bool(plan and campana_actual and campana_actual.plan_id == plan.id)
+
+        campana = None
+        if plan and float(plan.precio) == 0 and not es_plan_promocionado:
+            return Response(
+                {'error': 'El plan gratis no está disponible en este momento.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if es_plan_promocionado:
+            campana = campana_actual
+            if not usuario_elegible_plan_gratis(request.user):
+                return Response(
+                    {'error': 'Ya usaste una promoción gratis anteriormente.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            data['expiracion'] = timezone.now() + timedelta(days=campana.dias_gratis)
+
         serializer = SubscripcionCreateSerializer(data=data)
         if serializer.is_valid():
             subscripcion = serializer.save()
+            if campana:
+                subscripcion.campana = campana
+                subscripcion.save(update_fields=['campana'])
             return Response(
                 SubscripcionSerializer(subscripcion).data,
                 status=status.HTTP_201_CREATED,
@@ -400,14 +438,13 @@ class AdminExtenderSubscripcionView(APIView):
     """
     POST /suscripciones/admin/extender/
     Extiende la suscripción activa de un usuario (solo admins).
-    Body: { usuario_id, dias, jobs_extra }
+    Body: { usuario_id, dias }
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
 
     def post(self, request):
         usuario_id = request.data.get('usuario_id')
         dias       = int(request.data.get('dias', 30))
-        jobs_extra = int(request.data.get('jobs_extra', 0))
 
         if not usuario_id:
             return Response({'error': 'usuario_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
@@ -427,16 +464,11 @@ class AdminExtenderSubscripcionView(APIView):
 
         from datetime import timedelta
         sub.expiracion = sub.expiracion + timedelta(days=dias)
-
-        if jobs_extra > 0:
-            sub.jobs_restantes = (sub.jobs_restantes or 0) + jobs_extra
-
-        sub.save(update_fields=['expiracion', 'jobs_restantes'])
+        sub.save(update_fields=['expiracion'])
 
         return Response({
-            'message': f'Suscripción extendida {dias} días' + (f' y {jobs_extra} jobs agregados' if jobs_extra else ''),
+            'message': f'Suscripción extendida {dias} días',
             'nueva_expiracion': sub.expiracion,
-            'jobs_restantes': sub.jobs_restantes,
         })
 
 
@@ -444,7 +476,7 @@ class AdminAsignarSubscripcionView(APIView):
     """
     POST /suscripciones/admin/asignar/
     Asigna un plan a un usuario y crea una suscripción (solo admins).
-    Body: { usuario_id, plan_id, dias, jobs_extra, fuente }
+    Body: { usuario_id, plan_id, dias, fuente }
     """
     permission_classes = [IsAuthenticated, IsAdminUser]
 
@@ -452,7 +484,6 @@ class AdminAsignarSubscripcionView(APIView):
         usuario_id = request.data.get('usuario_id')
         plan_id = request.data.get('plan_id')
         dias = int(request.data.get('dias', 30))
-        jobs_extra = int(request.data.get('jobs_extra', 0))
         fuente = request.data.get('fuente', 'manual')
 
         if not usuario_id:
@@ -486,7 +517,6 @@ class AdminAsignarSubscripcionView(APIView):
             user_id=usuario,
             plan_id=plan,
             expiracion=expiracion,
-            jobs_restantes=plan.cantidad_jobs + jobs_extra,
             source=fuente,
             status=SubscripcionStatus.ACTIVE,
         )
@@ -500,3 +530,81 @@ class AdminAsignarSubscripcionView(APIView):
             'message': f'Suscripción asignada correctamente',
             'subscripcion': SubscripcionSerializer(subscripcion).data,
         }, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# Admin: campañas de marketing
+# ---------------------------------------------------------------------------
+
+class AdminCampanaListCreateView(generics.ListCreateAPIView):
+    """
+    GET/POST /suscripciones/admin/campanas/
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = CampanaMarketingSerializer
+    queryset = CampanaMarketing.objects.all().order_by('-fecha_inicio')
+
+
+class AdminCampanaDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /suscripciones/admin/campanas/<pk>/
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = CampanaMarketingSerializer
+    queryset = CampanaMarketing.objects.all()
+
+
+class AdminCampanaToggleView(APIView):
+    """
+    PATCH /suscripciones/admin/campanas/<pk>/toggle/
+    Activa/desactiva la campaña manualmente.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    def patch(self, request, pk):
+        try:
+            campana = CampanaMarketing.objects.get(pk=pk)
+        except CampanaMarketing.DoesNotExist:
+            return Response({'error': 'Campaña no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        campana.activa = not campana.activa
+        campana.save(update_fields=['activa'])
+        return Response(CampanaMarketingSerializer(campana).data)
+
+
+class AdminCampanaUsuariosView(generics.ListAPIView):
+    """
+    GET /suscripciones/admin/campanas/<pk>/usuarios/
+    Usuarios que se registraron (crearon una suscripción) durante esta campaña.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = CampanaUsuarioInscriptoSerializer
+
+    def get_queryset(self):
+        return (
+            Subscripcion.objects
+            .filter(campana_id=self.kwargs['pk'])
+            .select_related('user_id')
+            .order_by('-created_at')
+        )
+
+
+# ---------------------------------------------------------------------------
+# Admin: planes
+# ---------------------------------------------------------------------------
+
+class AdminPlanListCreateView(generics.ListCreateAPIView):
+    """
+    GET/POST /suscripciones/admin/planes/
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = PlanAdminSerializer
+    queryset = Plan.objects.all().order_by('precio')
+
+
+class AdminPlanDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET/PATCH/DELETE /suscripciones/admin/planes/<pk>/
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = PlanAdminSerializer
+    queryset = Plan.objects.all()

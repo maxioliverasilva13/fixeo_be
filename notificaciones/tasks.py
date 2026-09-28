@@ -130,6 +130,44 @@ def notificar_usuario(usuario_id, titulo, mensaje, data=None):
     return result
 
 
+@shared_task(name='notificaciones.enviar_resumen_visitas_perfil')
+def enviar_resumen_visitas_perfil():
+    """
+    Tarea semanal (ver CELERY_BEAT_SCHEDULE): a cada profesional que recibió
+    intentos de visita a su perfil mientras no tenía suscripción activa, le
+    manda un único resumen de la semana (push + email vía notificar_usuario).
+    No envía nada si no tuvo visitas.
+    """
+    from django.db.models import Count
+    from django.utils import timezone
+    from datetime import timedelta
+    from usuario.models import VisitaPerfil
+
+    desde = timezone.now() - timedelta(days=7)
+    resumen = (
+        VisitaPerfil.objects
+        .filter(created_at__gte=desde)
+        .values('profesional_id')
+        .annotate(cantidad=Count('id'))
+    )
+
+    enviados = 0
+    for fila in resumen:
+        notificar_usuario(
+            usuario_id=fila['profesional_id'],
+            titulo='Tu perfil tuvo visitas esta semana',
+            mensaje=(
+                f"Tu perfil recibió {fila['cantidad']} visita(s) esta semana, pero no pudieron "
+                'ver tus servicios porque no tenés una suscripción activa. '
+                'Activala para no perder esos clientes.'
+            ),
+            data={'deep_link': '/planes'},
+        )
+        enviados += 1
+
+    return {'profesionales_notificados': enviados}
+
+
 WELCOME_PROFESIONAL_CHAT_PROMO = (
     '¡Hola {nombre}! 👋 Gracias por sumarte a ALaVuelta.\n\n'
     'Por ser de los primeros en registrarte, durante los primeros 3 meses '

@@ -50,13 +50,13 @@ def _postprocesar_visibilidad(results, filtrar_elegibles=True):
 
     usuario_ids = [r['id'] for r in results if r.get('tipo') == 'usuario']
     all_owner_ids = list({r['id'] for r in results if r.get('id') is not None})
-    subs_map, efectivo_counts = ({}, {})
+    subs_map = {}
     if all_owner_ids:
-        subs_map, efectivo_counts = _batch_visibility_data(all_owner_ids)
+        subs_map = _batch_visibility_data(all_owner_ids)
 
     if filtrar_elegibles and usuario_ids:
         usuarios_qs = Usuario.objects.filter(id__in=usuario_ids).prefetch_related('empresas_administradas')
-        visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u, subs_map, efectivo_counts)}
+        visibles = {u.id for u in usuarios_qs if _es_elegible_en_busqueda(u)}
         results = [r for r in results if r.get('tipo') != 'usuario' or r['id'] in visibles]
 
     return results, subs_map
@@ -107,9 +107,7 @@ def buscar_unificado(q, *, exclude_id=0, profesion_id=None, max_price=None,
     results, subs_map = _postprocesar_visibilidad(results, filtrar_elegibles=filtrar_elegibles)
 
     for r in results:
-        plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
-        r['plan_rank'] = plan_rank
-        r['plan_nombre'] = plan_nombre
+        r.update(_search_plan_fields(subs_map.get(r.get('id'))))
 
     if profesion_id:
         pid = int(profesion_id)
@@ -171,9 +169,7 @@ def recomendados_cercanos(*, tipo='profesional', exclude_id=0, profesion_id=None
         ]
 
     for r in results:
-        plan_rank, plan_nombre = _search_plan_fields(subs_map.get(r.get('id')))
-        r['plan_rank'] = plan_rank
-        r['plan_nombre'] = plan_nombre
+        r.update(_search_plan_fields(subs_map.get(r.get('id'))))
 
     if profesion_id:
         pid = int(profesion_id)

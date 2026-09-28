@@ -47,6 +47,15 @@ class ServicioViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'], url_path='obtener-servicios')
     def obtener_servicios(self, request, pk=None):
+        es_dueño = request.user.is_authenticated and str(request.user.id) == str(pk)
+        if not es_dueño:
+            from suscripciones.utils import tiene_subscripcion_activa
+            from usuario.models import Usuario
+
+            profesional = Usuario.objects.filter(pk=pk).first()
+            if profesional and not tiene_subscripcion_activa(profesional):
+                return Response([])
+
         servicios = (
             Servicio.objects
             .filter(usuario_id=pk)

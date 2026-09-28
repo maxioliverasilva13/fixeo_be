@@ -1,15 +1,25 @@
 from django.contrib import admin
-from .models import Plan, Subscripcion
+from .models import Plan, Subscripcion, CampanaMarketing
 
 
 @admin.register(Plan)
 class PlanAdmin(admin.ModelAdmin):
     list_display = (
         'nombre', 'precio', 'cantidad_personas', 'duracion',
-        'google_play_id', 'appstore_id', 'activo', 'created_at',
+        'google_play_id', 'appstore_id', 'activo', 'recomendado', 'created_at',
     )
-    list_filter = ('activo', 'created_at')
+    list_filter = ('activo', 'recomendado', 'created_at')
     search_fields = ('nombre', 'descripcion', 'google_play_id', 'appstore_id')
+
+
+@admin.register(CampanaMarketing)
+class CampanaMarketingAdmin(admin.ModelAdmin):
+    list_display = (
+        'nombre', 'plan', 'fecha_inicio', 'duracion', 'dias_gratis',
+        'cupo_usuarios', 'activa',
+    )
+    list_filter = ('activa',)
+    search_fields = ('nombre',)
 
 
 @admin.register(Subscripcion)

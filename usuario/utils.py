@@ -12,3 +12,17 @@ def obtener_localizacion_usuario(usuario):
     )
 
     return rel.localizacion if rel else None
+
+
+def registrar_visita_perfil(profesional, request=None):
+    """
+    Registra que alguien (que no es el dueño) intentó ver el perfil de un
+    profesional sin suscripción activa. `request` se usa solo para evitar
+    loguear al propio dueño; si no hay usuario autenticado se registra igual
+    (visitante anónimo).
+    """
+    if request is not None and request.user.is_authenticated and request.user.id == profesional.id:
+        return
+
+    from usuario.models import VisitaPerfil
+    VisitaPerfil.objects.create(profesional=profesional)

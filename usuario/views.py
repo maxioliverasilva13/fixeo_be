@@ -1,5 +1,5 @@
-from localizacion.utils import calcular_distancia_km
-from rest_framework import viewsets, status
+from localizacion.utils import calcular_distancia_km, reverse_geocode_country
+from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
@@ -7,7 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
 from usuario.authentication import touch_token_activity
-from usuario.models import Usuario, PasswordResetToken
+from usuario.models import Usuario, PasswordResetToken, HistorialBusqueda
 from usuario.utils import obtener_localizacion_usuario, foto_usuario_api
 from usuario.email_verification import (
     request_email_verification_code,
@@ -24,6 +24,7 @@ from usuario.serializers import (
     RequestPasswordResetSerializer, ConfirmPasswordResetSerializer,
     AdminUsuarioSerializer, AdminUsuarioUpdateSerializer,
     EnviarCodigoEmailSerializer, VerificarCodigoEmailSerializer,
+    BusquedaAgregadaSerializer, HistorialBusquedaDetalleSerializer,
 )
 from localizacion.models import Localizacion
 from empresas.models import Empresa
@@ -58,21 +59,24 @@ from usuario.mapa_helpers import (
     es_visible_en_mapa as _es_visible_en_mapa,
     flag_mal_calificado as _flag_mal_calificado,
     plan_rank_tuple_from_sub as _plan_rank_tuple_from_sub,
+    plan_rank_precio_from_sub as _plan_rank_precio_from_sub,
     resolve_map_users_from_bounds,
     resolve_map_users_national,
     serialize_usuarios_mapa,
 )
 
 
-def _search_plan_fields(sub) -> tuple[int, str | None]:
-    """plan_rank numérico (mismo criterio que el mapa) + nombre del plan activo."""
-    precio, jobs = _plan_rank_tuple_from_sub(sub)
-    rank = int(precio * 1000 + (jobs or 0))
-    nombre = None
-    if sub is not None:
-        plan = getattr(sub, 'plan_id', None)
-        nombre = getattr(plan, 'nombre', None)
-    return rank, nombre
+def _search_plan_fields(sub) -> dict:
+    """plan_rank numérico (mismo criterio que el mapa) + marca del plan activo."""
+    precio = _plan_rank_precio_from_sub(sub)
+    plan = getattr(sub, 'plan_id', None) if sub is not None else None
+    return {
+        'plan_rank': int(precio * 1000),
+        'plan_nombre': getattr(plan, 'nombre', None),
+        'plan_user_badge_url': getattr(plan, 'user_badge_url', None),
+        'plan_color': getattr(plan, 'color', None),
+        'plan_slogan': getattr(plan, 'slogan', None),
+    }
 
 
 def _sort_search_results(results: list, sort_by: str | None) -> None:
@@ -449,6 +453,20 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             return []
         return super().get_authenticators()
 
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+
+        usuario = self.get_object()
+        es_dueño = request.user.is_authenticated and request.user.id == usuario.id
+        if usuario.is_owner_empresa and not es_dueño:
+            from suscripciones.utils import tiene_subscripcion_activa
+            from usuario.utils import registrar_visita_perfil
+
+            if not tiene_subscripcion_activa(usuario):
+                registrar_visita_perfil(usuario, request)
+
+        return response
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='validate-email')
     def validate_email(self, request):
         serializer = ValidateEmailExistSerializer(data=request.data)
@@ -529,6 +547,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     is_owner_empresa=es_empresa,
                     rounded_foto_url=data.get('rounded_foto_url') or '',
                     rango_mapa_km=rango_mapa,
+                    invitado_por=data.get('invitador'),
                 )
 
                 if data.get('email_verified_via') == 'otp':
@@ -537,14 +556,18 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         data.get('email_verification_token') or '',
                     )
 
+                pais_nombre = ''
                 if lat is not None and lng is not None:
+                    # País de la dirección principal (lat/lng del signup) por
+                    # reverse geocoding — no se le pide el país al usuario.
+                    pais_nombre = reverse_geocode_country(lat, lng)
                     localizacion = Localizacion.objects.create(
                         ubicacion=data.get('direction_name') or '',
                         latitud=lat,
                         longitud=lng,
                         address=data.get('direction_name') or '',
                         city='',
-                        country='',
+                        country=pais_nombre,
                         county='',
                         state='',
                         isPrimary=True,
@@ -583,6 +606,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         raise ValueError(
                             f"Ya existe una empresa con el nombre '{nombre_empresa}'"
                         )
+                    pais_codigo = Empresa.COUNTRY_NAME_TO_CODE.get(pais_nombre.strip().lower()) if pais_nombre else None
                     crear_empresa(
                         nombre=nombre_empresa,
                         ubicacion=data.get('direction_name') or '',
@@ -596,6 +620,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         vende_servicios=data.get('vende_servicios', True),
                         vende_menu_diario=data.get('vende_menu_diario', False),
                         compartir_ubicacion_mapa=data.get('compartir_ubicacion_mapa', True),
+                        pais=pais_codigo,
                     )
 
                 usuario_id = usuario.id
@@ -619,6 +644,24 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         )
 
                 transaction.on_commit(_enqueue_bienvenida)
+
+            # Premio de invitación al profesional que invitó (si vino con un código válido).
+            # Nunca bloquear el registro si esto falla.
+            if usuario.invitado_por_id:
+                def _otorgar_premio(invitador_id=usuario.invitado_por_id):
+                    try:
+                        from suscripciones.services.referidos_service import otorgar_premio_invitacion
+                        invitador = Usuario.objects.get(pk=invitador_id)
+                        otorgar_premio_invitacion(invitador)
+                    except Exception as exc:
+                        logger.warning(
+                            'No se pudo otorgar premio de invitación (invitador=%s): %s',
+                            invitador_id,
+                            exc,
+                        )
+
+                transaction.on_commit(_otorgar_premio)
+
             refresh = RefreshToken.for_user(usuario)
             try:
                 user_data = UsuarioSerializer(usuario, context={'request': request}).data
@@ -754,7 +797,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     'activa': True,
                     'plan': sub.plan_id.nombre if sub and sub.plan_id else None,
                     'fecha_vencimiento': sub.expiracion,
-                    'jobs_restantes': sub.jobs_restantes,
                 } if sub else None,
             })
 
@@ -789,7 +831,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 'activa': True,
                 'plan': sub.plan_id.nombre if sub and sub.plan_id else None,
                 'fecha_vencimiento': sub.expiracion,
-                'jobs_restantes': sub.jobs_restantes,
             } if sub else None,
         })
 
@@ -805,7 +846,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         usuario_id = request.data.get('usuario_id')
         dias       = int(request.data.get('dias', 30))
-        jobs_extra = int(request.data.get('jobs_extra', 0))
 
         if not usuario_id:
             return Response({'error': 'usuario_id requerido'}, status=status.HTTP_400_BAD_REQUEST)
@@ -823,16 +863,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
         base = sub.expiracion if sub.expiracion > timezone.now() else timezone.now()
         sub.expiracion = base + timedelta(days=dias)
-
-        if jobs_extra > 0:
-            sub.jobs_restantes = (sub.jobs_restantes or 0) + jobs_extra
-
-        sub.save(update_fields=['expiracion', 'jobs_restantes'])
+        sub.save(update_fields=['expiracion'])
 
         return Response({
-            'message': f'Suscripción extendida {dias} días' + (f' y {jobs_extra} jobs agregados' if jobs_extra else ''),
+            'message': f'Suscripción extendida {dias} días',
             'nueva_expiracion': sub.expiracion,
-            'jobs_restantes': sub.jobs_restantes,
         })
 
     @action(detail=False, methods=['patch', 'put'], permission_classes=[IsAuthenticated], url_path='update_me')
@@ -1041,6 +1076,25 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             )
             return Response(serialize_usuarios_mapa(usuarios))
     
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='mi-invitacion')
+    def mi_invitacion(self, request):
+        usuario = request.user
+        if not usuario.is_owner_empresa:
+            return Response(
+                {'error': 'Solo los usuarios profesionales pueden invitar.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        from suscripciones.services.referidos_service import beneficio_texto
+        from django.conf import settings
+
+        frontend_url = getattr(settings, 'FRONTEND_URL', '').rstrip('/')
+        codigo = usuario.codigo_invitacion
+        return Response({
+            'codigo_invitacion': codigo,
+            'link_invitacion': f"{frontend_url}/register?ref={codigo}" if frontend_url else None,
+            'beneficio_texto': beneficio_texto(usuario),
+        })
+
     @action(detail=False, methods=['get'], url_path='search')
     def search(self, request):
         q = request.query_params.get("q", "").strip()
@@ -1057,6 +1111,17 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             sort_by=request.query_params.get('sort_by'),
             limit=int(request.query_params.get("limit", 50)),
         )
+
+        try:
+            HistorialBusqueda.objects.create(
+                query=q.lower(),
+                usuario=request.user if request.user and request.user.is_authenticated else None,
+                resultados_count=len(results),
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('No se pudo registrar HistorialBusqueda para q=%r', q)
+
         return Response(results)
 
     @action(detail=False, methods=['get'], url_path='recomendados')
@@ -1312,3 +1377,62 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
         usuario.deleted_at = timezone.now()
         usuario.save(update_fields=['is_deleted', 'is_active', 'deleted_at'])
         return Response({'message': 'Usuario eliminado correctamente'}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Admin: historial de búsquedas
+# ---------------------------------------------------------------------------
+
+class AdminBusquedaListView(generics.ListAPIView):
+    """
+    GET /api/usuarios/admin/busquedas/
+    Términos buscados, agregados por texto, ordenados alfabéticamente por
+    defecto (?sort_by=ocurrencias para ordenar por más buscado). ?q= filtra
+    por substring.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = BusquedaAgregadaSerializer
+
+    def get_queryset(self):
+        from django.db.models import Count, Max
+
+        queryset = HistorialBusqueda.objects.all()
+        q = self.request.query_params.get('q')
+        if q:
+            queryset = queryset.filter(query__icontains=q.strip().lower())
+
+        queryset = queryset.values('query').annotate(
+            ocurrencias=Count('id'),
+            usuarios_unicos=Count('usuario', distinct=True),
+            ultima_busqueda=Max('created_at'),
+        )
+
+        sort_by = self.request.query_params.get('sort_by')
+        order = self.request.query_params.get('order', 'desc')
+        if sort_by == 'ocurrencias':
+            campo = 'ocurrencias' if order == 'asc' else '-ocurrencias'
+            queryset = queryset.order_by(campo, 'query')
+        else:
+            queryset = queryset.order_by('query')
+
+        return queryset
+
+
+class AdminBusquedaDetalleView(generics.ListAPIView):
+    """
+    GET /api/usuarios/admin/busquedas/detalle/?q=<term>
+    Cada búsqueda individual hecha con ese término exacto (quién y cuándo).
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    serializer_class = HistorialBusquedaDetalleSerializer
+
+    def get_queryset(self):
+        q = (self.request.query_params.get('q') or '').strip().lower()
+        if not q:
+            return HistorialBusqueda.objects.none()
+        return (
+            HistorialBusqueda.objects
+            .filter(query=q)
+            .select_related('usuario')
+            .order_by('-created_at')
+        )

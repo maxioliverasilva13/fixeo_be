@@ -2,17 +2,17 @@
 Consultas optimizadas para pins del mapa (top-zona, rango-mapa, top-nacionales).
 Evita listar miles de filas en bbox grande y N+1 en serialización.
 
-Orden por defecto de pins: mejor plan activo (precio del plan, luego cantidad_jobs),
+Orden por defecto de pins: mejor plan activo (precio del plan),
 luego criterio del filtro (rating, distancia o precio).
 """
 from __future__ import annotations
 
 import datetime
 import math
-from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Case, Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery, When
+from django.db.models import Case, CharField, Count, DecimalField, F, IntegerField, Min, OuterRef, Prefetch, Q, Subquery, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from empresas.models import Empresa, Horarios
@@ -48,7 +48,11 @@ def flag_mal_calificado(rating, cant_calif) -> int:
     return 1 if es_mal_calificado(rating, cant_calif) else 0
 
 
-def _active_plan_precio_subquery():
+PLAN_SIN_SUBSCRIPCION_NOMBRE = 'Básica'
+
+
+def _active_plan_field_subquery(plan_field: str):
+    """Subquery genérica: valor de `plan.<plan_field>` de la suscripción activa más alta."""
     from suscripciones.models import Subscripcion
 
     now = timezone.now()
@@ -60,45 +64,79 @@ def _active_plan_precio_subquery():
         '-plan_id__precio',
         '-plan_id__cantidad_jobs',
         '-created_at',
-    ).values('plan_id__precio')[:1]
+    ).values(f'plan_id__{plan_field}')[:1]
 
 
-def _active_plan_jobs_subquery():
-    from suscripciones.models import Subscripcion
+def _plan_sin_subscripcion_field_subquery(plan_field: str):
+    """Fallback: valor de `plan.<plan_field>` del plan Básica, para usuarios sin
+    suscripción activa (se muestran como si tuvieran el plan Básica)."""
+    from suscripciones.models import Plan
 
-    now = timezone.now()
-    return Subscripcion.objects.filter(
-        user_id=OuterRef('pk'),
-        cancelada=False,
-        expiracion__gt=now,
-    ).order_by(
-        '-plan_id__precio',
-        '-plan_id__cantidad_jobs',
-        '-created_at',
-    ).values('plan_id__cantidad_jobs')[:1]
+    return Plan.objects.filter(
+        nombre=PLAN_SIN_SUBSCRIPCION_NOMBRE, activo=True,
+    ).values(plan_field)[:1]
+
+
+def _plan_field_with_fallback(plan_field: str, output_field):
+    return Coalesce(
+        Subquery(_active_plan_field_subquery(plan_field), output_field=output_field),
+        Subquery(_plan_sin_subscripcion_field_subquery(plan_field), output_field=output_field),
+        output_field=output_field,
+    )
 
 
 def annotate_map_plan_rank(qs):
-    """Plan activo más alto por usuario (para ordenar antes de visibilidad/serializar)."""
+    """Plan activo más alto por usuario (para ordenar antes de visibilidad/serializar),
+    más los campos de marca (imágenes/color/slogan) de ese plan. Si el usuario no
+    tiene suscripción activa, se le asignan los campos del plan Básica (se muestra
+    igual que un usuario Básica en vez de con el pin/badge genérico)."""
     return qs.annotate(
-        active_plan_precio=Subquery(
-            _active_plan_precio_subquery(),
-            output_field=DecimalField(max_digits=10, decimal_places=2),
+        active_plan_precio=_plan_field_with_fallback(
+            'precio', DecimalField(max_digits=10, decimal_places=2),
         ),
-        active_plan_jobs=Subquery(
-            _active_plan_jobs_subquery(),
-            output_field=IntegerField(),
+        active_plan_jobs=_plan_field_with_fallback(
+            'cantidad_jobs', IntegerField(),
+        ),
+        active_plan_badge_mapa=_plan_field_with_fallback(
+            'badge_mapa_url', CharField(max_length=500),
+        ),
+        active_plan_user_badge=_plan_field_with_fallback(
+            'user_badge_url', CharField(max_length=500),
+        ),
+        active_plan_color=_plan_field_with_fallback(
+            'color', CharField(max_length=7),
+        ),
+        active_plan_slogan=_plan_field_with_fallback(
+            'slogan', CharField(max_length=40),
+        ),
+        active_plan_nombre=_plan_field_with_fallback(
+            'nombre', CharField(max_length=200),
         ),
     )
 
 
+def plan_rank_precio_from_sub(sub) -> float:
+    if not sub:
+        return 0.0
+    return float(sub.plan_id.precio)
+
+
+def plan_rank_precio_from_usuario(usuario) -> float:
+    precio = getattr(usuario, 'active_plan_precio', None)
+    return float(precio) if precio is not None else 0.0
+
+
 def plan_rank_tuple_from_sub(sub) -> tuple[float, int]:
+    """(precio, cantidad_jobs) de la suscripción activa, o (0.0, 0) sin suscripción
+    (el llamador debe caer a plan_rank_tuple_from_usuario para el fallback a Básica)."""
     if not sub:
         return (0.0, 0)
     return (float(sub.plan_id.precio), int(sub.plan_id.cantidad_jobs))
 
 
 def plan_rank_tuple_from_usuario(usuario) -> tuple[float, int]:
+    """Mismo criterio que plan_rank_tuple_from_sub, leyendo las anotaciones de
+    annotate_map_plan_rank (ya incluyen el fallback a Básica)."""
     precio = getattr(usuario, 'active_plan_precio', None)
     jobs = getattr(usuario, 'active_plan_jobs', None)
     if precio is not None:
@@ -139,12 +177,11 @@ def sort_map_result_rows(results: list[dict], sort_by: str, subs_map: dict) -> N
     results.sort(key=sort_key)
 
 
-def batch_visibility_data(user_ids: list):
+def batch_visibility_data(user_ids: list) -> dict:
     from suscripciones.models import Subscripcion
-    from trabajos.models import Trabajo
 
     if not user_ids:
-        return {}, {}
+        return {}
 
     now = timezone.now()
     subs_map = {}
@@ -152,30 +189,16 @@ def batch_visibility_data(user_ids: list):
         Subscripcion.objects
         .filter(user_id__in=user_ids, cancelada=False, expiracion__gt=now)
         .select_related('plan_id')
-        .order_by('-plan_id__precio', '-plan_id__cantidad_jobs', '-created_at')
+        .order_by('-plan_id__precio', '-created_at')
     ):
         uid = sub.user_id_id
         if uid not in subs_map:
             subs_map[uid] = sub
 
-    hace_30_dias = now - timedelta(days=30)
-    efectivo_counts = dict(
-        Trabajo.objects
-        .filter(
-            profesional__in=user_ids,
-            metodo_pago='efectivo',
-            created_at__gte=hace_30_dias,
-            is_deleted=False,
-        )
-        .exclude(status='cancelado')
-        .values('profesional')
-        .annotate(cnt=Count('id'))
-        .values_list('profesional', 'cnt')
-    )
-    return subs_map, efectivo_counts
+    return subs_map
 
 
-def es_elegible_en_busqueda(usuario, subs_map: dict, efectivo_counts: dict) -> bool:
+def es_elegible_en_busqueda(usuario) -> bool:
     """
     Aparece en búsqueda general y trabajos urgentes aunque no comparta ubicación en el mapa.
     Misma lógica de medios de pago que el mapa, sin filtrar por compartir_ubicacion_mapa.
@@ -188,18 +211,10 @@ def es_elegible_en_busqueda(usuario, subs_map: dict, efectivo_counts: dict) -> b
     if empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado:
         return True
 
-    if empresa.acepta_efectivo:
-        sub = subs_map.get(usuario.id)
-        if sub:
-            usados = efectivo_counts.get(usuario.id, 0)
-            jobs_restantes = max(0, sub.plan_id.cantidad_jobs - usados)
-            if jobs_restantes > 0:
-                return True
-
-    return False
+    return bool(empresa.acepta_efectivo)
 
 
-def es_visible_en_mapa(usuario, subs_map: dict = None, efectivo_counts: dict = None) -> bool:
+def es_visible_en_mapa(usuario, subs_map: dict = None) -> bool:
     # Visible en el mapa si administra una empresa que comparte su ubicación.
     # (El requisito de MP vinculado / suscripción activa quedó deprecado; la
     # suscripción solo se usa para PRIORIZAR el orden, no para ocultar.)
@@ -471,7 +486,6 @@ def _national_scan_order(sort_by: str):
     """Orden SQL al escanear candidatos: plan primero, luego criterio del filtro."""
     plan_first = (
         F('active_plan_precio').desc(nulls_last=True),
-        F('active_plan_jobs').desc(nulls_last=True),
     )
     if sort_by == 'mejor_precio':
         return (*plan_first, F('min_precio_servicio').asc(nulls_last=True), 'id')
@@ -522,7 +536,7 @@ def resolve_map_users_from_bounds(
 
     user_ids = list({c['usuario_id'] for c in candidatos})
     usuarios_by_id = {u.id: u for u in usuarios_mapa_queryset(user_ids)}
-    subs_map, efectivo_counts = batch_visibility_data(user_ids)
+    subs_map = batch_visibility_data(user_ids)
 
     center_lat = float((north + south) / 2)
     center_lng = float((east + west) / 2)
@@ -530,7 +544,7 @@ def resolve_map_users_from_bounds(
     results = []
     for cand in candidatos:
         usuario = usuarios_by_id.get(cand['usuario_id'])
-        if not usuario or not es_visible_en_mapa(usuario, subs_map, efectivo_counts):
+        if not usuario or not es_visible_en_mapa(usuario, subs_map):
             continue
 
         avg_rating = float(usuario.avg_rating or 0)
@@ -577,10 +591,10 @@ def resolve_map_users_national(*, limit: int, sort_by: str) -> list[Usuario]:
         offset += batch_size
 
         batch = list(usuarios_mapa_queryset(batch_ids))
-        subs_map, efectivo_counts = batch_visibility_data(batch_ids)
+        subs_map = batch_visibility_data(batch_ids)
 
         for u in batch:
-            if not es_visible_en_mapa(u, subs_map, efectivo_counts):
+            if not es_visible_en_mapa(u, subs_map):
                 continue
             candidates.append({
                 'usuario': u,
@@ -597,6 +611,6 @@ def resolve_map_users_national(*, limit: int, sort_by: str) -> list[Usuario]:
         return []
 
     all_ids = [r['usuario'].id for r in candidates]
-    subs_map, _ = batch_visibility_data(all_ids)
+    subs_map = batch_visibility_data(all_ids)
     sort_map_result_rows(candidates, sort_by, subs_map)
     return [r['usuario'] for r in candidates[:limit]]

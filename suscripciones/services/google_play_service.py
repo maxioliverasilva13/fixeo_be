@@ -159,7 +159,6 @@ class GooglePlayService:
             subscription.plan_id = plan
             subscription.status = status_value
             subscription.cancelada = False
-            subscription.jobs_restantes = plan.cantidad_jobs
         else:
             subscription = Subscripcion(
                 user_id=usuario,
@@ -169,7 +168,6 @@ class GooglePlayService:
                 google_play_purchase_token=purchase_token,
                 expiracion=expiration,
                 status=status_value,
-                jobs_restantes=plan.cantidad_jobs,
             )
 
         subscription.save()

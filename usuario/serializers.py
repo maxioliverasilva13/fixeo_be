@@ -2,14 +2,13 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from .models import Usuario
+from .models import Usuario, HistorialBusqueda
 from .utils import foto_usuario_api
 from rol.serializers import RolSerializer
 from django.db.models import Prefetch
 from empresas.serializers import EmpresaSerializer
 from localizacion.models import Localizacion
 from django.db import transaction
-from datetime import timedelta
 from empresas.models import Horarios
 
 class UsuarioFotoApiMixin:
@@ -77,6 +76,7 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     zonas_no_trabajo = serializers.SerializerMethodField()
     cantidad_servicios = serializers.SerializerMethodField()
     cantidad_productos = serializers.SerializerMethodField()
+    perfil_disponible = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
@@ -87,9 +87,30 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
                   'cantidad_servicios', 'cantidad_productos', 'is_configured',
                   'auto_aprobacion_trabajos', 'device_tokens', 'horarios_semana', 'zonas_no_trabajo',
                   'subscripcion_activa', 'rating','cant_calif', 'rating_cliente', 'cant_calif_cliente',
-                  'es_visible_en_mapa', 'advertencias_mapa',
+                  'es_visible_en_mapa', 'advertencias_mapa', 'perfil_disponible',
                   'recibir_notificaciones', 'recibir_correos', 'activar_agente']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def _es_vista_publica(self, obj):
+        """True si quien pide el perfil es distinto del dueño (o anónimo)."""
+        request = self.context.get('request')
+        if not request:
+            return False
+        return not (request.user.is_authenticated and request.user.id == obj.id)
+
+    def _perfil_disponible(self, obj):
+        """
+        False solo cuando un tercero (no el dueño) mira el perfil de un
+        profesional sin suscripción activa: en ese caso servicios/productos
+        se ocultan, pero el perfil sigue existiendo/visible en el mapa.
+        """
+        if not obj.is_owner_empresa or not self._es_vista_publica(obj):
+            return True
+        from suscripciones.utils import tiene_subscripcion_activa
+        return tiene_subscripcion_activa(obj)
+
+    def get_perfil_disponible(self, obj):
+        return self._perfil_disponible(obj)
 
     def _puede_ver_rating_cliente(self):
         request = self.context.get('request')
@@ -124,7 +145,6 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         from django.utils import timezone
         from suscripciones.models import Subscripcion
         from suscripciones.serializers import UsuarioSubscripcionActivaSerializer
-        from trabajos.models import Trabajo
 
         subscripcion = (
             Subscripcion.objects
@@ -141,21 +161,7 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         if not subscripcion:
             return None
 
-        inicio_periodo = subscripcion.expiracion - timedelta(days=30)
-
-        trabajos_usados = Trabajo.objects.filter(
-            profesional=obj,
-            metodo_pago='efectivo',
-            created_at__gte=inicio_periodo,
-            is_deleted=False,
-        ).exclude(status='cancelado').count()
-
-        cantidad_jobs = subscripcion.plan_id.cantidad_jobs
-        jobs_restantes = max(0, cantidad_jobs - trabajos_usados)
-
-        return UsuarioSubscripcionActivaSerializer(subscripcion, context={
-            'jobs_restantes': jobs_restantes
-        }).data
+        return UsuarioSubscripcionActivaSerializer(subscripcion).data
 
     def _get_empresa_visibilidad(self, obj):
         """
@@ -169,47 +175,14 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         if not empresa:
             return False, ['No tenés empresa configurada']
 
-        from django.utils import timezone
-        from datetime import timedelta
-        from suscripciones.models import Subscripcion
-        from trabajos.models import Trabajo
-
         # MercadoPago disponible
         has_mp = empresa.acepta_tarjeta and empresa.is_mercadopago_vinculado
-
-        has_efectivo = False
-        advertencias = []
-
-        if empresa.acepta_efectivo:
-            subscripcion = (
-                Subscripcion.objects
-                .filter(user_id=obj, cancelada=False, expiracion__gt=timezone.now())
-                .select_related('plan_id')
-                .order_by('-created_at')
-                .first()
-            )
-            if subscripcion:
-                inicio_periodo = subscripcion.expiracion - timedelta(days=30)
-                usados = Trabajo.objects.filter(
-                    profesional=obj,
-                    metodo_pago='efectivo',
-                    created_at__gte=inicio_periodo,
-                    is_deleted=False,
-                ).exclude(status='cancelado').count()
-                jobs_restantes = max(0, subscripcion.plan_id.cantidad_jobs - usados)
-                if jobs_restantes > 0:
-                    has_efectivo = True
-                else:
-                    advertencias.append(
-                        'Alcanzaste el límite de trabajos en efectivo de tu suscripción'
-                    )
-            else:
-                advertencias.append('No tenés suscripción activa para cobrar en efectivo')
+        has_efectivo = bool(empresa.acepta_efectivo)
 
         if has_mp or has_efectivo:
             return True, []
 
-        return False, advertencias if advertencias else ['No tenés ningún método de pago disponible']
+        return False, ['No tenés ningún método de pago disponible']
 
     def get_es_visible_en_mapa(self, obj):
         if not hasattr(self, '_visibilidad_cache'):
@@ -241,11 +214,13 @@ class UsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         return UsuarioLocalizacionSerializer(usuario_localizaciones, many=True).data
 
     def get_servicios(self, obj):
-        if obj.is_owner_empresa:
-            from servicios.serializers import ServicioSerializer
-            servicios = obj.servicios.select_related('profesion').all()
-            return ServicioSerializer(servicios, many=True).data
-        return []
+        if not obj.is_owner_empresa:
+            return []
+        if not self._perfil_disponible(obj):
+            return []
+        from servicios.serializers import ServicioSerializer
+        servicios = obj.servicios.select_related('profesion').all()
+        return ServicioSerializer(servicios, many=True).data
 
     def get_cantidad_servicios(self, obj):
         """Cantidad de servicios publicados. Coincide con len(get_servicios)."""
@@ -374,7 +349,7 @@ class UsuarioPublicoSerializer(UsuarioSerializer):
             'profesiones', 'localizaciones', 'localizacion_principal', 'servicios',
             'cantidad_servicios', 'cantidad_productos',
             'horarios_semana', 'zonas_no_trabajo', 'rating', 'cant_calif',
-            'es_visible_en_mapa',
+            'es_visible_en_mapa', 'perfil_disponible',
         ]
 
 
@@ -551,6 +526,7 @@ class RegistroSerializer(serializers.Serializer):
     # Registro social: se puede omitir si se envía firebase_token válido.
     email_verification_token = serializers.CharField(required=False, allow_blank=True)
     firebase_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    codigo_invitacion = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     def validate_compartir_ubicacion_mapa(self, value):
         if value is None:
@@ -652,6 +628,10 @@ class RegistroSerializer(serializers.Serializer):
             attrs['email_verified_via'] = 'otp'
             attrs['email_verification_token'] = email_verification_token
 
+        codigo_invitacion = (attrs.pop('codigo_invitacion', '') or '').strip()
+        # Un código inválido o de un link viejo no debe bloquear el registro: se ignora en silencio.
+        attrs['invitador'] = Usuario.resolver_invitador(codigo_invitacion) if codigo_invitacion else None
+
         return attrs
 
 
@@ -721,12 +701,19 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
     vende_servicios = serializers.SerializerMethodField()
     vende_menu_diario = serializers.SerializerMethodField()
     plan_rank = serializers.SerializerMethodField()
+    badge_mapa_url = serializers.SerializerMethodField()
+    plan_user_badge_url = serializers.SerializerMethodField()
+    plan_color = serializers.SerializerMethodField()
+    plan_slogan = serializers.SerializerMethodField()
+    plan_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = Usuario
-        fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio', 
+        fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio',
                   'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta',
-                  'vende_productos', 'vende_servicios', 'vende_menu_diario', 'plan_rank', 'rating', 'cant_calif']
+                  'vende_productos', 'vende_servicios', 'vende_menu_diario', 'plan_rank',
+                  'badge_mapa_url', 'plan_user_badge_url', 'plan_color', 'plan_slogan', 'plan_nombre',
+                  'rating', 'cant_calif']
         read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 
                             'trabajo_domicilio', 'trabajo_local', 
                             'rango_mapa_km', 'esta_abierta']
@@ -807,9 +794,24 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         return bool(empresa and empresa.vende_menu_diario)
 
     def get_plan_rank(self, obj):
-        from usuario.mapa_helpers import plan_rank_tuple_from_usuario
-        precio, jobs = plan_rank_tuple_from_usuario(obj)
-        return int(precio * 1000 + (jobs or 0))
+        from usuario.mapa_helpers import plan_rank_precio_from_usuario
+        precio = plan_rank_precio_from_usuario(obj)
+        return int(precio * 1000)
+
+    def get_badge_mapa_url(self, obj):
+        return getattr(obj, 'active_plan_badge_mapa', None)
+
+    def get_plan_user_badge_url(self, obj):
+        return getattr(obj, 'active_plan_user_badge', None)
+
+    def get_plan_color(self, obj):
+        return getattr(obj, 'active_plan_color', None)
+
+    def get_plan_slogan(self, obj):
+        return getattr(obj, 'active_plan_slogan', None)
+
+    def get_plan_nombre(self, obj):
+        return getattr(obj, 'active_plan_nombre', None)
 
     def get_esta_abierta(self, obj):
         empresa = self._get_empresa(obj)
@@ -943,3 +945,44 @@ class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         return instance
+
+
+class BusquedaAgregadaSerializer(serializers.Serializer):
+    """Fila agregada de HistorialBusqueda.objects.values('query').annotate(...)."""
+    query = serializers.CharField()
+    ocurrencias = serializers.IntegerField()
+    usuarios_unicos = serializers.IntegerField()
+    ultima_busqueda = serializers.DateTimeField()
+    profesion_sugerida = serializers.SerializerMethodField()
+
+    def get_profesion_sugerida(self, obj):
+        """Si el término buscado hace match con una profesión ya cargada, la
+        devuelve (para que el admin vea que 'ya tenemos eso en la base')."""
+        from django.contrib.postgres.search import TrigramSimilarity
+        from profesion.models import Profesion
+
+        query = (obj.get('query') if isinstance(obj, dict) else obj.query) or ''
+        match = (
+            Profesion.objects
+            .annotate(similarity=TrigramSimilarity('nombre', query))
+            .filter(similarity__gt=0.3)
+            .order_by('-similarity')
+            .first()
+        )
+        if not match:
+            return None
+        return {'id': match.id, 'nombre': match.nombre}
+
+
+class HistorialBusquedaUsuarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Usuario
+        fields = ['id', 'nombre', 'apellido', 'correo']
+
+
+class HistorialBusquedaDetalleSerializer(serializers.ModelSerializer):
+    usuario = HistorialBusquedaUsuarioSerializer(read_only=True)
+
+    class Meta:
+        model = HistorialBusqueda
+        fields = ['id', 'query', 'usuario', 'resultados_count', 'created_at']

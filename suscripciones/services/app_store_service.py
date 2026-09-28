@@ -444,7 +444,6 @@ class AppStoreService:
             subscription.plan_id = plan
             subscription.status = SubscripcionStatus.ACTIVE
             subscription.cancelada = False
-            subscription.jobs_restantes = plan.cantidad_jobs
         else:
             subscription = Subscripcion(
                 user_id=usuario,
@@ -454,7 +453,6 @@ class AppStoreService:
                 appstore_original_transaction_id=transaction.get('original_transaction_id'),
                 expiracion=expiration,
                 status=SubscripcionStatus.ACTIVE,
-                jobs_restantes=plan.cantidad_jobs,
             )
 
         subscription.save()
@@ -617,8 +615,7 @@ class AppStoreService:
                         subtype,
                     )
                     subscription.plan_id = plan
-                    subscription.jobs_restantes = plan.cantidad_jobs
-                    update_fields.extend(['plan_id', 'jobs_restantes'])
+                    update_fields.append('plan_id')
                     if subscription.status != SubscripcionStatus.ACTIVE:
                         subscription.status = SubscripcionStatus.ACTIVE
                         update_fields.append('status')

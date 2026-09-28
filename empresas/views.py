@@ -487,6 +487,125 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             }
         })
 
+    @action(detail=False, methods=['get'], url_path='mi-empresa/clientes')
+    def mi_empresa_clientes(self, request):
+        """Cartera de clientes del profesional logueado: agrega Ordenes (productos/menú)
+        y Trabajos (servicios) por cliente, con estadísticas detalladas de cada uno."""
+        from django.db.models import Count, Max, Min, Sum
+        from usuario.models import Usuario
+        from carritos.models import Orden
+        from trabajos.models import Trabajo
+        from cupones.models import Cupon
+
+        empresa = Empresa.objects.filter(admin_id=request.user).first()
+        if not empresa:
+            return Response(
+                {'error': 'No tenés una empresa asociada'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not request.user.is_owner_empresa:
+            return Response(
+                {'error': 'Solo el propietario puede ver su cartera de clientes'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ordenes_qs = (
+            Orden.objects.filter(empresa=empresa)
+            .exclude(status='cancelada')
+            .values('usuario_id')
+            .annotate(
+                total_ordenes=Count('id'),
+                total_gastado_productos=Sum('total'),
+                primera_orden=Min('created_at'),
+                ultima_orden=Max('created_at'),
+            )
+        )
+        trabajos_qs = (
+            Trabajo.objects.filter(profesional=request.user, status='finalizado')
+            .values('usuario_id')
+            .annotate(
+                total_trabajos=Count('id'),
+                total_gastado_servicios=Sum('precio_final'),
+                primer_trabajo=Min('created_at'),
+                ultimo_trabajo=Max('created_at'),
+            )
+        )
+        cupones_activos_qs = (
+            Cupon.objects.filter(empresa=empresa, fecha_uso__isnull=True)
+            .filter(Q(fecha_expiracion__isnull=True) | Q(fecha_expiracion__gt=timezone.now()))
+            .values('cliente_id')
+            .annotate(cantidad=Count('id'))
+        )
+        cupones_usados_qs = (
+            Cupon.objects.filter(empresa=empresa, fecha_uso__isnull=False)
+            .values('cliente_id')
+            .annotate(cantidad=Count('id'))
+        )
+
+        por_cliente = {}
+
+        def _entry(uid):
+            return por_cliente.setdefault(uid, {
+                'cliente_id': uid,
+                'total_ordenes': 0,
+                'total_trabajos': 0,
+                'total_gastado_productos': 0.0,
+                'total_gastado_servicios': 0.0,
+                'primera_compra': None,
+                'ultima_compra': None,
+                'cupones_activos': 0,
+                'cupones_usados': 0,
+            })
+
+        def _merge_fecha(entry, campo, candidata, comparador):
+            if candidata and (not entry[campo] or comparador(candidata, entry[campo])):
+                entry[campo] = candidata
+
+        for row in ordenes_qs:
+            entry = _entry(row['usuario_id'])
+            entry['total_ordenes'] = row['total_ordenes'] or 0
+            entry['total_gastado_productos'] = float(row['total_gastado_productos'] or 0)
+            _merge_fecha(entry, 'primera_compra', row['primera_orden'], lambda a, b: a < b)
+            _merge_fecha(entry, 'ultima_compra', row['ultima_orden'], lambda a, b: a > b)
+
+        for row in trabajos_qs:
+            entry = _entry(row['usuario_id'])
+            entry['total_trabajos'] = row['total_trabajos'] or 0
+            entry['total_gastado_servicios'] = float(row['total_gastado_servicios'] or 0)
+            _merge_fecha(entry, 'primera_compra', row['primer_trabajo'], lambda a, b: a < b)
+            _merge_fecha(entry, 'ultima_compra', row['ultimo_trabajo'], lambda a, b: a > b)
+
+        for row in cupones_activos_qs:
+            entry = por_cliente.get(row['cliente_id'])
+            if entry:
+                entry['cupones_activos'] = row['cantidad']
+
+        for row in cupones_usados_qs:
+            entry = por_cliente.get(row['cliente_id'])
+            if entry:
+                entry['cupones_usados'] = row['cantidad']
+
+        if por_cliente:
+            usuarios = {u.id: u for u in Usuario.objects.filter(id__in=por_cliente.keys())}
+            for uid, entry in por_cliente.items():
+                u = usuarios.get(uid)
+                entry['nombre'] = f"{u.nombre} {u.apellido}".strip() if u else 'Cliente'
+                entry['avatar_url'] = (u.rounded_foto_url or u.foto_url) if u else None
+                entry['total_gastado'] = entry['total_gastado_productos'] + entry['total_gastado_servicios']
+                cantidad_compras = entry['total_ordenes'] + entry['total_trabajos']
+                entry['ticket_promedio'] = (
+                    round(entry['total_gastado'] / cantidad_compras, 2) if cantidad_compras else 0.0
+                )
+                for campo in ('primera_compra', 'ultima_compra'):
+                    if entry[campo]:
+                        entry[campo] = entry[campo].isoformat()
+
+        sort = request.query_params.get('sort')
+        sort_key = 'total_ordenes' if sort == 'total_ordenes' else 'total_gastado'
+        resultados = sorted(por_cliente.values(), key=lambda r: r[sort_key], reverse=True)
+
+        return Response(resultados)
+
     @action(detail=False, methods=['get'], url_path='estadisticas')
     def estadisticas(self, request):
         """Panel de estadísticas del negocio (solo owner de empresa)."""
@@ -827,6 +946,17 @@ class ProductoViewSet(viewsets.ModelViewSet):
 
         if empresa_id:
             queryset = queryset.filter(empresa_id=empresa_id)
+
+            user = self.request.user
+            es_dueño = bool(user and user.is_authenticated and Empresa.objects.filter(
+                id=empresa_id, admin_id=user
+            ).exists())
+            if not es_dueño:
+                from suscripciones.utils import tiene_subscripcion_activa
+
+                empresa = Empresa.objects.filter(id=empresa_id).select_related('admin_id').first()
+                if empresa and not tiene_subscripcion_activa(empresa.admin_id):
+                    queryset = queryset.none()
 
         if categoria_id:
             queryset = queryset.filter(categoria_id=categoria_id)

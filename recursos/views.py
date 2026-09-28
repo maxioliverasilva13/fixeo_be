@@ -127,6 +127,10 @@ class RecursosViewSet(viewsets.ViewSet):
         
         file = request.FILES['file']
         is_profile = request.query_params.get('isProfile', 'false').lower() == 'true'
+        # raw=true: no comprimir/convertir (necesario para PNG con transparencia,
+        # p.ej. las imágenes de pin de mapa / badge de plan que llevan un agujero
+        # transparente donde va la foto del usuario).
+        skip_compression = request.query_params.get('raw', 'false').lower() == 'true'
         
         supabase_url = config('SUPABASE_URL')
         supabase_key = config('SUPABASE_KEY')
@@ -153,23 +157,24 @@ class RecursosViewSet(viewsets.ViewSet):
                 'size': file.size,
             }
             
-            # Si es imagen, comprimir
-            if is_image:
+            # Si es imagen, comprimir (salvo que se pida preservar el archivo tal cual)
+            if is_image and not skip_compression:
                 if is_profile:
                     file_content = self._compress_image(file_content, max_size=(600, 600), quality=80)
                 else:
                     file_content = self._compress_image(file_content, max_size=(1080, 1080), quality=82)
-            
+
             # Subir archivo principal
             file_path = f"uploads/{base_filename}{file_extension}"
             public_url = self._upload_to_supabase(
-                file_content, file_path, content_type if not is_image else 'image/jpeg',
+                file_content, file_path,
+                content_type if (not is_image or skip_compression) else 'image/jpeg',
                 supabase_url, supabase_key, supabase_bucket
             )
             result['url'] = public_url
-            
+
             # Si es perfil y es imagen, crear versión redondeada
-            if is_profile and is_image:
+            if is_profile and is_image and not skip_compression:
                 rounded_content = self._create_rounded_image(file_content)
                 if rounded_content:
                     rounded_path = f"uploads/{base_filename}_rounded.png"

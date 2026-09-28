@@ -910,6 +910,30 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             precio_max = None
             newStatus = 'aceptado' if profesional.auto_aprobacion_trabajos else 'pendiente'
 
+        cupon = None
+        cupon_codigo = (serializer.validated_data.get('cupon_codigo') or '').strip()
+        if cupon_codigo and empresa_profesional:
+            from cupones.views import calcular_monto_descuento, resolver_cupon_para_canje
+
+            cupon = resolver_cupon_para_canje(
+                codigo=cupon_codigo, empresa_id=empresa_profesional.id, cliente_id=usuario.id,
+            )
+            if not cupon:
+                return Response(
+                    {'error': 'El cupón ingresado no es válido o ya no está disponible'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if requiere_estimacion_precio:
+                # Sin precio_final fijo todavía: el descuento se aplica a los dos
+                # extremos del rango que se le muestra al cliente.
+                descuento_min = calcular_monto_descuento(cupon, precio_min)
+                descuento_max = calcular_monto_descuento(cupon, precio_max)
+                precio_min = max(Decimal('0'), precio_min - Decimal(str(descuento_min)))
+                precio_max = max(Decimal('0'), precio_max - Decimal(str(descuento_max)))
+            else:
+                descuento = calcular_monto_descuento(cupon, precio_final)
+                precio_final = max(Decimal('0'), precio_final - Decimal(str(descuento)))
+
         trabajo = Trabajo.objects.create(
             usuario=usuario,
             profesional=profesional,
@@ -926,8 +950,11 @@ class TrabajoViewSet(viewsets.ModelViewSet):
             localizacion=localizacion,
             status=newStatus,
             metodo_pago=metodo_pago,
-            currency=currency,  
+            currency=currency,
         )
+
+        if cupon:
+            cupon.marcar_usado(trabajo=trabajo)
 
         for servicio in servicios:
             TrabajoServicio.objects.create(

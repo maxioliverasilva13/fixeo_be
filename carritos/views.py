@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from django.db import IntegrityError, transaction
 from rest_framework import viewsets, status
 from rest_framework.response import Response
@@ -499,6 +500,23 @@ class CarritoViewSet(viewsets.ModelViewSet):
         orden_currency = next(iter(divisas_en_carrito), empresa.moneda_local)
 
         total = carrito.total
+
+        cupon = None
+        cupon_codigo = (serializer.validated_data.get('cupon_codigo') or '').strip()
+        if cupon_codigo:
+            from cupones.views import calcular_monto_descuento, resolver_cupon_para_canje
+
+            cupon = resolver_cupon_para_canje(
+                codigo=cupon_codigo, empresa_id=empresa.id, cliente_id=request.user.id,
+            )
+            if not cupon:
+                return Response(
+                    {'error': 'El cupón ingresado no es válido o ya no está disponible'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            descuento = calcular_monto_descuento(cupon, total)
+            total = max(Decimal('0'), total - Decimal(str(descuento)))
+
         mp_response = None
         if metodo_pago == 'mercadopago':
             from pagos.services import ejecutar_pago_mp, calcular_comision
@@ -568,6 +586,9 @@ class CarritoViewSet(viewsets.ModelViewSet):
                 currency=orden_currency,
                 fecha_entrega=fecha_entrega,
             )
+
+            if cupon:
+                cupon.marcar_usado(orden=orden)
 
             for item in items_carrito:
                 OrdenItem.objects.create(

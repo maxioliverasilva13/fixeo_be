@@ -147,11 +147,6 @@ def estadisticas_suscripciones(start, end):
         cancelada=True, updated_at__gte=start, updated_at__lt=end
     ).count()
 
-    # Jobs restantes promedio
-    jobs_promedio = subs_qs.filter(
-        cancelada=False, expiracion__gt=ahora
-    ).aggregate(promedio=Avg('jobs_restantes'))['promedio'] or 0
-
     # Subs por mes (últimos 12 meses)
     hace_12_meses = ahora - timedelta(days=365)
     subs_por_mes = list(
@@ -169,7 +164,6 @@ def estadisticas_suscripciones(start, end):
         'expiradas': subs_expiradas,
         'nuevas_en_periodo': nuevas_periodo,
         'canceladas_en_periodo': canceladas_periodo,
-        'jobs_restantes_promedio': round(jobs_promedio, 2),
         'por_plan': [
             {
                 'plan': s['plan_id__nombre'],
@@ -210,7 +204,6 @@ def estadisticas_planes():
                 'precio': _decimal_str(p.precio),
                 'duracion_dias': p.duracion.days if p.duracion else 0,
                 'cantidad_personas': p.cantidad_personas,
-                'cantidad_jobs': p.cantidad_jobs,
                 'activo': p.activo,
                 'total_subscripciones': p.subscripciones.count(),
                 'subscripciones_activas': p.subscripciones.filter(

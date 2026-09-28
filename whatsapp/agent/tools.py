@@ -1001,11 +1001,14 @@ def finalizar_registro_profesional(conv):
             UsuarioLocalizacion.objects.create(usuario=usuario, localizacion=localizacion, es_principal=True)
             if prof:
                 UsuarioProfesion.objects.get_or_create(usuario=usuario, profesion=prof)
+            from empresas.models import Empresa
+            pais_codigo = Empresa.COUNTRY_NAME_TO_CODE.get((localizacion.country or '').strip().lower())
             empresa = crear_empresa(
                 nombre=(d.get('nombre_empresa') or f"{usuario.nombre} {usuario.apellido}").strip(),
                 ubicacion=loc['ubicacion'], latitud=Decimal(str(loc['lat'])), longitud=Decimal(str(loc['lon'])),
                 admin_id=usuario, descripcion='', unipersonal=True, localizacion=localizacion,
                 vende_productos=vende_prod, vende_servicios=vende_serv, vende_menu_diario=False,
+                pais=pais_codigo,
             )
             for s in d.get('servicios', []):
                 sp = _resolver_profesion(s.get('profesion')) or prof

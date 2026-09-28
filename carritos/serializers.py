@@ -254,6 +254,7 @@ class OrdenCreateSerializer(serializers.Serializer):
                                 help_text='Primeros 6 dígitos de la tarjeta')
     is_saved_card = serializers.BooleanField(required=False, default=False)
     tarjeta_id = serializers.IntegerField(required=False, allow_null=True, default=None)
+    cupon_codigo = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate(self, data):
         if data['metodo_pago'] == 'mercadopago' and not data.get('card_token'):

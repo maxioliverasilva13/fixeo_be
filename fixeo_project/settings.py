@@ -1,5 +1,6 @@
 from pathlib import Path
 from decouple import config
+from celery.schedules import crontab
 import json
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,6 +41,7 @@ INSTALLED_APPS = [
     'pagos',
     'whatsapp',
     'moderacion',
+    'cupones',
     'rest_framework_simplejwt.token_blacklist',
     'channels',
     'survey'
@@ -283,6 +285,10 @@ CELERY_BEAT_SCHEDULE = {
     'recordatorios-reservas': {
         'task': 'trabajos.enviar_recordatorios_reservas',
         'schedule': CELERY_RECORDATORIO_RESERVA_INTERVAL_SECONDS,
+    },
+    'resumen-semanal-visitas-perfil': {
+        'task': 'notificaciones.enviar_resumen_visitas_perfil',
+        'schedule': crontab(day_of_week='monday', hour=9, minute=0),
     },
 }
 

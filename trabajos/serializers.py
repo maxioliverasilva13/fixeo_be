@@ -225,6 +225,7 @@ class TrabajoCreateSerializer(serializers.Serializer):
         default='efectivo',
         required=False,
     )
+    cupon_codigo = serializers.CharField(required=False, allow_blank=True, default='')
 
     def validate_servicios_ids(self, value):
         if not value:

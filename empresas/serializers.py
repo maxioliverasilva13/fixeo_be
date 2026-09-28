@@ -16,6 +16,8 @@ class EmpresaSerializer(serializers.ModelSerializer):
     subscripcion = serializers.SerializerMethodField()
     admin_id = serializers.IntegerField(source='admin_id.id', read_only=True)
     tiene_landing_activa = serializers.SerializerMethodField()
+    visitas_perfil_count = serializers.SerializerMethodField()
+    admin_correo = serializers.SerializerMethodField()
 
     class Meta:
         model = Empresa
@@ -54,55 +56,30 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'landing_foto_url',
             'tiene_landing_page',
             'tiene_landing_activa',
+            'visitas_perfil_count',
+            'admin_correo',
         ]
-        read_only_fields = ['currency', 'moneda_local', 'tiene_landing_activa']
+        read_only_fields = ['currency', 'moneda_local', 'tiene_landing_activa', 'admin_correo']
 
-    def _get_efectivo_jobs_restantes(self, obj):
-        """Devuelve (subscripcion, jobs_restantes_efectivo) o (None, 0). Cachea por empresa."""
-        cache_key = '_efectivo_cache'
-        if not hasattr(self, cache_key):
-            setattr(self, cache_key, {})
-        cache = getattr(self, cache_key)
-        if obj.id in cache:
-            return cache[obj.id]
+    def get_visitas_perfil_count(self, obj):
+        """Solo visible para el admin del sistema o el dueño de la empresa."""
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        if not (request.user.is_staff or request.user.id == obj.admin_id_id):
+            return None
+        from usuario.models import VisitaPerfil
+        return VisitaPerfil.objects.filter(profesional_id=obj.admin_id_id).count()
 
-        from suscripciones.models import Subscripcion
-        from trabajos.models import Trabajo
-        from django.utils import timezone
-        from datetime import timedelta
-
-        subscripcion = (
-            Subscripcion.objects
-            .filter(user_id=obj.admin_id, cancelada=False, expiracion__gt=timezone.now())
-            .select_related('plan_id')
-            .order_by('-created_at')
-            .first()
-        )
-        if not subscripcion:
-            cache[obj.id] = (None, 0)
-            return None, 0
-
-        inicio_periodo = subscripcion.expiracion - timedelta(days=30)
-        usados = Trabajo.objects.filter(
-            profesional=obj.admin_id,
-            metodo_pago='efectivo',
-            created_at__gte=inicio_periodo,
-            is_deleted=False,
-        ).exclude(status='cancelado').count()
-
-        result = (subscripcion, max(0, subscripcion.plan_id.cantidad_jobs - usados))
-        cache[obj.id] = result
-        return result
+    def get_admin_correo(self, obj):
+        """Solo lectura, solo para staff: el correo del dueño de la empresa."""
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated or not request.user.is_staff:
+            return None
+        return obj.admin_id.correo
 
     def get_efectivo_disponible(self, obj):
-        """
-        acepta_efectivo=True solo funciona si el admin tiene suscripción activa
-        y le quedan trabajos en efectivo disponibles.
-        """
-        if not obj.acepta_efectivo:
-            return False
-        _, jobs_restantes = self._get_efectivo_jobs_restantes(obj)
-        return jobs_restantes > 0
+        return bool(obj.acepta_efectivo)
 
     def get_metodos_pago_disponibles(self, obj):
         """Lista de métodos de pago que la empresa realmente puede usar."""
@@ -110,9 +87,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
         if obj.acepta_tarjeta and obj.is_mercadopago_vinculado:
             metodos.append('mercadopago')
         if obj.acepta_efectivo:
-            _, jobs_restantes = self._get_efectivo_jobs_restantes(obj)
-            if jobs_restantes > 0:
-                metodos.append('efectivo')
+            metodos.append('efectivo')
         return metodos
 
     def get_tiene_landing_activa(self, obj):
@@ -141,10 +116,8 @@ class EmpresaSerializer(serializers.ModelSerializer):
                 'nombre': subscripcion.plan_id.nombre,
                 'precio': str(subscripcion.plan_id.precio),
                 'duracion_dias': subscripcion.plan_id.duracion.days if subscripcion.plan_id.duracion else 0,
-                'cantidad_jobs': subscripcion.plan_id.cantidad_jobs,
             },
             'expiracion': subscripcion.expiracion.isoformat() if subscripcion.expiracion else None,
-            'jobs_restantes': subscripcion.jobs_restantes,
             'cancelada': subscripcion.cancelada,
             'source': subscripcion.source,
             'status': subscripcion.status,

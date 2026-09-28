@@ -50,6 +50,7 @@ def crear_empresa(
     vende_menu_diario=False,
     compartir_ubicacion_mapa=True,
     tiene_landing_page=None,
+    pais=None,
 ):
     if not validar_nombre_empresa_unico(nombre):
         raise ValueError(f"Ya existe una empresa con el nombre '{nombre}'")
@@ -75,7 +76,14 @@ def crear_empresa(
         compartir_ubicacion_mapa=compartir_ubicacion_mapa,
         tiene_landing_page=bool(tiene_landing_page),
         subdomain=generar_subdomain_unico(nombre),
+        # 'pais' se detecta por reverse geocoding de la dirección principal (ver
+        # usuario/views.py:registro); si no se pudo detectar, queda el default del
+        # modelo ('UY') en vez de forzar un país incorrecto.
+        **({'pais': pais} if pais else {}),
     )
+    if pais:
+        empresa.sync_currency_from_pais(save=False)
+        empresa.save(update_fields=['currency', 'updated_at'])
 
     return empresa
 
