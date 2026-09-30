@@ -214,6 +214,18 @@ def es_elegible_en_busqueda(usuario) -> bool:
     return bool(empresa.acepta_efectivo)
 
 
+def _tiene_profesion_aprobada(usuario) -> bool:
+    """Un profesional necesita al menos una profesión aprobada para listarse en
+    el mapa: si todas las suyas están pendientes o fueron rechazadas por el
+    admin, no aparece (evita listar rubros no revisados/inválidos)."""
+    from profesion.models import Profesion
+
+    ups = getattr(usuario, '_prefetched_objects_cache', {}).get('usuario_profesiones')
+    if ups is None:
+        ups = usuario.usuario_profesiones.select_related('profesion').all()
+    return any(up.profesion.estado == Profesion.ESTADO_APROBADA for up in ups)
+
+
 def es_visible_en_mapa(usuario, subs_map: dict = None) -> bool:
     # Visible en el mapa si administra una empresa que comparte su ubicación.
     # (El requisito de MP vinculado / suscripción activa quedó deprecado; la
@@ -222,7 +234,9 @@ def es_visible_en_mapa(usuario, subs_map: dict = None) -> bool:
     empresa = emps[0] if emps else usuario.empresas_administradas.first()
     if not empresa:
         return False
-    return bool(empresa.compartir_ubicacion_mapa)
+    if not empresa.compartir_ubicacion_mapa:
+        return False
+    return _tiene_profesion_aprobada(usuario)
 
 
 def _prefetch_empresas():
