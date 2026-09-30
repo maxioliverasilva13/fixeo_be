@@ -74,6 +74,7 @@ class CarritoItemCreateSerializer(serializers.Serializer):
     fecha_menu = serializers.DateField(required=False, allow_null=True)
 
 
+
 class OrdenItemSerializer(serializers.ModelSerializer):
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_codigo = serializers.CharField(source='producto.codigo', read_only=True)
