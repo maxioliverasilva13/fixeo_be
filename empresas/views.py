@@ -490,7 +490,14 @@ class EmpresaViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='mi-empresa/clientes')
     def mi_empresa_clientes(self, request):
         """Cartera de clientes del profesional logueado: agrega Ordenes (productos/menú)
-        y Trabajos (servicios) por cliente, con estadísticas detalladas de cada uno."""
+        y Trabajos (servicios) por cliente, con estadísticas detalladas de cada uno.
+
+        Cada orden/trabajo tiene su propia moneda (`currency`), así que los montos se
+        agregan agrupados por moneda (`*_por_moneda`) en vez de sumarse todos juntos
+        en un único número — sumar monedas distintas como si fueran una sola daría un
+        total sin sentido. `total_gastado` (para ordenar) usa sólo la moneda principal
+        de la empresa; el detalle completo multi-moneda va en `total_gastado_por_moneda`.
+        """
         from django.db.models import Count, Max, Min, Sum
         from usuario.models import Usuario
         from carritos.models import Orden
@@ -509,23 +516,25 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        moneda_default = empresa.currency or 'UYU'
+
         ordenes_qs = (
             Orden.objects.filter(empresa=empresa)
             .exclude(status='cancelada')
-            .values('usuario_id')
+            .values('usuario_id', 'currency')
             .annotate(
                 total_ordenes=Count('id'),
-                total_gastado_productos=Sum('total'),
+                total_gastado=Sum('total'),
                 primera_orden=Min('created_at'),
                 ultima_orden=Max('created_at'),
             )
         )
         trabajos_qs = (
             Trabajo.objects.filter(profesional=request.user, status='finalizado')
-            .values('usuario_id')
+            .values('usuario_id', 'currency')
             .annotate(
                 total_trabajos=Count('id'),
-                total_gastado_servicios=Sum('precio_final'),
+                total_gastado=Sum('precio_final'),
                 primer_trabajo=Min('created_at'),
                 ultimo_trabajo=Max('created_at'),
             )
@@ -549,8 +558,8 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 'cliente_id': uid,
                 'total_ordenes': 0,
                 'total_trabajos': 0,
-                'total_gastado_productos': 0.0,
-                'total_gastado_servicios': 0.0,
+                'gastado_por_moneda': {},
+                'compras_por_moneda': {},
                 'primera_compra': None,
                 'ultima_compra': None,
                 'cupones_activos': 0,
@@ -561,17 +570,22 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             if candidata and (not entry[campo] or comparador(candidata, entry[campo])):
                 entry[campo] = candidata
 
+        def _sumar_moneda(entry, moneda, monto, cantidad):
+            moneda = moneda or moneda_default
+            entry['gastado_por_moneda'][moneda] = entry['gastado_por_moneda'].get(moneda, 0.0) + float(monto or 0)
+            entry['compras_por_moneda'][moneda] = entry['compras_por_moneda'].get(moneda, 0) + cantidad
+
         for row in ordenes_qs:
             entry = _entry(row['usuario_id'])
-            entry['total_ordenes'] = row['total_ordenes'] or 0
-            entry['total_gastado_productos'] = float(row['total_gastado_productos'] or 0)
+            entry['total_ordenes'] += row['total_ordenes'] or 0
+            _sumar_moneda(entry, row['currency'], row['total_gastado'], row['total_ordenes'] or 0)
             _merge_fecha(entry, 'primera_compra', row['primera_orden'], lambda a, b: a < b)
             _merge_fecha(entry, 'ultima_compra', row['ultima_orden'], lambda a, b: a > b)
 
         for row in trabajos_qs:
             entry = _entry(row['usuario_id'])
-            entry['total_trabajos'] = row['total_trabajos'] or 0
-            entry['total_gastado_servicios'] = float(row['total_gastado_servicios'] or 0)
+            entry['total_trabajos'] += row['total_trabajos'] or 0
+            _sumar_moneda(entry, row['currency'], row['total_gastado'], row['total_trabajos'] or 0)
             _merge_fecha(entry, 'primera_compra', row['primer_trabajo'], lambda a, b: a < b)
             _merge_fecha(entry, 'ultima_compra', row['ultimo_trabajo'], lambda a, b: a > b)
 
@@ -591,11 +605,15 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 u = usuarios.get(uid)
                 entry['nombre'] = f"{u.nombre} {u.apellido}".strip() if u else 'Cliente'
                 entry['avatar_url'] = (u.rounded_foto_url or u.foto_url) if u else None
-                entry['total_gastado'] = entry['total_gastado_productos'] + entry['total_gastado_servicios']
-                cantidad_compras = entry['total_ordenes'] + entry['total_trabajos']
-                entry['ticket_promedio'] = (
-                    round(entry['total_gastado'] / cantidad_compras, 2) if cantidad_compras else 0.0
-                )
+                entry['total_gastado_por_moneda'] = entry.pop('gastado_por_moneda')
+                compras_por_moneda = entry.pop('compras_por_moneda')
+                entry['ticket_promedio_por_moneda'] = {
+                    moneda: round(monto / compras_por_moneda[moneda], 2)
+                    for moneda, monto in entry['total_gastado_por_moneda'].items()
+                    if compras_por_moneda.get(moneda)
+                }
+                # Usada sólo para ordenar (no se muestra sola): moneda principal de la empresa.
+                entry['total_gastado'] = entry['total_gastado_por_moneda'].get(moneda_default, 0.0)
                 for campo in ('primera_compra', 'ultima_compra'):
                     if entry[campo]:
                         entry[campo] = entry[campo].isoformat()

@@ -2,7 +2,7 @@ from localizacion.utils import calcular_distancia_km, reverse_geocode_country
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser, BasePermission
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
@@ -403,6 +403,22 @@ SQL_REC_POR_TIPO = {
     'servicio': SQL_REC_SERVICIOS,
 }
 
+class IsSelfOrAdmin(BasePermission):
+    """
+    Permiso de objeto: solo el propio usuario o un admin pueden
+    modificar/eliminar un Usuario vía los endpoints genéricos del ViewSet.
+    Sin esto, cualquier usuario autenticado podía editar/borrar cualquier
+    otra cuenta llamando PATCH/DELETE /api/usuarios/{id}/.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        return bool(
+            user and user.is_authenticated
+            and (user.id == obj.id or user.is_staff or user.is_superuser)
+        )
+
+
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
@@ -433,6 +449,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == 'create':
             return UsuarioCreateSerializer
+        if self.action in ('update', 'partial_update'):
+            # Allowlist de campos: evita que update/partial_update (generico)
+            # permita escalar privilegios (is_staff, is_superuser, rol, etc.)
+            # incluso cuando el propio dueño edita su cuenta.
+            return UpdateUsuarioSerializer
         if self.action == 'retrieve':
             user = getattr(self.request, 'user', None)
             if not user or not user.is_authenticated:
@@ -444,7 +465,21 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         # Nota: get_permissions pisa permission_classes del @action; hay que listar acá.
         if self.action in self.PUBLIC_AUTH_ACTIONS or self.action in self.PUBLIC_READ_ACTIONS:
             return [AllowAny()]
+        if self.action in ('update', 'partial_update', 'destroy'):
+            return [IsAuthenticated(), IsSelfOrAdmin()]
         return [IsAuthenticated()]
+
+    def destroy(self, request, *args, **kwargs):
+        # Soft-delete (consistente con delete_me/AdminUsuarioViewSet) en vez
+        # de un hard-delete: evita perder datos relacionados por error o abuso.
+        from django.utils import timezone
+
+        usuario = self.get_object()
+        usuario.is_deleted = True
+        usuario.is_active = False
+        usuario.deleted_at = timezone.now()
+        usuario.save(update_fields=['is_deleted', 'is_active', 'deleted_at'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_authenticators(self):
         # Patrón recomendado para pre-auth: no exigir/validar JWT.
@@ -535,6 +570,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 if rango_mapa is None:
                     rango_mapa = Decimal('10.00')
 
+                from rol.models import Rol
+                rol = Rol.objects.filter(
+                    nombre='profesional' if es_empresa else 'usuario'
+                ).first()
+
                 usuario = Usuario.objects.create_user(
                     correo=data['email'],
                     password=data['password'],
@@ -545,6 +585,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     trabajo_local=bool(data.get('trabajo_local', False)),
                     telefono=data.get('telefono') or '',
                     is_owner_empresa=es_empresa,
+                    rol=rol,
                     rounded_foto_url=data.get('rounded_foto_url') or '',
                     rango_mapa_km=rango_mapa,
                     invitado_por=data.get('invitador'),

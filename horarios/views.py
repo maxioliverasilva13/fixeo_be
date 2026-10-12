@@ -23,42 +23,44 @@ class HorariosViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def bulk(self, request):
         try:
-            print("xd1")
             empresa = Empresa.objects.get(admin_id=request.user)
-
-            horarios_data = request.data
-            dias_recibidos = []
-
-            with transaction.atomic():
-                for item in horarios_data:
-                    serializer = HorariosSerializer(data=item)
-                    serializer.is_valid(raise_exception=True)
-
-                    dia = serializer.validated_data['dia_semana']
-                    dias_recibidos.append(dia)
-
-                    qs = Horarios.objects.filter(empresa=empresa, dia_semana=dia)
-                    
-                    if qs.exists():
-                        qs.delete()
-                    
-                    Horarios.objects.create(
-                        empresa=empresa,
-                        dia_semana=dia,
-                        hora_inicio=serializer.validated_data["hora_inicio"],
-                        hora_fin=serializer.validated_data["hora_fin"],
-                        enabled=serializer.validated_data.get("enabled", True),
-                    )
-
-            Horarios.objects.filter(
-                empresa=empresa
-            ).exclude(
-                dia_semana__in=dias_recibidos
-            ).delete()
-            return Response({"ok": True})
-        except Exception as e:
-            print(e)
+        except Empresa.DoesNotExist:
             return Response(
-                {'error': f'Error al obtener la empresa: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {'error': 'No se encontró una empresa asociada a tu cuenta'},
+                status=status.HTTP_404_NOT_FOUND,
             )
+
+        horarios_data = request.data
+        dias_recibidos = []
+
+        # ValidationError (ej. "hora_inicio debe ser menor que hora_fin") se
+        # deja propagar sin atrapar: antes un `except Exception` genérico la
+        # disfrazaba de error 500 ("Error al obtener la empresa...") en vez
+        # de devolver el 400 con el motivo real que el serializer ya arma.
+        with transaction.atomic():
+            for item in horarios_data:
+                serializer = HorariosSerializer(data=item)
+                serializer.is_valid(raise_exception=True)
+
+                dia = serializer.validated_data['dia_semana']
+                dias_recibidos.append(dia)
+
+                qs = Horarios.objects.filter(empresa=empresa, dia_semana=dia)
+
+                if qs.exists():
+                    qs.delete()
+
+                Horarios.objects.create(
+                    empresa=empresa,
+                    dia_semana=dia,
+                    hora_inicio=serializer.validated_data["hora_inicio"],
+                    hora_fin=serializer.validated_data["hora_fin"],
+                    enabled=serializer.validated_data.get("enabled", True),
+                )
+
+        Horarios.objects.filter(
+            empresa=empresa
+        ).exclude(
+            dia_semana__in=dias_recibidos
+        ).delete()
+        return Response({"ok": True})

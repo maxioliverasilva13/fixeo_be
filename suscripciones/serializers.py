@@ -94,6 +94,7 @@ class SubscripcionCreateSerializer(serializers.ModelSerializer):
 
 class UsuarioSubscripcionActivaSerializer(serializers.ModelSerializer):
     plan_detalle = PlanSerializer(source='plan_id', read_only=True)
+    es_gratuita = serializers.SerializerMethodField()
 
     class Meta:
         model = Subscripcion
@@ -104,4 +105,13 @@ class UsuarioSubscripcionActivaSerializer(serializers.ModelSerializer):
             'cancelada',
             'source',
             'status',
+            'es_gratuita',
         ]
+
+    def get_es_gratuita(self, obj):
+        # `plan_detalle.precio` es el precio de LISTA del plan, no lo que esta
+        # suscripción puntual costó: una suscripción otorgada por una campaña
+        # de marketing (ej. "3 meses gratis por lanzamiento") en un plan que
+        # normalmente es pago quedaba mostrada como "Premium $X/mes" en el
+        # frontend, aunque el usuario no está pagando nada.
+        return obj.campana_id is not None

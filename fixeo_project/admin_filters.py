@@ -56,13 +56,22 @@ def apply_created_at_filters(queryset, params):
 def apply_ordering(queryset, params, allowed=None, default='-created_at'):
     """
     ordering=created_at | -created_at | nombre | -nombre ...
+
+    Siempre agrega `id` como desempate estable: un ORDER BY de un solo campo
+    con empates (ej. varias filas con el mismo `created_at` por un alta
+    masiva/seed) hace que la paginación LIMIT/OFFSET pueda repetir o saltear
+    filas entre páginas — en el admin de usuarios esto se veía como keys
+    duplicadas en React al hacer scroll infinito.
     """
     if allowed is None:
         allowed = {'created_at', '-created_at', 'nombre', '-nombre', 'id', '-id'}
     ordering = (params.get('ordering') or default).strip()
     if ordering not in allowed:
         ordering = default
-    return queryset.order_by(ordering)
+    tiebreaker = '-id' if ordering.startswith('-') else 'id'
+    if ordering in ('id', '-id'):
+        return queryset.order_by(ordering)
+    return queryset.order_by(ordering, tiebreaker)
 
 
 def period_bounds_from_params(params):

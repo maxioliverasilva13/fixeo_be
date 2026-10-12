@@ -73,6 +73,25 @@ def aplicar_aprobacion_trabajo(trabajo, precio_estimado=None, permitir_precio_pe
     """
     profesional = trabajo.profesional
 
+    # Evita overbooking: nada impedía aceptar dos trabajos superpuestos en el
+    # mismo horario (la consulta de disponibilidad y la creación del trabajo
+    # solo descartan conflictos contra trabajos ya 'aceptado'/'finalizado',
+    # así que dos solicitudes 'pendiente' para el mismo slot podían coexistir
+    # y ambas terminar aceptadas). Esta es la última línea de defensa, al
+    # momento de aceptar.
+    if trabajo.fecha_inicio and trabajo.fecha_fin:
+        hay_conflicto = Trabajo.objects.filter(
+            profesional=profesional,
+            status__in=['aceptado', 'finalizado'],
+            fecha_inicio__lt=trabajo.fecha_fin,
+            fecha_fin__gt=trabajo.fecha_inicio,
+        ).exclude(pk=trabajo.pk).exists()
+        if hay_conflicto:
+            raise ValueError(
+                'Ya tenés otro trabajo aceptado que se superpone con este horario. '
+                'Rechazá o reprogramá el conflicto antes de aceptar este.'
+            )
+
     if trabajo.requiere_estimacion_precio:
         if precio_estimado is None and permitir_precio_pendiente:
             pass
@@ -685,6 +704,15 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # No se puede marcar como finalizado un trabajo que todavía no empezó
+        # (nada lo impedía antes: se podía "completar" una cita del día
+        # siguiente apenas se aceptaba).
+        if trabajo.fecha_inicio and django_timezone.now() < trabajo.fecha_inicio:
+            return Response(
+                {'error': 'No se puede finalizar un trabajo antes de la fecha y hora agendada'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         trabajo.status = 'finalizado'
         trabajo.save()
 
@@ -805,7 +833,7 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         usuario = request.user
-        descripcion = serializer.validated_data['descripcion']
+        descripcion = serializer.validated_data.get('descripcion', '')
         esUrgente = serializer.validated_data.get('esUrgente', False)
         servicios_ids = serializer.validated_data['servicios_ids']
         fecha = serializer.validated_data['fecha']
@@ -824,6 +852,21 @@ class TrabajoViewSet(viewsets.ModelViewSet):
         empresa_profesional = profesional.empresas_administradas.first()
         if empresa_profesional:
             currency = empresa_profesional.moneda_local
+
+            # Nada validaba que el método de pago elegido siga habilitado por
+            # la empresa: un profesional podía desactivar "efectivo" en su
+            # configuración (quedando sin NINGÚN método activo, ya que
+            # "tarjeta" requiere Mercado Pago vinculado) y un cliente igual
+            # podía reservar pidiendo pagar en efectivo.
+            metodo_pago_habilitado = (
+                (metodo_pago == 'efectivo' and empresa_profesional.acepta_efectivo)
+                or (metodo_pago in ('tarjeta', 'mercadopago') and empresa_profesional.acepta_tarjeta)
+            )
+            if not metodo_pago_habilitado:
+                return Response(
+                    {'error': 'Este profesional no acepta el método de pago seleccionado'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         servicios = Servicio.objects.filter(id__in=servicios_ids)
         if not servicios.exists():
