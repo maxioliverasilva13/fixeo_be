@@ -10,7 +10,12 @@ from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser, B
 from usuario.utils import obtener_localizacion_usuario
 from .models import Empresa, CategoriaProducto, Producto
 from .serializers import EmpresaSerializer, CategoriaProductoSerializer, ProductoSerializer
-from .utils import validar_nombre_empresa_unico, generar_subdomain_unico, empresa_tiene_landing_activa
+from .utils import (
+    validar_nombre_empresa_unico,
+    generar_subdomain_unico,
+    empresa_tiene_landing_activa,
+    empresas_con_landing_activa_qs,
+)
 from .gemini_service import analizar_imagen_productos
 from .estadisticas import estadisticas_empresa
 from rest_framework.decorators import action
@@ -1184,6 +1189,23 @@ class ProductoViewSet(viewsets.ModelViewSet):
             )
 
         return Response({'ok': True, 'productos': productos})
+
+
+class EmpresaPublicLandingIndexView(APIView):
+    """Índice público de landings activas (para sitemap SEO). Solo campos seguros."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        results = [
+            {
+                'subdomain': e.subdomain,
+                'nombre': e.nombre,
+                'ubicacion': e.ubicacion or '',
+                'updated_at': e.updated_at.isoformat() if e.updated_at else None,
+            }
+            for e in empresas_con_landing_activa_qs()
+        ]
+        return Response({'results': results, 'count': len(results)})
 
 
 class EmpresaPublicLandingView(APIView):

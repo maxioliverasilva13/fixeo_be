@@ -1,3 +1,5 @@
+from django.db.models import Q
+
 from .models import Empresa
 from localizacion.models import Localizacion
 import re
@@ -112,4 +114,36 @@ def empresa_tiene_landing_activa(empresa) -> bool:
         .first()
     )
     return bool(sub and getattr(sub.plan_id, 'tiene_landing_page', False))
+
+
+def empresas_con_landing_activa_qs():
+    """
+    Queryset de empresas con landing pública activa y subdomain válido.
+    Activa = tiene_landing_page OR suscripción vigente con plan.tiene_landing_page.
+    """
+    from django.utils import timezone
+    from suscripciones.models import Subscripcion
+
+    now = timezone.now()
+    owner_ids_con_plan_landing = (
+        Subscripcion.objects
+        .filter(
+            cancelada=False,
+            expiracion__gt=now,
+            plan_id__tiene_landing_page=True,
+        )
+        .values_list('user_id', flat=True)
+        .distinct()
+    )
+    return (
+        Empresa.objects
+        .filter(is_deleted=False)
+        .exclude(subdomain__isnull=True)
+        .exclude(subdomain='')
+        .filter(
+            Q(tiene_landing_page=True) | Q(admin_id_id__in=owner_ids_con_plan_landing)
+        )
+        .only('id', 'subdomain', 'nombre', 'ubicacion', 'updated_at')
+        .order_by('subdomain')
+    )
 
