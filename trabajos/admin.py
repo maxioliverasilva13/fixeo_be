@@ -1,5 +1,10 @@
 from django.contrib import admin
-from .models import Trabajo, Calificacion
+from .models import (
+    Trabajo,
+    Calificacion,
+    AlertaProductoUrgente,
+    RespuestaAlertaProducto,
+)
 
 
 @admin.register(Trabajo)
@@ -35,5 +40,18 @@ class CalificacionAdmin(admin.ModelAdmin):
     list_filter = ('rating', 'created_at')
     search_fields = ('comentario', 'user_cal_sender__correo', 'user_cal_recibe__correo')
     readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by')
+
+
+@admin.register(AlertaProductoUrgente)
+class AlertaProductoUrgenteAdmin(admin.ModelAdmin):
+    list_display = ('id', 'producto', 'cantidad', 'status', 'usuario', 'expires_at', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('producto', 'marca_modelo', 'usuario__correo')
+
+
+@admin.register(RespuestaAlertaProducto)
+class RespuestaAlertaProductoAdmin(admin.ModelAdmin):
+    list_display = ('id', 'alerta', 'profesional', 'disponibilidad', 'created_at')
+    list_filter = ('disponibilidad', 'created_at')
 
 

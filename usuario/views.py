@@ -66,6 +66,19 @@ from usuario.mapa_helpers import (
 )
 
 
+def _mapa_audiencia_from_request(request) -> str:
+    """Solo staff puede pedir usuarios comunes / todos en endpoints de mapa."""
+    raw = (request.query_params.get('audiencia') or 'empresas').strip().lower()
+    if raw not in ('empresas', 'usuarios', 'todos'):
+        return 'empresas'
+    if raw == 'empresas':
+        return 'empresas'
+    user = request.user
+    if user and user.is_authenticated and (user.is_staff or user.is_superuser):
+        return raw
+    return 'empresas'
+
+
 def _search_plan_fields(sub) -> dict:
     """plan_rank numérico (mismo criterio que el mapa) + marca del plan activo."""
     precio = _plan_rank_precio_from_sub(sub)
@@ -1103,6 +1116,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             sort_by       = request.query_params.get('sort_by', 'mejor_valorados')
             max_price     = request.query_params.get('max_price')
             is_urgent     = request.query_params.get('is_urgent')
+            audiencia = _mapa_audiencia_from_request(request)
 
             usuarios = resolve_map_users_from_bounds(
                 north=north,
@@ -1114,6 +1128,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 profesion_id=profesion_id,
                 max_price=max_price,
                 is_urgent=is_urgent,
+                audiencia=audiencia,
             )
             return Response(serialize_usuarios_mapa(usuarios))
     
@@ -1248,7 +1263,10 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         limit = max(1, min(limit, 100))
 
         sort_by = request.query_params.get('sort_by', 'mejor_valorados')
-        usuarios = resolve_map_users_national(limit=limit, sort_by=sort_by)
+        audiencia = _mapa_audiencia_from_request(request)
+        usuarios = resolve_map_users_national(
+            limit=limit, sort_by=sort_by, audiencia=audiencia
+        )
         return Response(serialize_usuarios_mapa(usuarios))
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='top-zona')
@@ -1264,6 +1282,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             limit = 50
         limit = max(1, min(limit, 100))
         sort_by = request.query_params.get('sort_by', 'mejor_valorados')
+        audiencia = _mapa_audiencia_from_request(request)
 
         usuarios = resolve_map_users_from_bounds(
             north=north,
@@ -1272,6 +1291,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
             west=west,
             limit=limit,
             sort_by=sort_by,
+            audiencia=audiencia,
         )
         return Response(serialize_usuarios_mapa(usuarios))
     

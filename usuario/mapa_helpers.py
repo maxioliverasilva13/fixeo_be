@@ -226,7 +226,11 @@ def _tiene_profesion_aprobada(usuario) -> bool:
     return any(up.profesion.estado == Profesion.ESTADO_APROBADA for up in ups)
 
 
-def es_visible_en_mapa(usuario, subs_map: dict = None) -> bool:
+def es_visible_en_mapa(usuario, subs_map: dict = None, *, permitir_usuarios_comunes: bool = False) -> bool:
+    # Usuarios normales (clientes): solo para admin/heatmap con audiencia usuarios|todos.
+    if not usuario.is_owner_empresa:
+        return bool(permitir_usuarios_comunes and usuario.is_active and not usuario.is_staff)
+
     # Visible en el mapa si administra una empresa que comparte su ubicación.
     # (El requisito de MP vinculado / suscripción activa quedó deprecado; la
     # suscripción solo se usa para PRIORIZAR el orden, no para ocultar.)
@@ -384,6 +388,27 @@ def bounds_usuarios_loc_qs(
     return qs.distinct().order_by('usuario_id')
 
 
+def bounds_usuarios_comunes_loc_qs(north, south, east, west):
+    """Clientes (no empresa) con ubicación principal en el bbox — solo admin/heatmap."""
+    return (
+        UsuarioLocalizacion.objects.filter(
+            es_principal=True,
+            localizacion__isPrimary=True,
+            localizacion__latitud__lte=north,
+            localizacion__latitud__gte=south,
+            localizacion__longitud__lte=east,
+            localizacion__longitud__gte=west,
+            usuario__is_owner_empresa=False,
+            usuario__is_active=True,
+            usuario__is_staff=False,
+            usuario__is_superuser=False,
+        )
+        .select_related('usuario', 'localizacion')
+        .distinct()
+        .order_by('usuario_id')
+    )
+
+
 def _empresa_geo_q(north, south, east, west):
     return Q(
         latitud__lte=north,
@@ -450,19 +475,49 @@ def collect_bounds_map_candidates(
     profesion_id=None,
     max_price=None,
     is_urgent=None,
+    audiencia: str = 'empresas',
 ) -> list[dict]:
     """
     Candidatos en bbox: usuario_localizacion principal y, si falta, empresa del admin en zona.
     Evita que un negocio con coords correctas en `empresa` no aparezca por flags UL/localizacion desalineados.
+
+    audiencia:
+      - empresas (default): solo profesionales/empresas
+      - usuarios: solo clientes (is_owner_empresa=False)
+      - todos: empresas + clientes (admin heatmap)
     """
+    audiencia = (audiencia or 'empresas').strip().lower()
+    if audiencia not in ('empresas', 'usuarios', 'todos'):
+        audiencia = 'empresas'
+
     por_usuario: dict[int, dict] = {}
+
+    if audiencia in ('usuarios', 'todos'):
+        for ul in bounds_usuarios_comunes_loc_qs(north, south, east, west)[:max_scan]:
+            por_usuario[ul.usuario_id] = {
+                'usuario_id': ul.usuario_id,
+                'lat': float(ul.localizacion.latitud),
+                'lng': float(ul.localizacion.longitud),
+                'min_price': None,
+            }
+            if audiencia == 'usuarios' and len(por_usuario) >= max_scan:
+                return list(por_usuario.values())[:max_scan]
+
+    if audiencia == 'usuarios':
+        return list(por_usuario.values())[:max_scan]
+
+    restante_scan = max_scan if audiencia == 'empresas' else max(0, max_scan - len(por_usuario))
+    if restante_scan <= 0:
+        return list(por_usuario.values())[:max_scan]
 
     for ul in bounds_usuarios_loc_qs(
         north, south, east, west,
         profesion_id=profesion_id,
         max_price=max_price,
         is_urgent=is_urgent,
-    )[:max_scan]:
+    )[:restante_scan]:
+        if ul.usuario_id in por_usuario:
+            continue
         por_usuario[ul.usuario_id] = {
             'usuario_id': ul.usuario_id,
             'lat': float(ul.localizacion.latitud),
@@ -534,9 +589,14 @@ def resolve_map_users_from_bounds(
     profesion_id=None,
     max_price=None,
     is_urgent=None,
+    audiencia: str = 'empresas',
 ) -> list[Usuario]:
     has_filters = bool(profesion_id or max_price or is_urgent == 'true')
     max_scan = max_scan_for_bounds(north, south, east, west, has_filters)
+    audiencia = (audiencia or 'empresas').strip().lower()
+    if audiencia not in ('empresas', 'usuarios', 'todos'):
+        audiencia = 'empresas'
+    permitir_usuarios = audiencia in ('usuarios', 'todos')
 
     candidatos = collect_bounds_map_candidates(
         north, south, east, west,
@@ -544,6 +604,7 @@ def resolve_map_users_from_bounds(
         profesion_id=profesion_id,
         max_price=max_price,
         is_urgent=is_urgent,
+        audiencia=audiencia,
     )
     if not candidatos:
         return []
@@ -558,7 +619,9 @@ def resolve_map_users_from_bounds(
     results = []
     for cand in candidatos:
         usuario = usuarios_by_id.get(cand['usuario_id'])
-        if not usuario or not es_visible_en_mapa(usuario, subs_map):
+        if not usuario or not es_visible_en_mapa(
+            usuario, subs_map, permitir_usuarios_comunes=permitir_usuarios
+        ):
             continue
 
         avg_rating = float(usuario.avg_rating or 0)
@@ -577,12 +640,36 @@ def resolve_map_users_from_bounds(
     return [r['usuario'] for r in results[:limit]]
 
 
-def resolve_map_users_national(*, limit: int, sort_by: str) -> list[Usuario]:
+def resolve_map_users_national(*, limit: int, sort_by: str, audiencia: str = 'empresas') -> list[Usuario]:
+    audiencia = (audiencia or 'empresas').strip().lower()
+    if audiencia not in ('empresas', 'usuarios', 'todos'):
+        audiencia = 'empresas'
+    permitir_usuarios = audiencia in ('usuarios', 'todos')
+
+    if audiencia == 'usuarios':
+        owner_filter = Q(is_owner_empresa=False, is_staff=False, is_superuser=False)
+    elif audiencia == 'todos':
+        owner_filter = Q(is_owner_empresa=True) | Q(
+            is_owner_empresa=False, is_staff=False, is_superuser=False
+        )
+    else:
+        owner_filter = Q(is_owner_empresa=True)
+
     base_qs = annotate_map_plan_rank(
-        Usuario.objects.filter(is_owner_empresa=True, is_active=True).annotate(
+        Usuario.objects.filter(owner_filter, is_active=True).annotate(
             avg_rating=F('rating'),
         )
     )
+
+    # Clientes solo si tienen ubicación principal (si no, no hay pin).
+    if audiencia in ('usuarios', 'todos'):
+        base_qs = base_qs.filter(
+            Q(is_owner_empresa=True)
+            | Q(
+                localizaciones__es_principal=True,
+                localizaciones__localizacion__isPrimary=True,
+            )
+        ).distinct()
 
     if sort_by == 'mejor_precio':
         base_qs = base_qs.annotate(min_precio_servicio=Min('servicios__precio'))
@@ -608,7 +695,9 @@ def resolve_map_users_national(*, limit: int, sort_by: str) -> list[Usuario]:
         subs_map = batch_visibility_data(batch_ids)
 
         for u in batch:
-            if not es_visible_en_mapa(u, subs_map):
+            if not es_visible_en_mapa(
+                u, subs_map, permitir_usuarios_comunes=permitir_usuarios
+            ):
                 continue
             candidates.append({
                 'usuario': u,

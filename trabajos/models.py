@@ -163,3 +163,106 @@ class OfertaTrabajo(BaseModel):
     
     def __str__(self):
         return f"Oferta de {self.profesional} para {self.trabajo.id} - ${self.precio_ofertado}"
+
+
+class AlertaProductoUrgente(BaseModel):
+    """Consulta masiva de disponibilidad de un producto (no es compra ni reserva)."""
+
+    STATUS_CHOICES = [
+        ('abierta', 'Abierta'),
+        ('en_respuesta', 'En respuesta'),
+        ('resuelta', 'Resuelta'),
+        ('cancelada', 'Cancelada'),
+        ('expirada', 'Expirada'),
+        ('sin_entrega', 'Sin entrega'),
+    ]
+
+    usuario = models.ForeignKey(
+        Usuario, on_delete=models.CASCADE, related_name='alertas_producto_urgentes'
+    )
+    producto = models.CharField(max_length=200)
+    cantidad = models.PositiveIntegerField(default=1)
+    marca_modelo = models.CharField(max_length=200, blank=True, default='')
+    detalles = models.TextField(blank=True, default='')
+    localizacion = models.ForeignKey(
+        Localizacion,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='alertas_producto_urgentes',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='abierta')
+    expires_at = models.DateTimeField()
+    comercios_notificados = models.PositiveIntegerField(default=0)
+    respuesta_aceptada = models.ForeignKey(
+        'RespuestaAlertaProducto',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='+',
+        help_text='Propuesta con la que el usuario resolvió la alerta.',
+    )
+
+    class Meta:
+        db_table = 'alerta_producto_urgente'
+        verbose_name = 'Alerta producto urgente'
+        verbose_name_plural = 'Alertas producto urgentes'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'expires_at'], name='idx_alerta_prod_status_exp'),
+            models.Index(fields=['usuario', 'status'], name='idx_alerta_prod_user_status'),
+        ]
+
+    def __str__(self):
+        return f"{self.producto} ({self.status})"
+
+
+class AlertaProductoFoto(BaseModel):
+    alerta = models.ForeignKey(
+        AlertaProductoUrgente, on_delete=models.CASCADE, related_name='fotos'
+    )
+    url = models.URLField(max_length=500)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'alerta_producto_foto'
+        verbose_name = 'Foto alerta producto'
+        verbose_name_plural = 'Fotos alerta producto'
+        ordering = ['orden', 'id']
+
+
+class RespuestaAlertaProducto(BaseModel):
+    DISPONIBILIDAD_CHOICES = [
+        ('disponible', 'Sí, tenemos el producto'),
+        ('no_disponible', 'No tenemos el producto'),
+    ]
+
+    alerta = models.ForeignKey(
+        AlertaProductoUrgente, on_delete=models.CASCADE, related_name='respuestas'
+    )
+    profesional = models.ForeignKey(
+        Usuario, on_delete=models.CASCADE, related_name='respuestas_alerta_producto'
+    )
+    empresa = models.ForeignKey(
+        'empresas.Empresa',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='respuestas_alerta_producto',
+    )
+    disponibilidad = models.CharField(max_length=20, choices=DISPONIBILIDAD_CHOICES)
+    mensaje = models.TextField(
+        blank=True,
+        default='',
+        help_text='Alternativa, condiciones u observación del comercio.',
+    )
+
+    class Meta:
+        db_table = 'respuesta_alerta_producto'
+        verbose_name = 'Respuesta alerta producto'
+        verbose_name_plural = 'Respuestas alerta producto'
+        unique_together = ['alerta', 'profesional']
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.profesional_id} → {self.alerta_id}: {self.disponibilidad}"

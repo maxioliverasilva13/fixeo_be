@@ -18,6 +18,7 @@ from usuario.utils import foto_usuario_api
 from servicios.models import Servicio
 from usuario_localizacion.models import UsuarioLocalizacion
 from usuario_profesion.models import UsuarioProfesion
+from empresas.models import Empresa
 from .models import Calificacion, CalificacionDireccion, OfertaTrabajo, Trabajo, TrabajoServicio
 from .serializers import TrabajoCreateSerializer, TrabajoDetailSerializer, TrabajoListSerializer, TrabajoSerializer
 from .whatsapp_helpers import mensaje_whatsapp_trabajo
@@ -499,11 +500,50 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 profesional=logged_user
             ).count()
 
-            # online/total = solo urgentes públicos en zona. No sumar trabajo ya ganado/asignado (badge sirena).
+            # Alertas de producto en zona (comercios con vende_productos).
+            productos_online = 0
+            empresa_productos = Empresa.objects.filter(
+                admin_id=logged_user, vende_productos=True, is_deleted=False
+            ).exists()
+            if empresa_productos and localizacion_usuario and localizacion_usuario.localizacion:
+                from trabajos.models import AlertaProductoUrgente
+                from localizacion.utils import calcular_distancia_km as _calc_dist
+
+                rango = float(getattr(logged_user, 'rango_mapa_km', None) or 10)
+                lat_u = float(localizacion_usuario.localizacion.latitud)
+                lng_u = float(localizacion_usuario.localizacion.longitud)
+                alertas_prod = (
+                    AlertaProductoUrgente.objects.filter(
+                        is_deleted=False,
+                        expires_at__gte=django_timezone.now(),
+                        status__in=['abierta', 'en_respuesta'],
+                    )
+                    .exclude(usuario=logged_user)
+                    .exclude(respuestas__profesional=logged_user)
+                    .select_related('localizacion')
+                    .distinct()
+                )
+                for alerta in alertas_prod:
+                    loc = alerta.localizacion
+                    if not loc or loc.latitud is None or loc.longitud is None:
+                        continue
+                    dist = _calc_dist(
+                        lat_u,
+                        lng_u,
+                        float(loc.latitud),
+                        float(loc.longitud),
+                    )
+                    if dist <= rango:
+                        productos_online += 1
+
+            # online/total = urgentes públicos en zona (servicios + productos).
+            online_total = online_count + productos_online
             return Response({
-                'online': online_count,
+                'online': online_total,
                 'pendientes': urgente_asignado_pendiente,
-                'total': online_count,
+                'total': online_total,
+                'servicios_online': online_count,
+                'productos_online': productos_online,
             }, status=status.HTTP_200_OK)
         
         else:
@@ -523,13 +563,22 @@ class TrabajoViewSet(viewsets.ModelViewSet):
                 status='pendiente',
             ).count()
 
+            from trabajos.models import AlertaProductoUrgente
+            alertas_producto_activas = AlertaProductoUrgente.objects.filter(
+                usuario=logged_user,
+                is_deleted=False,
+                status__in=['abierta', 'en_respuesta'],
+            ).count()
+
             return Response(
                 {
                     # Ofertas pendientes sólo dentro de trabajo aún sin aprobación del cliente (informativo)
                     'online': ofertas_sobre_trabajo_abierto,
-                    'pendientes': trabajos_sin_aprobacion,
+                    'pendientes': trabajos_sin_aprobacion + alertas_producto_activas,
                     # Usado por la BottomBar cliente: cuenta publicaciones pendientes de resolver, no ofertas
-                    'total': trabajos_sin_aprobacion,
+                    'total': trabajos_sin_aprobacion + alertas_producto_activas,
+                    'servicios_pendientes': trabajos_sin_aprobacion,
+                    'productos_pendientes': alertas_producto_activas,
                 },
                 status=status.HTTP_200_OK,
             )

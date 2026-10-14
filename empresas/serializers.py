@@ -59,7 +59,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'visitas_perfil_count',
             'admin_correo',
         ]
-        read_only_fields = ['currency', 'moneda_local', 'tiene_landing_activa', 'admin_correo']
+        read_only_fields = ['currency', 'moneda_local', 'tiene_landing_activa', 'admin_correo', 'subdomain']
 
     def get_visitas_perfil_count(self, obj):
         """Solo visible para el admin del sistema o el dueño de la empresa."""

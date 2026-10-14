@@ -7,12 +7,16 @@ from .views import (
     rechazar_trabajo_por_token,
 )
 from .views_urgente import TrabajoUrgenteViewSet
+from .views_producto_urgente import AlertaProductoUrgenteViewSet
 
 router = DefaultRouter()
 router.register(r'', TrabajoViewSet, basename='trabajo')
 
 router_urgente = DefaultRouter()
 router_urgente.register(r'', TrabajoUrgenteViewSet, basename='trabajo-urgente')
+
+router_producto_urgente = DefaultRouter()
+router_producto_urgente.register(r'', AlertaProductoUrgenteViewSet, basename='alerta-producto-urgente')
 
 urlpatterns = [
     path('calificaciones/', CalificacionViewSet.as_view({'post': 'create'}), name='calificacion-create'),
@@ -24,6 +28,7 @@ urlpatterns = [
     path('confirmar/<uuid:token>/', confirmar_trabajo_por_token, name='trabajo-confirmar-token'),
     path('rechazar/<uuid:token>/', rechazar_trabajo_por_token, name='trabajo-rechazar-token'),
     path('urgente/', include(router_urgente.urls)),
+    path('urgente-productos/', include(router_producto_urgente.urls)),
     path('', include(router.urls)),
 ]
 

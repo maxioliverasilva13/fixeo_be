@@ -1,5 +1,5 @@
 def foto_usuario_api(valor):
-    """Para respuestas JSON: sin foto (None o vacío) -> string vacía."""
+    """Para respuestas JSON: sin foto (None o vacío) -> placeholder por defecto."""
     return valor if valor else 'https://static.vecteezy.com/system/resources/thumbnails/019/879/186/small/user-icon-on-transparent-background-free-png.png'
 
 

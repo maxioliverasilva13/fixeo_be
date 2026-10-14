@@ -711,12 +711,13 @@ class UsuarioInMapaSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
         model = Usuario
         fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 'trabajo_domicilio',
                   'trabajo_local', 'rango_mapa_km', 'profesiones', 'localizacion', 'esta_abierta',
-                  'vende_productos', 'vende_servicios', 'vende_menu_diario', 'plan_rank',
+                  'is_owner_empresa', 'vende_productos', 'vende_servicios', 'vende_menu_diario',
+                  'plan_rank',
                   'badge_mapa_url', 'plan_user_badge_url', 'plan_color', 'plan_slogan', 'plan_nombre',
                   'rating', 'cant_calif']
-        read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url', 
-                            'trabajo_domicilio', 'trabajo_local', 
-                            'rango_mapa_km', 'esta_abierta']
+        read_only_fields = ['id', 'nombre', 'apellido', 'foto_url', 'rounded_foto_url',
+                            'trabajo_domicilio', 'trabajo_local',
+                            'rango_mapa_km', 'esta_abierta', 'is_owner_empresa']
         
     def get_profesiones(self, obj):
         from profesion.serializers import ProfesionSerializer

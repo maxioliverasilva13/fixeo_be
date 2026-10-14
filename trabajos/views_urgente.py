@@ -11,7 +11,7 @@ from datetime import timedelta, datetime
 from decimal import Decimal
 from localizacion.models import Localizacion
 from localizacion.utils import calcular_distancia_km
-from mensajeria.models import Chat
+from mensajeria.models import Chat, Mensajes, Recurso
 from profesion.models import Profesion
 from trabajos.utils import filtrar_trabajos_por_distancia_sql
 from usuario.models import Usuario
@@ -28,10 +28,28 @@ from .serializers import (
     OfertaTrabajoSerializer,
     OfertaTrabajoCreateSerializer
 )
-from mensajeria.models import Recurso
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from empresas.models import Empresa
+
+
+def _mensaje_push_trabajo_urgente_confirmado(trabajo, profesional):
+    """Texto corto con detalle para la push al cliente al aceptar una oferta."""
+    partes = [f"{profesional.nombre} tomará tu trabajo urgente"]
+    if trabajo.precio_final is not None:
+        moneda = f" {trabajo.currency}" if trabajo.currency else ''
+        partes[0] += f" por ${trabajo.precio_final}{moneda}"
+
+    if trabajo.profesion_urgente_id and trabajo.profesion_urgente:
+        partes.append(trabajo.profesion_urgente.nombre)
+    elif trabajo.descripcion:
+        partes.append(trabajo.descripcion[:80])
+
+    if trabajo.fecha_inicio:
+        fecha_local = timezone.localtime(trabajo.fecha_inicio)
+        partes.append(fecha_local.strftime('%d/%m %H:%M'))
+
+    return ' · '.join(partes)
 
 
 def _moneda_profesional(usuario) -> str:
@@ -533,48 +551,86 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
         trabajo.refresh_from_db()
         
         trabajo.ofertas.exclude(id=oferta.id).update(status='rechazada')
-        
+
+        profesional = oferta.profesional
+        deep_link_trabajo = f'/trabajos/{trabajo.id}'
+
         chat = Chat.objects.filter(
-            Q(sender=trabajo.usuario, receiver=oferta.profesional) |
-            Q(sender=oferta.profesional, receiver=trabajo.usuario)
+            Q(sender=trabajo.usuario, receiver=profesional) |
+            Q(sender=profesional, receiver=trabajo.usuario)
         ).first()
 
         if not chat:
             chat = Chat.objects.create(
-                sender=trabajo.usuario,
-                receiver=oferta.profesional,
-                trabajo=trabajo
+                sender=profesional,
+                receiver=trabajo.usuario,
+                trabajo=trabajo,
             )
+        elif chat.trabajo_id != trabajo.id:
+            chat.trabajo = trabajo
+            chat.save(update_fields=['trabajo'])
 
-            channel_layer = get_channel_layer()
-            room_name = f"usuario_channel_{chat.receiver.id}"
+        # Igual que trabajo común: mensaje inicial del profesional al cliente.
+        texto_reserva = (
+            getattr(profesional, 'defaultMessageReservation', None)
+            or f"Hola, soy {profesional.nombre}. Coordinemos los detalles de tu trabajo urgente."
+        )
+        mensaje_chat = Mensajes.objects.create(
+            texto=texto_reserva,
+            sender=profesional,
+            chat=chat,
+            trabajo=trabajo,
+        )
 
-            async_to_sync(channel_layer.group_send)(f'chat_{room_name}', {
-                'type': 'chat_message',
-                'message': '',
-                'user_id': chat.sender.id,
-                'leido': False,
-                'chat_id': chat.id,
-                'chat': {
-                    'id': chat.id,
-                    'sender_id': chat.sender.id,
-                    'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
-                    'receiver_id': chat.receiver.id,
-                    'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
-                    'trabajo_id': chat.trabajo.id if chat.trabajo else None,
-                    'ultimo_mensaje_at': chat.created_at.isoformat(),
-                }
-            })
-        
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(f'user_{trabajo.usuario.id}', {
+            'type': 'chat_message',
+            'message': mensaje_chat.texto,
+            'user_id': profesional.id,
+            'leido': False,
+            'chat_id': chat.id,
+            'trabajo': TrabajoUrgenteDetailSerializer(trabajo).data,
+            'chat': {
+                'id': chat.id,
+                'sender_id': chat.sender.id,
+                'sender_nombre': f"{chat.sender.nombre} {chat.sender.apellido}",
+                'receiver_id': chat.receiver.id,
+                'receiver_nombre': f"{chat.receiver.nombre} {chat.receiver.apellido}",
+                'trabajo_id': chat.trabajo.id if chat.trabajo else None,
+                'ultimo_mensaje_at': mensaje_chat.created_at.isoformat(),
+            },
+        })
+
+        # Push al cliente (como al aceptar un trabajo común), con detalle + deep link "Ver".
         notificar_usuario.delay(
-            usuario_id=oferta.profesional.id,
-            titulo="¡Tu oferta fue aceptada!",
-            mensaje=f"Tu oferta de ${oferta.precio_ofertado} fue aceptada",
+            usuario_id=trabajo.usuario.id,
+            titulo="¡Trabajo urgente confirmado!",
+            mensaje=_mensaje_push_trabajo_urgente_confirmado(trabajo, profesional),
             data={
-                'deep_link': f'/trabajos/{trabajo.id}',
+                'deep_link': deep_link_trabajo,
                 'entity_id': trabajo.id,
-                'tipo': 'oferta_aceptada'
-            }
+                'trabajo_id': trabajo.id,
+                'tipo': 'trabajo_aceptado',
+            },
+        )
+
+        # Push al profesional cuya oferta fue elegida.
+        notificar_usuario.delay(
+            usuario_id=profesional.id,
+            titulo="¡Tu oferta fue aceptada!",
+            mensaje=(
+                f"{trabajo.usuario.nombre} aceptó tu oferta de ${oferta.precio_ofertado}"
+                + (
+                    f" · {timezone.localtime(trabajo.fecha_inicio).strftime('%d/%m %H:%M')}"
+                    if trabajo.fecha_inicio else ''
+                )
+            ),
+            data={
+                'deep_link': deep_link_trabajo,
+                'entity_id': trabajo.id,
+                'trabajo_id': trabajo.id,
+                'tipo': 'oferta_aceptada',
+            },
         )
 
         enviar_mensaje_whatsapp_task.delay(
@@ -583,10 +639,10 @@ class TrabajoUrgenteViewSet(viewsets.ViewSet):
                 trabajo,
                 encabezado=(
                     f"Tu trabajo urgente fue asignado a "
-                    f"*{oferta.profesional.nombre} {oferta.profesional.apellido}* y *ha sido aceptado*."
+                    f"*{profesional.nombre} {profesional.apellido}* y *ha sido aceptado*."
                 ),
             ),
-            profesional_id=oferta.profesional_id,
+            profesional_id=profesional.id,
         )
 
         ofertas_rechazadas = trabajo.ofertas.filter(status='rechazada').exclude(id=oferta.id)

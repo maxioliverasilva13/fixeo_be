@@ -31,13 +31,15 @@ class MensajesSerializer(serializers.ModelSerializer):
     sender_nombre = serializers.SerializerMethodField()
     trabajo = serializers.SerializerMethodField()
     orden = serializers.SerializerMethodField()
+    alerta_producto = serializers.SerializerMethodField()
 
     class Meta:
         model = Mensajes
         fields = [
             'mensaje_id', 'texto', 'tipo', 'metadata',
             'sender', 'sender_nombre', 'chat', 'leido',
-            'recursos', 'created_at', 'updated_at', 'trabajo', 'orden', 'calificado'
+            'recursos', 'created_at', 'updated_at', 'trabajo', 'orden',
+            'alerta_producto', 'calificado',
         ]
         read_only_fields = ['mensaje_id', 'sender', 'created_at', 'updated_at']
 
@@ -62,6 +64,32 @@ class MensajesSerializer(serializers.ModelSerializer):
         except Orden.DoesNotExist:
             return None
         return _orden_data_for_mensaje(orden, metadata)
+
+    def get_alerta_producto(self, obj):
+        metadata = obj.metadata or {}
+        alerta_id = metadata.get('alerta_producto_id')
+        if not alerta_id:
+            return None
+        from trabajos.models import AlertaProductoUrgente
+        try:
+            alerta = AlertaProductoUrgente.objects.get(pk=alerta_id, is_deleted=False)
+        except AlertaProductoUrgente.DoesNotExist:
+            # Fallback con lo que quedó en metadata (alerta borrada/expirada).
+            return {
+                'id': alerta_id,
+                'producto': metadata.get('producto') or 'Pedido urgente',
+                'cantidad': metadata.get('cantidad') or 1,
+                'marca_modelo': metadata.get('marca_modelo') or '',
+                'status': metadata.get('status') or 'resuelta',
+            }
+        return {
+            'id': alerta.id,
+            'producto': alerta.producto,
+            'cantidad': alerta.cantidad,
+            'marca_modelo': alerta.marca_modelo or '',
+            'status': alerta.status,
+            'detalles': (alerta.detalles or '')[:160],
+        }
 
 class MensajeCreateSerializer(serializers.Serializer):
     texto      = serializers.CharField(required=False, allow_blank=True, default='')

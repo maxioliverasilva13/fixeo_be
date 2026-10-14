@@ -64,6 +64,12 @@ if [ "$migrate_ok" -ne 1 ]; then
   exit 1
 fi
 
+# Alertas urgentes de productos (AlertaProductoUrgente / RespuestaAlertaProducto).
+# Se aplica de forma explícita por si el migrate general quedó a medias en entornos viejos.
+# Sin pin a una migración concreta: siempre lleva trabajos al último estado (p. ej. 0017+).
+echo "📊 Aplicando migraciones de alertas de producto (trabajos)..."
+docker compose exec -T web python manage.py migrate trabajos
+
 echo "🌱 Ejecutando seeds..."
 docker compose exec -T web python manage.py seed_roles
 docker compose exec -T web python manage.py seed_profesiones

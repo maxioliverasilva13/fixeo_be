@@ -145,12 +145,28 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         nombre = request.data.get('nombre')
-        if nombre and nombre.lower() != instance.nombre.lower() and not validar_nombre_empresa_unico(nombre):
+        nombre_changed = bool(
+            nombre and nombre.strip() and nombre.strip().lower() != (instance.nombre or '').lower()
+        )
+        if nombre_changed and not validar_nombre_empresa_unico(nombre.strip()):
             return Response(
-                {'error': f"Ya existe una empresa con el nombre '{nombre}'"},
+                {'error': f"Ya existe una empresa con el nombre '{nombre.strip()}'"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         response = super().update(request, *args, **kwargs)
+        if response.status_code in (200, 201) and nombre_changed:
+            instance.refresh_from_db()
+            nuevo_subdomain = generar_subdomain_unico(instance.nombre, exclude_id=instance.id)
+            if nuevo_subdomain != instance.subdomain:
+                instance.subdomain = nuevo_subdomain
+                instance.save(update_fields=['subdomain', 'updated_at'])
+                data = response.data
+                if isinstance(data, dict):
+                    if 'subdomain' in data:
+                        data['subdomain'] = nuevo_subdomain
+                    nested = data.get('data')
+                    if isinstance(nested, dict) and 'subdomain' in nested:
+                        nested['subdomain'] = nuevo_subdomain
         # Si se actualizó la localizacion y no se mandó pais explícito, re-detectar
         if 'localizacion' in request.data and 'pais' not in request.data:
             try:
@@ -689,13 +705,38 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         denied = self._guard_owner_patch_fields(request)
         if denied:
             return denied
-        return super().update(request, *args, **kwargs)
+        instance = self.get_object()
+        nombre = request.data.get('nombre')
+        nombre_changed = bool(
+            request.user.is_staff
+            and nombre
+            and str(nombre).strip()
+            and str(nombre).strip().lower() != (instance.nombre or '').lower()
+        )
+        if nombre_changed and not validar_nombre_empresa_unico(str(nombre).strip()):
+            return Response(
+                {'error': f"Ya existe una empresa con el nombre '{str(nombre).strip()}'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        response = super().update(request, *args, **kwargs)
+        if response.status_code in (200, 201) and nombre_changed:
+            instance.refresh_from_db()
+            nuevo_subdomain = generar_subdomain_unico(instance.nombre, exclude_id=instance.id)
+            if nuevo_subdomain != instance.subdomain:
+                instance.subdomain = nuevo_subdomain
+                instance.save(update_fields=['subdomain', 'updated_at'])
+                data = response.data
+                if isinstance(data, dict):
+                    if 'subdomain' in data:
+                        data['subdomain'] = nuevo_subdomain
+                    nested = data.get('data')
+                    if isinstance(nested, dict) and 'subdomain' in nested:
+                        nested['subdomain'] = nuevo_subdomain
+        return response
 
     def partial_update(self, request, *args, **kwargs):
-        denied = self._guard_owner_patch_fields(request)
-        if denied:
-            return denied
-        return super().partial_update(request, *args, **kwargs)
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         """Soft delete de la empresa y desactiva al usuario owner asociado."""
