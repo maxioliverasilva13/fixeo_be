@@ -151,6 +151,7 @@ def _buscar_comercios_productos_cercanos(latitud, longitud, excluir_usuario_id=N
         INNER JOIN localizacion l ON l.id = ul.localizacion_id
         WHERE e.vende_productos = TRUE
             AND e.is_deleted = FALSE
+            AND COALESCE(e.activa, TRUE) = TRUE
             AND e.deleted_at IS NULL
             AND ul.deleted_at IS NULL
             AND l.deleted_at IS NULL

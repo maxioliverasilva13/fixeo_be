@@ -49,6 +49,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'updated_at',
             'currency',
             'compartir_ubicacion_mapa',
+            'activa',
             'subdomain',
             'landing_titulo',
             'landing_slogan',

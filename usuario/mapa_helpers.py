@@ -240,6 +240,8 @@ def es_visible_en_mapa(usuario, subs_map: dict = None, *, permitir_usuarios_comu
         return False
     if not empresa.compartir_ubicacion_mapa:
         return False
+    if not getattr(empresa, 'activa', True):
+        return False
     return _tiene_profesion_aprobada(usuario)
 
 
@@ -370,6 +372,7 @@ def bounds_usuarios_loc_qs(
             usuario__is_owner_empresa=True,
             usuario__is_active=True,
             usuario__empresas_administradas__compartir_ubicacion_mapa=True,
+            usuario__empresas_administradas__activa=True,
         )
         .select_related('usuario', 'localizacion')
     )
@@ -432,6 +435,7 @@ def _empresas_en_bounds_qs(
     qs = (
         Empresa.objects.filter(
             is_deleted=False,
+            activa=True,
             admin_id__is_owner_empresa=True,
             admin_id__is_active=True,
             compartir_ubicacion_mapa=True,

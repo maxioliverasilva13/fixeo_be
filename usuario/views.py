@@ -183,6 +183,7 @@ FROM (
         FROM empresa e0
         WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
           AND NOT COALESCE(e0.is_deleted, false)
+          AND COALESCE(e0.activa, true)
         ORDER BY e0.id
         LIMIT 1
     ) e ON TRUE
@@ -249,7 +250,7 @@ FROM (
         COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
         e.nombre AS business_name
     FROM producto pr
-    JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
+    JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false) AND COALESCE(e.activa, true)
     JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
     WHERE
         u.id != %s
@@ -310,7 +311,9 @@ FROM usuario u
 LEFT JOIN LATERAL (
     SELECT e0.id, e0.nombre, e0.descripcion, e0.ubicacion, e0.latitud, e0.longitud, e0.compartir_ubicacion_mapa
     FROM empresa e0
-    WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id AND NOT COALESCE(e0.is_deleted, false)
+    WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
+      AND NOT COALESCE(e0.is_deleted, false)
+      AND COALESCE(e0.activa, true)
     ORDER BY e0.id
     LIMIT 1
 ) e ON TRUE
@@ -356,7 +359,7 @@ SELECT
     COALESCE(e.compartir_ubicacion_mapa, true) AS compartir_ubicacion_mapa,
     e.nombre AS business_name
 FROM producto pr
-JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false)
+JOIN empresa e ON e.id = pr.empresa_id AND NOT COALESCE(e.is_deleted, false) AND COALESCE(e.activa, true)
 JOIN usuario u ON u.id = e.{_EMPRESA_ADMIN_FK_COL}
 WHERE
     u.id != %s
@@ -396,7 +399,9 @@ JOIN usuario u ON u.id = s.usuario_id AND u.is_active = true
 LEFT JOIN LATERAL (
     SELECT e0.id, e0.nombre, e0.ubicacion, e0.latitud, e0.longitud, e0.compartir_ubicacion_mapa
     FROM empresa e0
-    WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id AND NOT COALESCE(e0.is_deleted, false)
+    WHERE e0.{_EMPRESA_ADMIN_FK_COL} = u.id
+      AND NOT COALESCE(e0.is_deleted, false)
+      AND COALESCE(e0.activa, true)
     ORDER BY e0.id
     LIMIT 1
 ) e ON TRUE

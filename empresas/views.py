@@ -738,6 +738,46 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         kwargs['partial'] = True
         return self.update(request, *args, **kwargs)
 
+    @action(detail=True, methods=['post'], url_path='desactivar')
+    def desactivar(self, request, pk=None):
+        """Desactiva la empresa sin borrarla: deja de aparecer en búsqueda/mapa/zona."""
+        empresa = self.get_object()
+        if not empresa.activa:
+            return Response(
+                {'message': 'La empresa ya está desactivada.', 'activa': False, 'id': empresa.id},
+                status=status.HTTP_200_OK,
+            )
+        empresa.activa = False
+        empresa.save(update_fields=['activa', 'updated_at'])
+        return Response(
+            {
+                'message': 'Empresa desactivada. Ya no aparece en búsquedas, mapa ni zona.',
+                'activa': False,
+                'id': empresa.id,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['post'], url_path='activar')
+    def activar(self, request, pk=None):
+        """Reactiva una empresa desactivada."""
+        empresa = self.get_object()
+        if empresa.activa:
+            return Response(
+                {'message': 'La empresa ya está activa.', 'activa': True, 'id': empresa.id},
+                status=status.HTTP_200_OK,
+            )
+        empresa.activa = True
+        empresa.save(update_fields=['activa', 'updated_at'])
+        return Response(
+            {
+                'message': 'Empresa reactivada.',
+                'activa': True,
+                'id': empresa.id,
+            },
+            status=status.HTTP_200_OK,
+        )
+
     def destroy(self, request, *args, **kwargs):
         """Soft delete de la empresa y desactiva al usuario owner asociado."""
         empresa = self.get_object()
@@ -831,8 +871,16 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
             .first()
         )
 
-    @action(detail=True, methods=['get'], url_path='servicios')
-    def list_servicios_admin(self, request, pk=None):
+    @action(detail=True, methods=['get', 'post'], url_path='servicios')
+    def servicios_admin(self, request, pk=None):
+        """GET lista / POST crea. Un solo @action: dos url_path iguales en DRF
+        registran rutas duplicadas y la primera (solo POST) rompe el GET con 405.
+        """
+        if request.method == 'GET':
+            return self._list_servicios_admin(request, pk)
+        return self._create_servicio_admin(request, pk)
+
+    def _list_servicios_admin(self, request, pk=None):
         denied = self._require_staff(request)
         if denied:
             return denied
@@ -851,8 +899,7 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
         qs = _filter_servicios_queryset(qs, request)
         return Response(ServicioSerializer(qs, many=True).data)
 
-    @action(detail=True, methods=['post'], url_path='servicios')
-    def create_servicio_admin(self, request, pk=None):
+    def _create_servicio_admin(self, request, pk=None):
         denied = self._require_staff(request)
         if denied:
             return denied
@@ -885,6 +932,127 @@ class AdminEmpresaViewSet(viewsets.ModelViewSet):
 
         servicio = serializer.save(usuario=owner)
         return Response(ServicioSerializer(servicio).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='generar-servicios-ia')
+    def generar_servicios_ia(self, request, pk=None):
+        """Staff: pide a Gemini un borrador de servicios básicos para una profesión.
+
+        No crea nada: devuelve sugerencias para que el admin revise y confirme
+        el alta uno a uno (o en bulk desde el frontend).
+        Body: { profesion_id, prompt, cantidad? }
+        """
+        logger.info('generar_servicios_ia: empresa=%s user=%s', pk, getattr(request.user, 'id', None))
+        denied = self._require_staff(request)
+        if denied:
+            return denied
+        empresa = self.get_object()
+        owner = empresa.admin_id
+        if not owner:
+            return Response(
+                {'ok': False, 'error': 'La empresa no tiene un usuario owner asociado'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profesion_id = request.data.get('profesion_id')
+        prompt = (request.data.get('prompt') or '').strip()
+        try:
+            cantidad = int(request.data.get('cantidad') or 6)
+        except (TypeError, ValueError):
+            cantidad = 6
+
+        if not profesion_id:
+            return Response(
+                {'ok': False, 'error': 'profesion_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not prompt:
+            return Response(
+                {'ok': False, 'error': 'prompt es requerido'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from profesion.models import Profesion
+        profesion = Profesion.objects.filter(id=profesion_id, is_deleted=False).first()
+        if not profesion:
+            return Response(
+                {'ok': False, 'error': 'Profesión no encontrada'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not owner.usuario_profesiones.filter(profesion_id=profesion.id).exists():
+            return Response(
+                {'ok': False, 'error': 'El owner no tiene asignada esa profesión'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        existentes = list(
+            Servicio.objects.filter(
+                usuario=owner,
+                profesion_id=profesion.id,
+            ).values_list('nombre', flat=True)
+        )
+        if existentes:
+            prompt = (
+                f"{prompt}\n\n"
+                f"No generes servicios con estos nombres (ya existen): "
+                f"{', '.join(existentes[:40])}."
+            )
+
+        foto_default = (profesion.logo_svg_url or '').strip()
+        divisa = empresa.currency or empresa.moneda_local or 'UYU'
+
+        try:
+            from servicios.gemini_service import generar_servicios_basicos
+            logger.info(
+                'generar_servicios_ia: llamando Gemini profesion=%s cantidad=%s',
+                profesion.nombre,
+                cantidad,
+            )
+            servicios = generar_servicios_basicos(
+                profesion_nombre=profesion.nombre,
+                prompt=prompt,
+                divisa=divisa,
+                foto_default=foto_default,
+                cantidad=cantidad,
+            )
+        except RuntimeError as exc:
+            logger.error('Gemini no configurado: %s', exc)
+            return Response(
+                {'ok': False, 'error': 'El servicio de IA no está disponible'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ValueError as exc:
+            logger.exception('Gemini respuesta inválida')
+            return Response(
+                {'ok': False, 'error': str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        except Exception as exc:
+            logger.exception('Error generando servicios con Gemini')
+            msg = str(exc) if exc else ''
+            if 'RESOURCE_EXHAUSTED' in msg or 'credits are depleted' in msg.lower() or '429' in msg:
+                return Response(
+                    {
+                        'ok': False,
+                        'error': (
+                            'Se agotó el crédito de Gemini. Recargá billing en AI Studio '
+                            'y volvé a intentar.'
+                        ),
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            return Response(
+                {'ok': False, 'error': 'No se pudieron generar los servicios. Probá de nuevo.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        logger.info('generar_servicios_ia: ok empresa=%s n=%s', pk, len(servicios))
+        return Response({
+            'ok': True,
+            'profesion_id': profesion.id,
+            'profesion_nombre': profesion.nombre,
+            'divisa': divisa,
+            'servicios': servicios,
+        })
 
     @action(detail=True, methods=['patch', 'put', 'delete'], url_path='servicios/(?P<servicio_id>[^/.]+)')
     def manage_servicio_admin(self, request, pk=None, servicio_id=None):
@@ -1015,11 +1183,14 @@ class ProductoViewSet(viewsets.ModelViewSet):
             es_dueño = bool(user and user.is_authenticated and Empresa.objects.filter(
                 id=empresa_id, admin_id=user
             ).exists())
-            if not es_dueño:
+            es_staff = bool(user and user.is_authenticated and user.is_staff)
+            if not es_dueño and not es_staff:
                 from suscripciones.utils import tiene_subscripcion_activa
 
                 empresa = Empresa.objects.filter(id=empresa_id).select_related('admin_id').first()
-                if empresa and not tiene_subscripcion_activa(empresa.admin_id):
+                if empresa and not empresa.activa:
+                    queryset = queryset.none()
+                elif empresa and not tiene_subscripcion_activa(empresa.admin_id):
                     queryset = queryset.none()
 
         if categoria_id:
@@ -1256,7 +1427,7 @@ class EmpresaPublicLandingView(APIView):
     def get(self, request, subdomain):
         empresa = (
             Empresa.objects
-            .filter(subdomain=subdomain, is_deleted=False)
+            .filter(subdomain=subdomain, is_deleted=False, activa=True)
             .select_related('admin_id', 'localizacion')
             .first()
         )

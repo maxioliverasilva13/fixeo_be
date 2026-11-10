@@ -137,7 +137,7 @@ def empresas_con_landing_activa_qs():
     )
     return (
         Empresa.objects
-        .filter(is_deleted=False)
+        .filter(is_deleted=False, activa=True)
         .exclude(subdomain__isnull=True)
         .exclude(subdomain='')
         .filter(

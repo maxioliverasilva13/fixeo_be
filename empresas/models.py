@@ -74,6 +74,13 @@ class Empresa(BaseModel):
         default=True,
         help_text='Si es False, la empresa no aparece en el mapa pero sí en búsquedas y trabajos urgentes.',
     )
+    activa = models.BooleanField(
+        default=True,
+        help_text=(
+            'Si es False, la empresa queda desactivada por admin: no aparece en búsquedas, '
+            'mapa ni endpoints de zona. No se borra físicamente.'
+        ),
+    )
     subdomain = models.CharField(
         max_length=100,
         unique=True,
