@@ -897,6 +897,12 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         vende_menu_diario=False,
                         compartir_ubicacion_mapa=True,
                     )
+                    # La empresa base nace DESACTIVADA, en coherencia con el usuario
+                    # inactivo: no aparece en búsquedas/mapa y el admin la muestra
+                    # como inactiva (botón "Activar", no "Desactivar"). Se reactiva
+                    # cuando el profesional real reclame la cuenta.
+                    empresa.activa = False
+                    empresa.save(update_fields=['activa'])
                 except ValueError:
                     # Nombre de empresa duplicado pese al sufijo: seguimos sin empresa/horarios.
                     empresa = None

@@ -22,6 +22,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Dominio de los correos de las cuentas "base" generadas automáticamente desde
+# la web de prospección (ver usuario/views.py::registro_base). Son profesionales
+# placeholder (is_active=False) que NO deben contar en ganancias ni en
+# suscripciones. Se excluyen de las métricas por este marcador de correo.
+CUENTA_BASE_EMAIL_DOMINIO = '@fixeo.local'
+
+# Q reutilizables para excluir cuentas base de los agregados.
+EXCLUIR_USUARIO_BASE = ~Q(correo__iendswith=CUENTA_BASE_EMAIL_DOMINIO)
+EXCLUIR_SUB_BASE = ~Q(user_id__correo__iendswith=CUENTA_BASE_EMAIL_DOMINIO)
+
 def _decimal_str(value) -> str:
     if value is None:
         return '0.00'
@@ -67,9 +77,10 @@ def estadisticas_usuarios(start, end):
         Q(trabajos_asignados__isnull=False) | Q(servicios__isnull=False)
     ).distinct().count()
 
-    # Usuarios con suscripción activa
+    # Usuarios con suscripción activa (excluye cuentas base generadas automáticamente)
     ahora = timezone.now()
     usuarios_con_sub = Subscripcion.objects.filter(
+        EXCLUIR_SUB_BASE,
         cancelada=False,
         expiracion__gt=ahora,
     ).values('user_id').distinct().count()
@@ -107,7 +118,8 @@ def estadisticas_usuarios(start, end):
 def estadisticas_suscripciones(start, end):
     """Estadísticas de suscripciones (solo planes de pago, precio > 0)."""
     ahora = timezone.now()
-    subs_qs = Subscripcion.objects.filter(plan_id__precio__gt=0)
+    # Solo planes de pago (precio>0) y excluyendo las cuentas base automáticas.
+    subs_qs = Subscripcion.objects.filter(EXCLUIR_SUB_BASE, plan_id__precio__gt=0)
 
     total_subs = subs_qs.count()
     subs_activas = subs_qs.filter(cancelada=False, expiracion__gt=ahora).count()
@@ -205,9 +217,10 @@ def estadisticas_planes():
                 'duracion_dias': p.duracion.days if p.duracion else 0,
                 'cantidad_personas': p.cantidad_personas,
                 'activo': p.activo,
-                'total_subscripciones': p.subscripciones.count(),
+                # Excluye suscripciones de cuentas base generadas automáticamente.
+                'total_subscripciones': p.subscripciones.filter(EXCLUIR_SUB_BASE).count(),
                 'subscripciones_activas': p.subscripciones.filter(
-                    cancelada=False, expiracion__gt=timezone.now()
+                    EXCLUIR_SUB_BASE, cancelada=False, expiracion__gt=timezone.now()
                 ).count(),
             }
             for p in planes
