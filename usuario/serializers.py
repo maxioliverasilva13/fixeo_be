@@ -967,6 +967,15 @@ class AdminUsuarioSerializer(UsuarioFotoApiMixin, serializers.ModelSerializer):
 
 class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
     correo = serializers.EmailField(required=False)
+    # Solo el admin puede setear la contraseña de una cuenta desde el panel
+    # (write-only: nunca se devuelve). Vacío/omitido = no se cambia.
+    password = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        min_length=6,
+        max_length=128,
+    )
 
     class Meta:
         model = Usuario
@@ -986,6 +995,7 @@ class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
             'rol',
             'auto_aprobacion_trabajos',
             'defaultMessageReservation',
+            'password',
         ]
 
     def validate_correo(self, value):
@@ -995,8 +1005,12 @@ class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
+        # La contraseña se hashea con set_password; nunca se guarda en texto plano.
+        password = validated_data.pop('password', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if password:
+            instance.set_password(password)
         instance.save()
         return instance
 
