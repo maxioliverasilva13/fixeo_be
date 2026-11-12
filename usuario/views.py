@@ -25,6 +25,7 @@ from usuario.serializers import (
     AdminUsuarioSerializer, AdminUsuarioUpdateSerializer,
     EnviarCodigoEmailSerializer, VerificarCodigoEmailSerializer,
     BusquedaAgregadaSerializer, HistorialBusquedaDetalleSerializer,
+    RegistroBaseSerializer,
 )
 from localizacion.models import Localizacion
 from empresas.models import Empresa
@@ -447,6 +448,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         'create',
         'login',
         'registro',
+        'registro_base',
         'validate_email',
         'enviar_codigo_verificacion',
         'verificar_codigo_email',
@@ -757,7 +759,198 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], url_path='registro-base')
+    def registro_base(self, request):
+        """Alta "base" de un profesional inactivo a partir de un negocio de Google Places.
+
+        Pensado para el alta masiva desde la web de prospección: por cada negocio
+        que devuelve Places se crea una cuenta `is_active=False` con la info
+        disponible + plan base + servicios/horarios base + localización + empresa
+        unipersonal. Idempotente por `place_id` (o por correo derivado del nombre):
+        si ya existe la cuenta, responde 200 `created=false` sin duplicar.
+        """
+        import logging
+        import secrets
+        import re
+        import unicodedata
+        from datetime import time as dtime
+        from django.utils import timezone
+
+        from suscripciones.models import Plan, SubscripcionStatus
+        from empresas.models import Horarios
+        from profesion.models import Profesion
+        from servicios.models import Servicio
+        from servicios.base_catalog import (
+            servicios_base_para,
+            BASE_HORARIOS,
+            BASE_DIVISA,
+        )
+
+        logger = logging.getLogger(__name__)
+
+        serializer = RegistroBaseSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+
+        # Resolver profesión (por id o por nombre).
+        profesion = None
+        if data.get('profesion_id'):
+            profesion = obtener_profesion_por_id(data['profesion_id'])
+        if profesion is None and (data.get('profesion_nombre') or '').strip():
+            profesion = Profesion.objects.filter(
+                nombre__iexact=data['profesion_nombre'].strip()
+            ).first()
+        if profesion is None:
+            return Response(
+                {'error': 'Profesión no encontrada'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Correo determinístico para idempotencia.
+        def _slug(texto):
+            s = unicodedata.normalize('NFKD', texto or '')
+            s = ''.join(c for c in s if not unicodedata.combining(c)).lower()
+            s = re.sub(r'[^a-z0-9]+', '-', s).strip('-')
+            return s[:60] or 'negocio'
+
+        place_id = (data.get('place_id') or '').strip()
+        slug = _slug(place_id or data['nombre'])
+        correo = f"base-{slug}@fixeo.local"
+
+        existente = Usuario.objects.filter(correo__iexact=correo).first()
+        if existente:
+            return Response(
+                {'created': False, 'usuario_id': existente.id, 'correo': correo},
+                status=status.HTTP_200_OK,
+            )
+
+        lat = data.get('latitude')
+        lng = data.get('longitude')
+
+        try:
+            with transaction.atomic():
+                usuario = Usuario.objects.create_user(
+                    correo=correo,
+                    password=secrets.token_urlsafe(24),
+                    nombre=data['nombre'][:100],
+                    apellido='',
+                    telefono=data.get('telefono') or '',
+                    is_owner_empresa=True,
+                    is_configured=False,
+                )
+                # Cuenta base: inactiva hasta que el profesional real la reclame/active.
+                usuario.is_active = False
+                usuario.save(update_fields=['is_active'])
+
+                UsuarioProfesion.objects.create(usuario=usuario, profesion=profesion)
+
+                # Plan base = el activo más barato. Suscripción opcional (no romper si no hay planes).
+                plan = Plan.objects.filter(activo=True).order_by('precio').first()
+                if plan:
+                    Subscripcion.objects.create(
+                        user_id=usuario,
+                        plan_id=plan,
+                        expiracion=timezone.now() + plan.duracion,
+                        jobs_restantes=plan.cantidad_jobs,
+                        status=SubscripcionStatus.ACTIVE,
+                    )
+
+                localizacion = None
+                if lat is not None and lng is not None:
+                    localizacion = Localizacion.objects.create(
+                        ubicacion=data.get('direccion') or '',
+                        latitud=lat,
+                        longitud=lng,
+                        address=data.get('direccion') or '',
+                        city='',
+                        country='',
+                        county='',
+                        state='',
+                        isPrimary=True,
+                    )
+                    UsuarioLocalizacion.objects.create(
+                        usuario=usuario,
+                        localizacion=localizacion,
+                        es_principal=True,
+                    )
+
+                # Empresa unipersonal (necesaria para colgar los horarios). El nombre
+                # debe ser único: si choca, sufijar con el slug del place/negocio.
+                nombre_empresa = data['nombre'][:200]
+                if not validar_nombre_empresa_unico(nombre_empresa):
+                    nombre_empresa = f"{nombre_empresa[:180]} ({slug[:12]})"
+                empresa = None
+                try:
+                    empresa = crear_empresa(
+                        nombre=nombre_empresa,
+                        ubicacion=data.get('direccion') or '',
+                        latitud=lat if lat is not None else Decimal('0'),
+                        longitud=lng if lng is not None else Decimal('0'),
+                        admin_id=usuario,
+                        descripcion='',
+                        unipersonal=True,
+                        localizacion=localizacion,
+                        vende_productos=False,
+                        vende_servicios=True,
+                        vende_menu_diario=False,
+                        compartir_ubicacion_mapa=True,
+                    )
+                except ValueError:
+                    # Nombre de empresa duplicado pese al sufijo: seguimos sin empresa/horarios.
+                    empresa = None
+
+                if empresa is not None:
+                    Horarios.objects.bulk_create([
+                        Horarios(
+                            empresa=empresa,
+                            dia_semana=h['dia_semana'],
+                            hora_inicio=dtime.fromisoformat(h['hora_inicio']),
+                            hora_fin=dtime.fromisoformat(h['hora_fin']),
+                            enabled=True,
+                        )
+                        for h in BASE_HORARIOS
+                    ])
+
+                servicios_def = servicios_base_para(profesion.nombre)
+                servicios = Servicio.objects.bulk_create([
+                    Servicio(
+                        usuario=usuario,
+                        profesion=profesion,
+                        nombre=s['nombre'][:200],
+                        precio=s['precio'],
+                        divisa=s.get('divisa', BASE_DIVISA),
+                        tiempo=s['tiempo'],
+                        acepta_domicilio=True,
+                        acepta_retiro=True,
+                    )
+                    for s in servicios_def
+                ])
+
+                usuario_id = usuario.id
+                empresa_id = empresa.id if empresa else None
+                servicios_creados = len(servicios)
+
+            return Response(
+                {
+                    'created': True,
+                    'usuario_id': usuario_id,
+                    'empresa_id': empresa_id,
+                    'correo': correo,
+                    'servicios': servicios_creados,
+                    'is_active': False,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.exception('registro_base fallo para %s: %s', correo, e)
+            return Response(
+                {'error': f'Error al crear la cuenta base: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         serializer = LoginSerializer(data=request.data)

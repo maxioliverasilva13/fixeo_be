@@ -635,6 +635,59 @@ class RegistroSerializer(serializers.Serializer):
         return attrs
 
 
+class RegistroBaseSerializer(serializers.Serializer):
+    """Alta "base" de un profesional a partir de un negocio de Google Places.
+
+    No hay persona real detrás: la cuenta se crea `is_active=False` con la info
+    que se pudo extraer de Places y un catálogo de servicios/horarios base. Sin
+    password ni OTP (se autogeneran). La usa `UsuarioViewSet.registro_base`.
+    """
+    profesion_id = serializers.IntegerField(required=False, allow_null=True)
+    profesion_nombre = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    nombre = serializers.CharField(required=True, max_length=200)
+    telefono = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    direccion = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    web = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    rating = serializers.FloatField(required=False, allow_null=True)
+    # FloatField: Places manda >7 decimales y DecimalField(decimal_places=7) lo rechazaría.
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+    place_id = serializers.CharField(required=False, allow_blank=True, max_length=255)
+
+    def validate_nombre(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('El nombre del negocio es obligatorio.')
+        return value
+
+    def validate_telefono(self, value):
+        return (value or '').strip()[:20]
+
+    def _quantize(self, value):
+        if value is None or value == '':
+            return None
+        return Decimal(str(value)).quantize(Decimal('0.0000001'))
+
+    def validate_latitude(self, value):
+        return self._quantize(value)
+
+    def validate_longitude(self, value):
+        return self._quantize(value)
+
+    def validate(self, attrs):
+        if not attrs.get('profesion_id') and not (attrs.get('profesion_nombre') or '').strip():
+            raise serializers.ValidationError(
+                'Se requiere profesion_id o profesion_nombre.'
+            )
+        lat = attrs.get('latitude')
+        lng = attrs.get('longitude')
+        if (lat is None) != (lng is None):
+            raise serializers.ValidationError(
+                'latitude y longitude deben enviarse juntas.'
+            )
+        return attrs
+
+
 class EnviarCodigoEmailSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
 
