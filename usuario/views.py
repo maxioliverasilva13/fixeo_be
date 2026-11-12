@@ -782,6 +782,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         from servicios.models import Servicio
         from servicios.base_catalog import (
             servicios_base_para,
+            foto_base_para,
             BASE_HORARIOS,
             BASE_DIVISA,
         )
@@ -913,6 +914,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                     ])
 
                 servicios_def = servicios_base_para(profesion.nombre)
+                foto_profesion = foto_base_para(profesion.nombre) or (profesion.logo_svg_url or '')
                 servicios = Servicio.objects.bulk_create([
                     Servicio(
                         usuario=usuario,
@@ -921,6 +923,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
                         precio=s['precio'],
                         divisa=s.get('divisa', BASE_DIVISA),
                         tiempo=s['tiempo'],
+                        foto=(s.get('foto') or foto_profesion)[:500],
                         acepta_domicilio=True,
                         acepta_retiro=True,
                     )
