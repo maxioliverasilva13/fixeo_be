@@ -6,6 +6,9 @@ Pillow==10.2.0
 django-cors-headers==4.3.1
 djangorestframework-simplejwt==5.3.1
 celery==5.3.6
+# kombu pineado: celery 5.3.6 permite kombu<6.0, pero kombu>=5.6 exige redis-py>=6.1.0
+# y celery 5.3.6 a su vez exige redis<6.0 -> conflicto. 5.4.2 funciona con redis 5.0.1.
+kombu==5.4.2
 redis==5.0.1
 django-filter==23.5
 djangorestframework-simplejwt[crypto]==5.3.1
