@@ -1590,7 +1590,11 @@ class AdminUsuarioViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(is_staff=is_staff.lower() == 'true')
         if is_owner_empresa is not None:
             queryset = queryset.filter(is_owner_empresa=is_owner_empresa.lower() == 'true')
-        else:
+        elif self.action == 'list':
+            # Default solo para el listado: mostrar no-owners. En acciones de
+            # detalle (retrieve/update/partial_update/destroy) NO se filtra,
+            # para que get_object() encuentre al owner de una empresa
+            # (ej. PATCH /usuarios/admin/<id>/ para setear correo/contraseña).
             queryset = queryset.filter(is_owner_empresa=False)
         if is_deleted is not None:
             queryset = queryset.filter(is_deleted=is_deleted.lower() == 'true')
