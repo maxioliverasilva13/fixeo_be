@@ -50,6 +50,84 @@ class PerfilCatalogoCountsTests(APITestCase):
         self.assertEqual(data['cantidad_productos'], 0)
 
 
+class AdminChangePasswordTests(APITestCase):
+    """Cambio de contraseña desde el panel admin (Datos básicos de empresa).
+
+    Regresión para: PATCH /api/usuarios/admin/<id>/ que 404eaba para owners
+    (filtro is_owner_empresa) y para verificar que la nueva se hashea y guarda.
+    """
+
+    def _admin(self):
+        return Usuario.objects.create_user(
+            correo='admin-root@test.com',
+            password='admin-pass-123',
+            nombre='Admin',
+            apellido='Root',
+            telefono='111',
+            is_staff=True,
+        )
+
+    def _owner(self, correo, telefono, apellido='X'):
+        return Usuario.objects.create_user(
+            correo=correo,
+            password='vieja-pass-123',
+            nombre='Owner',
+            apellido=apellido,
+            telefono=telefono,
+            is_owner_empresa=True,
+        )
+
+    def test_cambiar_contrasena_la_hashea_y_la_guarda(self):
+        admin = self._admin()
+        owner = self._owner('owner@test.com', '222')
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.patch(
+            f'/api/usuarios/admin/{owner.id}/',
+            {'password': 'nueva-pass-456'},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        owner.refresh_from_db()
+        # La nueva funciona, la vieja ya no.
+        self.assertTrue(owner.check_password('nueva-pass-456'))
+        self.assertFalse(owner.check_password('vieja-pass-123'))
+        # Se guarda hasheada, nunca el texto plano que mandó el admin.
+        self.assertNotEqual(owner.password, 'nueva-pass-456')
+        self.assertTrue(owner.password.startswith('pbkdf2_sha256$'))
+
+    def test_owner_con_flag_no_404_y_acepta_el_patch(self):
+        # Un owner con is_owner_empresa=True debe poder ser editado desde el
+        # admin (antes del fix el get_queryset lo excluía y daba 404).
+        admin = self._admin()
+        owner = self._owner('owner-flag@test.com', '333')
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.patch(
+            f'/api/usuarios/admin/{owner.id}/',
+            {'correo': 'owner-flag@test.com'},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_contrasena_omitida_no_se_cambia(self):
+        admin = self._admin()
+        owner = self._owner('owner-sin-cambio@test.com', '444')
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.patch(
+            f'/api/usuarios/admin/{owner.id}/',
+            {'telefono': '555'},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        owner.refresh_from_db()
+        self.assertTrue(owner.check_password('vieja-pass-123'))
+
+
 class MalCalificadoTests(SimpleTestCase):
     """Un promedio bajo sólo castiga con historial suficiente."""
 
