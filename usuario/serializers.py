@@ -1019,6 +1019,13 @@ class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         if password:
             instance.set_password(password)
+            # Si el admin setea una contraseña para que el dueño pueda entrar,
+            # la cuenta debe quedar habilitada: muchas empresas nacen con
+            # is_active=False (registro_base) y el login rechaza inactivos
+            # (authenticate() devuelve None), dando "Credenciales inválidas"
+            # aunque la contraseña sea correcta.
+            if not instance.is_deleted and 'is_active' not in validated_data:
+                instance.is_active = True
         instance.save()
         return instance
 

@@ -112,6 +112,47 @@ class AdminChangePasswordTests(APITestCase):
 
         self.assertEqual(resp.status_code, 200, resp.content)
 
+    def test_setear_contrasena_activa_cuenta_inactiva(self):
+        # Muchas empresas nacen con is_active=False (registro_base). Si el admin
+        # les setea una contraseña, la cuenta debe quedar activa para que el
+        # login no devuelva "Credenciales inválidas" (authenticate rechaza
+        # inactivos) pese a tener la contraseña correcta.
+        admin = self._admin()
+        owner = self._owner('owner-inactivo@test.com', '666')
+        owner.is_active = False
+        owner.save(update_fields=['is_active'])
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.patch(
+            f'/api/usuarios/admin/{owner.id}/',
+            {'password': 'nueva-pass-789'},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        owner.refresh_from_db()
+        self.assertTrue(owner.is_active)
+        self.assertTrue(owner.check_password('nueva-pass-789'))
+
+    def test_setear_contrasena_no_revive_cuenta_eliminada(self):
+        # Un soft-delete no debe revivirse por un cambio de contraseña.
+        admin = self._admin()
+        owner = self._owner('owner-borrado@test.com', '777')
+        owner.is_active = False
+        owner.is_deleted = True
+        owner.save(update_fields=['is_active', 'is_deleted'])
+        self.client.force_authenticate(user=admin)
+
+        resp = self.client.patch(
+            f'/api/usuarios/admin/{owner.id}/',
+            {'password': 'otra-pass-789'},
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        owner.refresh_from_db()
+        self.assertFalse(owner.is_active)
+
     def test_contrasena_omitida_no_se_cambia(self):
         admin = self._admin()
         owner = self._owner('owner-sin-cambio@test.com', '444')
