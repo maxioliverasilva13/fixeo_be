@@ -999,9 +999,17 @@ class AdminUsuarioUpdateSerializer(serializers.ModelSerializer):
         ]
 
     def validate_correo(self, value):
+        value = (value or '').strip().lower()
         usuario_actual = self.instance
-        if Usuario.objects.filter(correo=value).exclude(pk=usuario_actual.pk).exists():
+        if Usuario.objects.filter(correo__iexact=value).exclude(pk=usuario_actual.pk).exists():
             raise serializers.ValidationError('Este correo ya está en uso.')
+        return value
+
+    def validate_password(self, value):
+        # El campo permite blank (= no cambiar); si viene con contenido,
+        # exigimos que no sea sólo espacios.
+        if value is not None and value.strip() == '' and value != '':
+            raise serializers.ValidationError('La contraseña no puede ser sólo espacios.')
         return value
 
     def update(self, instance, validated_data):
